@@ -1470,3 +1470,223 @@ updateStepUI = function() {
   originalUpdateStepUI();
   updateStepDescAnimation();
 };
+
+// ===== WebXR AR 预览 =====
+let arSession = null;
+let arButton = null;
+let arSupported = false;
+let arHitTestSource = null;
+let arHitMatrix = new THREE.Matrix4();
+let arModelPlaced = false;
+
+// 检测 WebXR AR 支持
+async function checkARSupport() {
+  if (!('xr' in navigator)) {
+    console.log('WebXR not supported');
+    return false;
+  }
+
+  try {
+    const isSupported = await navigator.xr.isSessionSupported('immersive-ar');
+    arSupported = isSupported;
+    console.log('WebXR AR supported:', isSupported);
+    return isSupported;
+  } catch (err) {
+    console.error('Error checking AR support:', err);
+    return false;
+  }
+}
+
+// 显示/隐藏 AR 按钮
+function updateARButton() {
+  if (arButton) {
+    if (arSupported && !arSession) {
+      arButton.style.display = 'inline-block';
+      arButton.disabled = false;
+      arButton.title = '在 AR 中预览 Quest 3';
+    } else {
+      arButton.style.display = 'none';
+    }
+  }
+}
+
+// 启动 AR 会话
+async function startAR() {
+  if (!arSupported) {
+    alert('您的设备不支持 AR 功能\n\n支持的设备：\n- Android Chrome\n- iOS Safari 15+\n\n请确保使用 HTTPS 访问。');
+    return;
+  }
+
+  try {
+    // 请求 AR 会话
+    const session = await navigator.xr.requestSession('immersive-ar', {
+      requiredFeatures: ['hit-test', 'local-floor'],
+      optionalFeatures: ['dom-overlay', 'light-estimation'],
+      domOverlay: { root: document.body }
+    });
+
+    arSession = session;
+
+    // 更新按钮状态
+    if (arButton) {
+      arButton.textContent = '🚪 退出 AR';
+      arButton.classList.add('active');
+    }
+
+    // 隐藏 UI 面板
+    if (uiOverlay) {
+      uiOverlay.style.display = 'none';
+    }
+
+    // 设置 AR 渲染器
+    const arRenderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      logarithmicDepthBuffer: true
+    });
+    arRenderer.setPixelRatio(window.devicePixelRatio);
+    arRenderer.setSize(window.innerWidth, window.innerHeight);
+    arRenderer.xr.enabled = true;
+    arRenderer.xr.setReferenceSpaceType('local-floor');
+
+    // 替换当前渲染器
+    const canvas = renderer.domElement;
+    renderer.domElement = arRenderer.domElement;
+    container.innerHTML = '';
+    container.appendChild(arRenderer.domElement);
+
+    // 创建 AR 场景
+    const arScene = new THREE.Scene();
+
+    // 添加灯光
+    const arAmbientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    arScene.add(arAmbientLight);
+    const arDirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    arDirLight.position.set(5, 10, 7);
+    arScene.add(arDirLight);
+
+    // 创建 Quest 3 模型的 AR 副本
+    const arQuestGroup = questGroup.clone();
+    arScene.add(arQuestGroup);
+
+    // 调整 AR 中的模型大小
+    arQuestGroup.scale.set(0.1, 0.1, 0.1);
+
+    // 设置 AR 相机
+    const arCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+    // 启用 hit-test
+    session.addEventListener('end', onAREnd);
+    await arRenderer.xr.setSession(session);
+
+    // AR 渲染循环
+    arRenderer.setAnimationLoop((timestamp, frame) => {
+      if (frame) {
+        // 获取参考空间
+        const referenceSpace = arRenderer.xr.getReferenceSpace();
+        const sessionSpace = arRenderer.xr.getSession();
+
+        // 获取 viewer 空间
+        const viewerPose = frame.getViewerPose(referenceSpace);
+
+        if (viewerPose) {
+          // 更新相机
+          const view = viewerPose.views[0];
+          arCamera.projectionMatrix.fromArray(view.projectionMatrix);
+
+          // 如果模型未放置，执行 hit-test
+          if (!arModelPlaced && frame.getHitTestResults) {
+            const hitTestResults = frame.getHitTestResults(arHitTestSource);
+
+            if (hitTestResults.length > 0) {
+              const hit = hitTestResults[0];
+              const hitPose = hit.getPose(referenceSpace);
+
+              if (hitPose) {
+                arModelPlaced = true;
+
+                // 放置模型
+                arQuestGroup.position.setFromMatrixPosition(hitPose.transform);
+                arQuestGroup.quaternion.setFromRotationMatrix(hitPose.transform);
+              }
+            }
+          }
+
+          // 如果模型已放置，添加简单的爆炸效果
+          if (arModelPlaced) {
+            const time = timestamp * 0.001;
+            const explodeFactor = (Math.sin(time * 0.5) + 1) * 0.3;
+
+            // 应用爆炸变换
+            parts.forEach((part, index) => {
+              const delay = index * 0.05;
+              const factor = Math.max(0, Math.min(1, (explodeFactor - delay) * 2));
+
+              part.mesh.position.lerpVectors(
+                part.homePos,
+                part.explodePos,
+                factor * 0.5
+              );
+            });
+          }
+
+          // 自动旋转
+          if (controls.autoRotate && arModelPlaced) {
+            arQuestGroup.rotation.y += 0.005;
+          }
+        }
+
+        arRenderer.render(arScene, arCamera);
+      }
+    });
+
+    console.log('AR session started');
+
+  } catch (err) {
+    console.error('Failed to start AR:', err);
+    alert('启动 AR 失败：' + err.message + '\n\n请确保：\n1. 使用 HTTPS\n2. 设备支持 AR\n3. 授予相机权限');
+    onAREnd();
+  }
+}
+
+// 结束 AR 会话
+function onAREnd() {
+  if (arSession) {
+    arSession.end();
+    arSession = null;
+    arModelPlaced = false;
+  }
+
+  // 恢复普通渲染器
+  location.reload();
+
+  console.log('AR session ended');
+}
+
+// 初始化 AR
+async function initAR() {
+  const supported = await checkARSupport();
+
+  if (supported) {
+    arButton = document.getElementById('ar-btn');
+    updateARButton();
+  }
+}
+
+// 页面加载后检测 AR
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initAR);
+} else {
+  initAR();
+}
+
+// 绑定 AR 按钮事件
+if (arButton) {
+  arButton.addEventListener('click', () => {
+    if (arSession) {
+      onAREnd();
+    } else {
+      startAR();
+    }
+  });
+}

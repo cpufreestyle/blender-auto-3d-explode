@@ -357,6 +357,40 @@ html, body {
   box-shadow: 0 8px 24px rgba(74, 158, 255, 0.5);
 }
 
+/* ===== AR 按钮 ===== */
+.step-btn.ar-btn {
+  background: linear-gradient(135deg, #00d4aa 0%, #00b894 100%);
+  color: #ffffff;
+  border-color: transparent;
+  font-weight: 600;
+  grid-column: span 2;
+  position: relative;
+  overflow: hidden;
+}
+
+.step-btn.ar-btn::before {
+  content: '📱';
+  position: absolute;
+  left: 12px;
+  font-size: 16px;
+}
+
+.step-btn.ar-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #00e6b8 0%, #00c9a1 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0, 212, 170, 0.4);
+}
+
+.step-btn.ar-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.step-btn.ar-btn:disabled {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.3);
+  cursor: not-allowed;
+}
+
 /* ===== 复选框 ===== */
 .checkbox-label {
   display: flex;
