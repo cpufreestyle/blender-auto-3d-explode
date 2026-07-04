@@ -86,8 +86,9 @@ def create_materials():
     bsdf.inputs['Base Color'].default_value = (0.6, 0.8, 1.0, 1.0)
     bsdf.inputs['Roughness'].default_value = 0.03
     bsdf.inputs['Metallic'].default_value = 0.0
-    bsdf.inputs['Transmission'].default_value = 0.95
-    bsdf.inputs['Thickness'].default_value = 0.5
+    if 'Transmission' in bsdf.inputs:
+        bsdf.inputs['Transmission'].default_value = 0.95
+        bsdf.inputs['Thickness'].default_value = 0.5
     materials['lensGlass'] = mat
 
     # 摄像头（深色玻璃纤维）
