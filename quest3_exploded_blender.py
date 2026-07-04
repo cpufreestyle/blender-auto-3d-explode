@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
 Quest 3 完整拆解模型 - Blender Python 脚本
+版本: v1.4.0
+日期: 2026-07-04
 
 生成 Quest 3 的 15 个可拆解部件，并设置爆炸视图动画
 
