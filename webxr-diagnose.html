@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebXR 诊断工具</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1b23 0%, #2d2e3a 100%);
+      color: #e6e6e6;
+      padding: 20px;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+      padding: 30px;
+      backdrop-filter: blur(10px);
+    }
+    h1 {
+      color: #4a9eff;
+      margin-bottom: 30px;
+      text-align: center;
+      font-size: 28px;
+    }
+    .section {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 12px;
+      padding: 20px;
+      margin: 20px 0;
+      border-left: 4px solid #4a9eff;
+    }
+    .section h2 {
+      color: #4a9eff;
+      margin-bottom: 15px;
+      font-size: 20px;
+    }
+    .test-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 8px;
+      margin: 8px 0;
+    }
+    .label {
+      font-weight: 500;
+    }
+    .value {
+      font-family: monospace;
+      font-size: 14px;
+      color: #4a9eff;
+    }
+    .status {
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-weight: bold;
+      font-size: 12px;
+    }
+    .status.success { background: #4caf50; color: white; }
+    .status.error { background: #ff6b6b; color: white; }
+    .status.warning { background: #ffc107; color: black; }
+    .status.info { background: #4a9eff; color: white; }
+    .log {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 15px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      max-height: 400px;
+      overflow-y: auto;
+      margin-top: 15px;
+    }
+    .log-entry { margin: 4px 0; }
+    .log-info { color: #4a9eff; }
+    .log-success { color: #4caf50; }
+    .log-error { color: #ff6b6b; }
+    .log-warn { color: #ffc107; }
+    button {
+      background: linear-gradient(135deg, #4a9eff, #8f7aff);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      margin: 5px;
+      transition: opacity 0.3s;
+    }
+    button:hover { opacity: 0.9; }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .suggestion {
+      background: rgba(76, 175, 80, 0.1);
+      border-left: 4px solid #4caf50;
+      padding: 15px;
+      border-radius: 8px;
+      margin: 15px 0;
+    }
+    .error-box {
+      background: rgba(255, 107, 107, 0.1);
+      border-left: 4px solid #ff6b6b;
+      padding: 15px;
+      border-radius: 8px;
+      margin: 15px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 WebXR 诊断工具</h1>
+
+    <div class="section">
+      <h2>📱 设备信息</h2>
+      <div id="device-info"></div>
+    </div>
+
+    <div class="section">
+      <h2>🌐 网络信息</h2>
+      <div id="network-info"></div>
+    </div>
+
+    <div class="section">
+      <h2>🎮 WebXR 检测</h2>
+      <div id="webxr-info"></div>
+    </div>
+
+    <div class="section">
+      <h2>📋 诊断结果</h2>
+      <div id="diagnosis"></div>
+    </div>
+
+    <div class="section">
+      <h2>📝 详细日志</h2>
+      <button onclick="runDiagnostics()">🔄 重新检测</button>
+      <button onclick="clearLog()">🗑️  清空日志</button>
+      <div id="log" class="log"></div>
+    </div>
+  </div>
+
+  <script>
+    const logDiv = document.getElementById('log');
+
+    function log(msg, type = 'info') {
+      const div = document.createElement('div');
+      div.className = `log-entry log-${type}`;
+      const time = new Date().toLocaleTimeString();
+      div.textContent = `[${time}] ${msg}`;
+      logDiv.appendChild(div);
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function clearLog() {
+      logDiv.innerHTML = '';
+      log('日志已清空', 'info');
+    }
+
+    function addInfo(containerId, label, value, status = 'info') {
+      const container = document.getElementById(containerId);
+      const div = document.createElement('div');
+      div.className = 'test-item';
+      div.innerHTML = `
+        <span class="label">${label}</span>
+        <span class="status ${status}">${value}</span>
+      `;
+      container.appendChild(div);
+    }
+
+    async function checkDevice() {
+      const container = document.getElementById('device-info');
+
+      // User Agent
+      const ua = navigator.userAgent;
+      let device = 'Unknown';
+      let browser = 'Unknown';
+      let os = 'Unknown';
+
+      if (ua.includes('Android')) {
+        os = 'Android';
+        const match = ua.match(/Android\s+([\d.]+)/);
+        const androidVersion = match ? match[1] : 'Unknown';
+        device = `Android ${androidVersion}`;
+
+        if (ua.includes('Chrome')) {
+          browser = 'Chrome';
+          const chromeMatch = ua.match(/Chrome\/([\d.]+)/);
+          const chromeVersion = chromeMatch ? chromeMatch[1] : 'Unknown';
+          browser += ` ${chromeVersion}`;
+        }
+      } else if (ua.includes('iPhone') || ua.includes('iPad')) {
+        os = 'iOS';
+        if (ua.includes('Safari')) {
+          browser = 'Safari';
+        }
+      }
+
+      addInfo('device-info', '操作系统', os, 'info');
+      addInfo('device-info', '浏览器', browser, 'info');
+      addInfo('device-info', 'User Agent', ua.substring(0, 60) + '...', 'info');
+
+      // 检查是否为移动设备
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
+      addInfo('device-info', '移动设备', isMobile ? '✅ 是' : '❌ 否',
+        isMobile ? 'success' : 'error');
+
+      log(`设备: ${device}, 浏览器: ${browser}, OS: ${os}`);
+
+      return { isMobile, device, browser, os };
+    }
+
+    async function checkNetwork() {
+      const container = document.getElementById('network-info');
+
+      // HTTPS
+      const isHTTPS = location.protocol === 'https:';
+      addInfo('network-info', '协议', location.protocol,
+        isHTTPS ? 'success' : 'error');
+      log(`协议: ${location.protocol}`, isHTTPS ? 'success' : 'error');
+
+      // Host
+      addInfo('network-info', '主机', location.host, 'info');
+      log(`主机: ${location.host}`);
+
+      // 检查是否 localhost
+      const isLocalhost = location.hostname === 'localhost' ||
+                         location.hostname === '127.0.0.1' ||
+                         location.hostname.startsWith('192.168.') ||
+                         location.hostname.startsWith('10.');
+      addInfo('network-info', '本地网络', isLocalhost ? '是' : '否', 'info');
+
+      return { isHTTPS, isLocalhost };
+    }
+
+    async function checkWebXR() {
+      const container = document.getElementById('webxr-info');
+
+      // 1. WebXR API
+      const hasWebXR = 'xr' in navigator;
+      addInfo('webxr-info', 'WebXR API',
+        hasWebXR ? '✅ 支持' : '❌ 不支持',
+        hasWebXR ? 'success' : 'error');
+      log(`WebXR API: ${hasWebXR}`, hasWebXR ? 'success' : 'error');
+
+      if (!hasWebXR) {
+        addInfo('webxr-info', '原因', '浏览器不支持 WebXR', 'error');
+        log('❌ 浏览器不支持 WebXR', 'error');
+        log('可能原因：', 'warn');
+        log('  - 桌面浏览器', 'warn');
+        log('  - 浏览器版本太低', 'warn');
+        log('  - WebXR 被禁用', 'warn');
+        return false;
+      }
+
+      // 2. AR 会话支持
+      let arSupported = false;
+      try {
+        log('正在检测 AR 会话支持...', 'info');
+        arSupported = await navigator.xr.isSessionSupported('immersive-ar');
+        addInfo('webxr-info', 'AR 会话支持',
+          arSupported ? '✅ 支持' : '❌ 不支持',
+          arSupported ? 'success' : 'error');
+        log(`AR 会话支持: ${arSupported}`, arSupported ? 'success' : 'error');
+      } catch (err) {
+        addInfo('webxr-info', 'AR 检测错误', err.message, 'error');
+        log(`❌ AR 检测失败: ${err.message}`, 'error');
+        return false;
+      }
+
+      if (!arSupported) {
+        addInfo('webxr-info', '原因', '设备不支持 AR', 'error');
+        log('❌ 设备不支持 AR', 'error');
+        log('可能原因：', 'warn');
+        log('  - 设备没有 AR 硬件', 'warn');
+        log('  - 系统版本太低', 'warn');
+        log('  - Chrome 版本太低（需要 79+）', 'warn');
+        log('  - 未使用 HTTPS', 'warn');
+        return false;
+      }
+
+      // 3. 检查其他 XR 功能
+      try {
+        const vrSupported = await navigator.xr.isSessionSupported('immersive-vr');
+        addInfo('webxr-info', 'VR 会话支持',
+          vrSupported ? '✅ 支持' : '❌ 不支持',
+          'info');
+        log(`VR 会话支持: ${vrSupported}`);
+      } catch (err) {
+        log(`VR 检测跳过: ${err.message}`, 'info');
+      }
+
+      return true;
+    }
+
+    function showDiagnosis(device, network, arSupported) {
+      const container = document.getElementById('diagnosis');
+      container.innerHTML = '';
+
+      // 诊断逻辑
+      let issues = [];
+      let suggestions = [];
+
+      // 检查 1: 移动设备
+      if (!device.isMobile) {
+        issues.push('❌ 不是移动设备（AR 需要手机/平板）');
+        suggestions.push('请在 Android 或 iOS 设备上测试');
+      }
+
+      // 检查 2: WebXR API
+      if (!('xr' in navigator)) {
+        issues.push('❌ 浏览器不支持 WebXR');
+        suggestions.push('请使用 Chrome 79+（Android）或 Safari 15+（iOS）');
+        suggestions.push('请更新浏览器到最新版本');
+      }
+
+      // 检查 3: HTTPS
+      if (!network.isHTTPS && !network.isLocalhost) {
+        issues.push('❌ 未使用 HTTPS（WebXR 要求 HTTPS）');
+        suggestions.push('请使用 Vercel 在线版本：https://quest3-exploded.vercel.app');
+        suggestions.push('或在本地配置 HTTPS（复杂，推荐使用 Vercel）');
+      }
+
+      // 检查 4: AR 支持
+      if (!arSupported) {
+        issues.push('❌ 设备不支持 AR 会话');
+        suggestions.push('确保设备有 AR 硬件（大多数现代手机都有）');
+        suggestions.push('确保 Chrome 版本 >= 79');
+        suggestions.push('确保 Android 版本 >= 7.0');
+      }
+
+      // 显示结果
+      if (issues.length === 0) {
+        const successDiv = document.createElement('div');
+        successDiv.className = 'suggestion';
+        successDiv.innerHTML = `
+          <h3>🎉 诊断通过！</h3>
+          <p>你的设备完全支持 WebXR AR 功能！</p>
+          <br>
+          <p><strong>下一步：</strong></p>
+          <ul style="margin-left: 20px; margin-top: 10px;">
+            <li>访问主程序：https://quest3-exploded.vercel.app</li>
+            <li>点击 "📱 AR 预览" 按钮</li>
+            <li>授予相机权限</li>
+            <li>开始 AR 体验！</li>
+          </ul>
+        `;
+        container.appendChild(successDiv);
+      } else {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'error-box';
+        errorDiv.innerHTML = `
+          <h3>⚠️ 发现 ${issues.length} 个问题</h3>
+          <br>
+          ${issues.map(issue => `<p>${issue}</p>`).join('')}
+          <br>
+          <p><strong>💡 建议解决方案：</strong></p>
+          <ul style="margin-left: 20px; margin-top: 10px;">
+            ${suggestions.map(s => `<li>${s}</li>`).join('')}
+          </ul>
+        `;
+        container.appendChild(errorDiv);
+      }
+    }
+
+    async function runDiagnostics() {
+      log('═══════════════════════════════════════', 'info');
+      log('🔍 开始 WebXR 诊断...', 'info');
+      log('═══════════════════════════════════════\n', 'info');
+
+      // 清空之前的信息
+      document.getElementById('device-info').innerHTML = '';
+      document.getElementById('network-info').innerHTML = '';
+      document.getElementById('webxr-info').innerHTML = '';
+      document.getElementById('diagnosis').innerHTML = '';
+
+      // 1. 设备检测
+      log('\n📱 检测设备信息...', 'info');
+      const device = await checkDevice();
+
+      // 2. 网络检测
+      log('\n🌐 检测网络信息...', 'info');
+      const network = await checkNetwork();
+
+      // 3. WebXR 检测
+      log('\n🎮 检测 WebXR 支持...', 'info');
+      const arSupported = await checkWebXR();
+
+      // 4. 诊断结果
+      log('\n📋 生成诊断报告...', 'info');
+      showDiagnosis(device, network, arSupported);
+
+      log('\n✅ 诊断完成！', 'success');
+    }
+
+    // 页面加载时自动运行
+    window.addEventListener('load', () => {
+      log('页面加载完成，开始自动诊断...\n', 'info');
+      setTimeout(runDiagnostics, 500);
+    });
+  </script>
+</body>
+</html>
