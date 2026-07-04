@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>为什么看不到 AR 按钮？</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1b23 0%, #2d2e3a 100%);
+      color: #e6e6e6;
+      padding: 20px;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+      padding: 30px;
+      backdrop-filter: blur(10px);
+    }
+    h1 {
+      color: #ff6b6b;
+      margin-bottom: 30px;
+      text-align: center;
+    }
+    .reason {
+      background: rgba(255, 107, 107, 0.1);
+      border-left: 4px solid #ff6b6b;
+      padding: 20px;
+      border-radius: 12px;
+      margin: 20px 0;
+    }
+    .reason h2 {
+      color: #ff6b6b;
+      margin-bottom: 10px;
+    }
+    .solution {
+      background: rgba(76, 175, 80, 0.1);
+      border-left: 4px solid #4caf50;
+      padding: 20px;
+      border-radius: 12px;
+      margin: 15px 0;
+    }
+    .solution h3 {
+      color: #4caf50;
+      margin-bottom: 10px;
+    }
+    .check {
+      background: rgba(74, 158, 255, 0.1);
+      border-left: 4px solid #4a9eff;
+      padding: 20px;
+      border-radius: 12px;
+      margin: 20px 0;
+    }
+    .check h2 {
+      color: #4a9eff;
+      margin-bottom: 15px;
+    }
+    .check-item {
+      padding: 10px;
+      margin: 8px 0;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .status {
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-weight: bold;
+      font-size: 12px;
+    }
+    .status.pass { background: #4caf50; color: white; }
+    .status.fail { background: #ff6b6b; color: white; }
+    .status.pending { background: #ffc107; color: black; }
+    button {
+      background: linear-gradient(135deg, #4a9eff, #8f7aff);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      margin: 5px;
+      width: 100%;
+    }
+    .vercel-btn {
+      background: linear-gradient(135deg, #000, #333);
+      font-size: 16px;
+      padding: 15px;
+      margin-top: 20px;
+    }
+    code {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: monospace;
+      color: #4a9eff;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>⚠️  为什么看不到 AR 按钮？</h1>
+
+    <div class="check">
+      <h2>🔍 自动检测</h2>
+      <div id="checks"></div>
+    </div>
+
+    <div class="reason">
+      <h2>常见原因</h2>
+      <div id="reasons"></div>
+    </div>
+
+    <div class="solution">
+      <h2>✅ 解决方案</h2>
+      <div id="solutions"></div>
+    </div>
+
+    <button class="vercel-btn" onclick="window.open('https://quest3-exploded.vercel.app', '_blank')">
+      🚀 使用 Vercel 在线版（推荐）
+    </button>
+  </div>
+
+  <script>
+    const checksDiv = document.getElementById('checks');
+    const reasonsDiv = document.getElementById('reasons');
+    const solutionsDiv = document.getElementById('solutions');
+
+    function addCheck(label, status, details = '') {
+      const div = document.createElement('div');
+      div.className = 'check-item';
+      div.innerHTML = `
+        <span>${label}</span>
+        <span class="status ${status}">${status === 'pass' ? '✅' : status === 'fail' ? '❌' : '⏳'} ${details || (status === 'pass' ? '通过' : status === 'fail' ? '失败' : '检测中')}</span>
+      `;
+      checksDiv.appendChild(div);
+    }
+
+    function addReason(title, description) {
+      const div = document.createElement('div');
+      div.className = 'reason';
+      div.style.marginTop = '15px';
+      div.innerHTML = `<h3>${title}</h3><p>${description}</p>`;
+      reasonsDiv.appendChild(div);
+    }
+
+    function addSolution(title, steps) {
+      const div = document.createElement('div');
+      div.className = 'solution';
+      div.style.marginTop = '15px';
+      div.innerHTML = `
+        <h3>${title}</h3>
+        <ol style="margin-left: 20px; margin-top: 10px; line-height: 1.8;">
+          ${steps.map(s => `<li>${s}</li>`).join('')}
+        </ol>
+      `;
+      solutionsDiv.appendChild(div);
+    }
+
+    async function runDiagnostics() {
+      checksDiv.innerHTML = '';
+      reasonsDiv.innerHTML = '';
+      solutionsDiv.innerHTML = '';
+
+      // 1. 检查设备类型
+      const ua = navigator.userAgent;
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
+      addCheck('移动设备', isMobile ? 'pass' : 'fail', isMobile ? '是' : '否（桌面浏览器不支持 AR）');
+
+      if (!isMobile) {
+        addReason('❌ 桌面浏览器', 'WebXR AR 功能仅在移动设备上可用。桌面浏览器（Chrome、Firefox、Safari）都不支持 AR 模式。');
+        addSolution('使用移动设备', [
+          '使用 Android 手机（Chrome 浏览器）',
+          '或使用 iPhone/iPad（Safari 浏览器）',
+          '确保系统版本：Android 7+ 或 iOS 15+'
+        ]);
+        return;
+      }
+
+      // 2. 检查 WebXR API
+      const hasWebXR = 'xr' in navigator;
+      addCheck('WebXR API', hasWebXR ? 'pass' : 'fail', hasWebXR ? '支持' : '不支持');
+
+      if (!hasWebXR) {
+        addReason('❌ 浏览器不支持 WebXR', '当前浏览器版本太低或 WebXR 功能被禁用。');
+        addSolution('更新浏览器或启用 WebXR', [
+          'Android: 更新 Chrome 到最新版本（需要 79+）',
+          'iOS: 使用 Safari 15+',
+          '检查 Chrome 标志：chrome://flags/#webxr → 设置为 Enabled'
+        ]);
+      }
+
+      // 3. 检查 HTTPS
+      const isHTTPS = location.protocol === 'https:';
+      addCheck('HTTPS 连接', isHTTPS ? 'pass' : 'fail', isHTTPS ? '是（正确）' : '否（WebXR 需要 HTTPS）');
+
+      if (!isHTTPS) {
+        addReason('❌ 未使用 HTTPS', 'WebXR API 强制要求 HTTPS 连接。本地 HTTP（http://192.168.x.x:8080）不满足安全要求。');
+        addSolution('使用 HTTPS', [
+          '方法 1（推荐）：访问 Vercel 在线版 → https://quest3-exploded.vercel.app',
+          '方法 2：使用 ngrok 隧道 → brew install ngrok && ngrok http 8080',
+          '方法 3：在 Chrome 标志中临时允许（仅开发）→ chrome://flags/#unsafely-treat-insecure-origin-as-secure'
+        ]);
+      }
+
+      // 4. 检查 AR 会话支持
+      if (hasWebXR) {
+        try {
+          const arSupported = await navigator.xr.isSessionSupported('immersive-ar');
+          addCheck('AR 会话支持', arSupported ? 'pass' : 'fail', arSupported ? '支持' : '不支持');
+
+          if (!arSupported) {
+            addReason('❌ 设备不支持 AR', '设备没有 AR 硬件，或 Chrome 版本太低，或系统版本太低。');
+            addSolution('检查设备要求', [
+              '确保设备支持 ARCore（Android）或 ARKit（iOS）',
+              '更新 Chrome 到最新版本（79+）',
+              '更新系统到 Android 7+ 或 iOS 15+',
+              '使用 2019 年后的旗舰设备（推荐）'
+            ]);
+          }
+        } catch (err) {
+          addCheck('AR 会话支持', 'fail', err.message);
+          addReason('❌ AR 检测失败', err.message);
+        }
+      }
+
+      // 5. 检查浏览器版本
+      let browserVersion = 'Unknown';
+      if (ua.includes('Chrome')) {
+        const match = ua.match(/Chrome\/([\d.]+)/);
+        browserVersion = match ? match[1] : 'Unknown';
+        const versionOK = parseFloat(browserVersion) >= 79;
+        addCheck('Chrome 版本', versionOK ? 'pass' : 'fail', browserVersion + (versionOK ? '（符合要求）' : '（需要 79+）'));
+      }
+
+      // 最终建议
+      if (hasWebXR && isHTTPS) {
+        const arSupported = await navigator.xr.isSessionSupported('immersive-ar').catch(() => false);
+        if (arSupported) {
+          const successDiv = document.createElement('div');
+          successDiv.className = 'solution';
+          successDiv.innerHTML = `
+            <h3>🎉 你的设备支持 AR！</h3>
+            <p style="margin-top: 10px;">请在主程序中测试 AR 功能：</p>
+            <ol style="margin-left: 20px; margin-top: 10px; line-height: 1.8;">
+              <li>访问 https://quest3-exploded.vercel.app</li>
+              <li>点击 "📱 AR 预览" 按钮</li>
+              <li>授予相机权限</li>
+              <li>缓慢移动手机扫描环境</li>
+            </ol>
+          `;
+          solutionsDiv.appendChild(successDiv);
+        }
+      }
+    }
+
+    // 自动检测
+    window.addEventListener('load', () => {
+      setTimeout(runDiagnostics, 500);
+    });
+  </script>
+</body>
+</html>
