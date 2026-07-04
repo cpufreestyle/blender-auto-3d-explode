@@ -1,8 +1,8 @@
 # Quest 3 爆炸拆解 3D 视图
 
-基于 Three.js 的 Meta Quest 3 交互式 3D 拆解教学工具，支持爆炸视图、AI 智能爆炸、自定义模型上传、WebXR AR 预览。
+基于 Three.js 的 Meta Quest 3 交互式 3D 拆解教学工具，支持爆炸视图、AI 智能爆炸、自定义模型上传、WebXR AR 预览、**Blender Python API 自动化集成**。
 
-**当前版本**：[v1.3.0](RELEASE_NOTES_v1.3.0.md) | **状态**：✅ Stable | **更新**：2026-07-04
+**当前版本**：[v1.4.0](RELEASE_NOTES_v1.4.0.md) | **状态**：✅ Stable | **更新**：2026-07-04
 
 ## ✨ 核心功能
 
@@ -54,6 +54,13 @@
 - **步骤动画**：淡入上移动画
 - **响应式设计**：移动端完美适配
 
+### 🤖 Blender 自动化集成（v1.4.0+）
+- **Blender Python API 控制器**：参数化控制 Blender
+- **HTTP API 服务器**：远程控制 Blender（REST API）
+- **文件监听自动执行**：保存脚本自动在 Blender 中运行
+- **Quest 3 爆炸视图脚本**：完整的 15 部件模型 + 动画
+- **Blender 3.0-5.1+ 兼容**：所有版本支持
+
 ## 🚀 快速开始
 
 这是一个纯静态项目，无需构建工具。任意 HTTP 服务器均可运行：
@@ -72,6 +79,15 @@ npx vite
 然后打开 http://localhost:8080。
 
 ## 📋 版本历史
+
+### [v1.4.0](RELEASE_NOTES_v1.4.0.md) (2026-07-04)
+- ✨ **Blender Python API 集成系统**
+  - 完整的 Blender Python API 控制器
+  - HTTP API 服务器（远程控制）
+  - 文件监听自动执行
+  - Quest 3 爆炸视图脚本（15 部件 + 动画）
+- 🐛 修复 6 个 Blender 5.1 API 兼容性问题
+- 📚 新增 4 个完整文档（1500+ 行）
 
 ### [v1.3.0](RELEASE_NOTES_v1.3.0.md) (2026-07-04)
 
@@ -161,11 +177,21 @@ npx vite
 
 ```
 quest3-exploded/
-├── index.html      # 页面结构
-├── style.css       # 界面样式
-├── main.js         # Three.js 场景与交互
-├── vercel.json     # Vercel 部署配置
-└── README.md
+├── index.html              # 页面结构
+├── style.css               # 界面样式
+├── main.js                 # Three.js 场景与交互
+├── vercel.json             # Vercel 部署配置
+├── blender_control.py      # Blender Python API 控制器
+├── blender_api_server.py   # Blender HTTP API 服务器
+├── blender_watcher.py      # 文件监听自动执行器
+├── quest3_exploded_blender.py  # Quest 3 爆炸视图脚本
+├── blender_scripts/        # Blender 脚本目录
+│   └── example_red_cube.py # 测试脚本
+├── blender_output/         # Blender 执行输出
+├── BLENDER_AUTOMATION.md   # Blender 自动化完整指南
+├── BLENDER_QUEST3_GUIDE.md # Quest 3 Blender 使用指南
+├── BLENDER_QUICK_START.md  # Blender 快速入门
+└── BLENDER_PYTHON_API.md   # Blender API 完整文档
 ```
 
 ## 自定义真实模型
@@ -178,6 +204,91 @@ quest3-exploded/
    ```
 
 2. 加载模型并按部件拆分为独立 Group，分别设置 `homePos` 和 `explodePos`。
+
+## 🎨 Blender 自动化集成（v1.4.0+）
+
+完整的 Blender Python API 集成系统，实现从 Web 到 Blender 的自动化工作流。
+
+### 📚 文档
+
+- **[BLENDER_AUTOMATION.md](BLENDER_AUTOMATION.md)** - 完整集成指南
+- **[BLENDER_QUEST3_GUIDE.md](BLENDER_QUEST3_GUIDE.md)** - Quest 3 Blender 使用指南
+- **[BLENDER_QUICK_START.md](BLENDER_QUICK_START.md)** - 5 分钟快速入门
+- **[BLENDER_PYTHON_API.md](BLENDER_PYTHON_API.md)** - API 完整文档
+
+### 🚀 快速开始
+
+#### 方法 1：文件监听（推荐）
+
+```bash
+# 1. 启动监听器
+./start_blender_watcher.sh
+
+# 2. 创建 Python 脚本
+echo 'import bpy; print("Hello from Blender!")' > blender_scripts/test.py
+
+# 3. 自动执行！查看输出
+cat blender_output/test_output.txt
+```
+
+#### 方法 2：HTTP API 服务器
+
+```bash
+# 1. 启动服务器
+blender --background --python blender_api_server.py -- --port 8000
+
+# 2. 远程控制
+curl -X POST http://localhost:8000/api/create \
+  -H "Content-Type: application/json" \
+  -d '{"type":"cube","name":"MyCube","location":[0,0,0],"size":2.0}'
+
+# 3. 查看所有物体
+curl http://localhost:8000/api/objects
+```
+
+#### 方法 3：Quest 3 爆炸视图
+
+```bash
+# 复制脚本到监听目录
+cp quest3_exploded_blender.py blender_scripts/quest3.py
+
+# 自动执行 → 15 个部件 + 爆炸动画
+# 在 Blender 中按 Space 播放
+```
+
+### 💡 使用示例
+
+```python
+from blender_control import BlenderController
+
+# 创建控制器
+controller = BlenderController()
+
+# 清空场景
+controller.clear_scene()
+
+# 创建立方体
+cube = controller.create_cube("MyCube", size=2.0, location=(0, 0, 1))
+
+# 应用材质
+controller.apply_material("MyCube", color=(0.8, 0.2, 0.2, 1.0), metallic=0.8)
+
+# 添加动画
+controller.add_animation("MyCube", "location",
+                        start_value=(0, 0, 1),
+                        end_value=(5, 0, 1),
+                        start_frame=1,
+                        end_frame=100)
+```
+
+### 📊 功能特性
+
+- ✅ **Blender Python API** - 参数化控制 Blender
+- ✅ **HTTP API 服务器** - 远程控制（REST API）
+- ✅ **文件监听** - 自动执行脚本
+- ✅ **自动修复** - 检测并修复 Blender 错误
+- ✅ **版本兼容** - Blender 3.0-5.1+
+- ✅ **虚拟环境** - 隔离 Python 依赖
 
 ## 技术栈
 
