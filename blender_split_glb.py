@@ -299,29 +299,50 @@ def merge_small_parts(min_faces=50):
 
 
 # Quest 3 原始 15 部位名称及归一化位置模板
-# 基于原始 Quest 3 模型坐标，归一化到 [-1, 1] 范围
-# Quest 3 原始 15 部位名称及归一化位置模板
-# 基于 quest3_exploded_blender.py 中真实模型坐标计算
+# 从共享配置文件 quest3_config.json 加载，确保 Python 和 JS 使用相同坐标
 # 坐标系: X=左右 Y=上下 Z=前后, 归一化到 [-1, 1]
 # 模型包围盒: X[-1.25,1.25] Y[-0.575,1.6] Z[-0.64,0.72]
 # 中心=(0, 0.5125, 0.04) 半幅=(1.25, 1.0875, 0.68)
-QUEST3_PART_TEMPLATES = [
-    {'name': '主机身',           'pos': [ 0.00, -0.47, -0.06]},
-    {'name': '前面板',           'pos': [ 0.00, -0.47,  0.75]},
-    {'name': '面罩海绵',         'pos': [ 0.00, -0.47, -0.87]},
-    {'name': '左透镜模组',       'pos': [-0.42, -0.43, -0.24]},
-    {'name': '右透镜模组',       'pos': [ 0.42, -0.43, -0.24]},
-    {'name': '左透镜',           'pos': [-0.42, -0.43, -0.56]},
-    {'name': '右透镜',           'pos': [ 0.42, -0.43, -0.56]},
-    {'name': '主板',             'pos': [ 0.00, -0.43, -0.13]},
-    {'name': '左摄像头',         'pos': [-0.60, -0.31,  0.94]},
-    {'name': '右摄像头',         'pos': [ 0.60, -0.31,  0.94]},
-    {'name': '中置摄像头',       'pos': [ 0.00, -0.21,  0.94]},
-    {'name': '下置追踪摄像头',   'pos': [ 0.00, -0.79,  0.82]},
-    {'name': '左头带臂',         'pos': [-1.00, -0.47, -0.06]},
-    {'name': '右头带臂',         'pos': [ 1.00, -0.47, -0.06]},
-    {'name': '头带',             'pos': [ 0.00,  0.45, -0.59]},
-]
+
+def _load_quest3_config():
+    """从 quest3_config.json 加载共享配置，回退到内置默认值"""
+    # 尝试从脚本同目录加载配置文件
+    config_paths = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'quest3_config.json'),
+        os.path.join(os.getcwd(), 'quest3_config.json'),
+    ]
+    for cfg_path in config_paths:
+        try:
+            with open(cfg_path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            templates = cfg.get('parts', [])
+            if templates:
+                log(f"  加载 Quest 3 配置: {cfg_path} ({len(templates)} 个部位)")
+                return templates
+        except Exception as e:
+            log(f"  配置文件加载失败 ({cfg_path}): {e}")
+
+    # 回退到内置默认值（与 quest3_config.json 同步）
+    log("  使用内置 Quest 3 配置（回退）")
+    return [
+        {'name': '主机身',           'pos': [ 0.00, -0.47, -0.06]},
+        {'name': '前面板',           'pos': [ 0.00, -0.47,  0.75]},
+        {'name': '面罩海绵',         'pos': [ 0.00, -0.47, -0.87]},
+        {'name': '左透镜模组',       'pos': [-0.42, -0.43, -0.24]},
+        {'name': '右透镜模组',       'pos': [ 0.42, -0.43, -0.24]},
+        {'name': '左透镜',           'pos': [-0.42, -0.43, -0.56]},
+        {'name': '右透镜',           'pos': [ 0.42, -0.43, -0.56]},
+        {'name': '主板',             'pos': [ 0.00, -0.43, -0.13]},
+        {'name': '左摄像头',         'pos': [-0.60, -0.31,  0.94]},
+        {'name': '右摄像头',         'pos': [ 0.60, -0.31,  0.94]},
+        {'name': '中置摄像头',       'pos': [ 0.00, -0.21,  0.94]},
+        {'name': '下置追踪摄像头',   'pos': [ 0.00, -0.79,  0.82]},
+        {'name': '左头带臂',         'pos': [-1.00, -0.47, -0.06]},
+        {'name': '右头带臂',         'pos': [ 1.00, -0.47, -0.06]},
+        {'name': '头带',             'pos': [ 0.00,  0.45, -0.59]},
+    ]
+
+QUEST3_PART_TEMPLATES = _load_quest3_config()
 
 
 def assign_quest3_names(parts_info, model_center, model_size):
@@ -449,10 +470,11 @@ def merge_to_quest3_parts(model_center, model_size):
 
 
 def _fill_missing_quest3_parts(model_center, half_x, half_y, half_z):
-    """保底补充：如果不足 15 个部位，从最大的部件中分裂面来填充缺失的模板。
+    """保底补充：如果不足 15 个部位，为缺失的模板生成占位网格。
 
-    对每个缺失的模板，在所有现有 mesh 中找距离该模板位置最近的面，
-    将这些面从原 mesh 中分离出来，创建为新部件。
+    改进：不再从已有部件中撕面（会导致几何破损和空洞），
+    而是在模板位置创建一个小的半透明占位立方体，标注"该区域未检测到独立部件"。
+    这样保持已有几何体的完整性，同时满足 15 部位的数量要求。
     """
     # 找出哪些模板还没有对应的 mesh
     existing_names = {obj.name for obj in get_mesh_objects()}
@@ -464,86 +486,53 @@ def _fill_missing_quest3_parts(model_center, half_x, half_y, half_z):
     if not missing_templates:
         return
 
-    log(f"  保底补充: 缺失 {len(missing_templates)} 个部位: {[QUEST3_PART_TEMPLATES[t]['name'] for t in missing_templates]}")
+    log(f"  保底补充: 缺失 {len(missing_templates)} 个部位，生成占位网格: {[QUEST3_PART_TEMPLATES[t]['name'] for t in missing_templates]}")
 
-    # 对每个缺失模板，从面数最多的部件中借取最近的面
+    # 为每个缺失模板创建占位立方体
     for t in missing_templates:
-        empty_tpl_pos = QUEST3_PART_TEMPLATES[t]['pos']
-        name = QUEST3_PART_TEMPLATES[t]['name']
+        tpl = QUEST3_PART_TEMPLATES[t]
+        name = tpl['name']
+        nx, ny, nz = tpl['pos']
 
-        # 找面数最多的部件作为源
-        all_objs = get_mesh_objects()
-        if not all_objs:
-            continue
+        # 将归一化坐标转换回世界坐标
+        world_x = nx * half_x + model_center[0]
+        world_y = ny * half_y + model_center[1]
+        world_z = nz * half_z + model_center[2]
 
-        # 计算每个部件到空模板的距离，选最近的
-        best_source_obj = None
-        best_source_dist = float('inf')
-        for obj in all_objs:
-            verts = [obj.matrix_world @ v.co for v in obj.data.vertices]
-            if not verts:
-                continue
-            cx = sum(v.x for v in verts) / len(verts)
-            cy = sum(v.y for v in verts) / len(verts)
-            cz = sum(v.z for v in verts) / len(verts)
-            nx, ny, nz = _normalize_coord(cx, cy, cz, model_center, half_x, half_y, half_z)
-            dist = _weighted_dist(nx, ny, nz, empty_tpl_pos)
-            if dist < best_source_dist:
-                best_source_dist = dist
-                best_source_obj = obj
+        # 创建一个小立方体作为占位
+        placeholder_size = min(half_x, half_y, half_z) * 0.08
+        bm = bmesh.new()
+        bmesh.ops.create_cube(bm, size=placeholder_size)
+        bmesh.ops.translate(bm, vec=(world_x, world_y, world_z), verts=bm.verts)
+        bm.normal_update()
 
-        if not best_source_obj or len(best_source_obj.data.polygons) < 10:
-            log(f"    {name}: 无可用源部件")
-            continue
+        # 创建网格
+        placeholder_mesh = bpy.data.meshes.new(name)
+        bm.to_mesh(placeholder_mesh)
+        bm.free()
 
-        # 进入编辑模式，选最近的面
-        bpy.ops.object.select_all(action='DESELECT')
-        best_source_obj.select_set(True)
-        bpy.context.view_layer.objects.active = best_source_obj
+        # 创建半透明材质（标注为占位）
+        mat_name = f"{name}_placeholder"
+        mat = bpy.data.materials.get(mat_name)
+        if mat is None:
+            mat = bpy.data.materials.new(name=mat_name)
+            mat.use_nodes = True
+            bsdf = mat.node_tree.nodes.get('Principled BSDF')
+            if bsdf:
+                bsdf.inputs['Base Color'].default_value = (0.5, 0.7, 1.0, 1.0)
+                bsdf.inputs['Alpha'].default_value = 0.3
+                # 标记为透明星号
+                if 'Transmission' in bsdf.inputs:
+                    bsdf.inputs['Transmission'].default_value = 0.8
+            mat.blend_method = 'BLEND'
 
-        source_mesh = best_source_obj.data
-        material_slots = [slot.material for slot in best_source_obj.material_slots]
-        has_uv = len(source_mesh.uv_layers) > 0
+        placeholder_mesh.materials.append(mat)
 
-        # 计算每个面到空模板的距离
-        face_dists = []
-        for fi, poly in enumerate(source_mesh.polygons):
-            cx, cy, cz = poly.center
-            nx, ny, nz = _normalize_coord(cx, cy, cz, model_center, half_x, half_y, half_z)
-            dist = _weighted_dist(nx, ny, nz, empty_tpl_pos)
-            face_dists.append((dist, fi))
-        face_dists.sort()
+        # 创建物体
+        placeholder_obj = bpy.data.objects.new(name, placeholder_mesh)
+        bpy.context.collection.objects.link(placeholder_obj)
 
-        # 借取最近的面：至少 15 个，最多源部件面数的 10%
-        steal_count = max(15, min(len(face_dists) // 10, 50))
-        steal_faces = set(fi for _, fi in face_dists[:steal_count])
-
-        if not steal_faces:
-            continue
-
-        # 用 bmesh 提取面
-        bm_orig = bmesh.new()
-        bm_orig.from_mesh(source_mesh)
-        bm_orig.faces.ensure_lookup_table()
-        uv_orig = bm_orig.loops.layers.uv.active if has_uv else None
-
-        # 创建新部件
-        _create_part_from_faces(bm_orig, list(steal_faces), name, material_slots, has_uv, uv_orig)
-
-        # 从源部件中删除这些面
-        bm_new = bmesh.new()
-        bm_new.from_mesh(source_mesh)
-        bm_new.faces.ensure_lookup_table()
-        faces_to_remove = [bm_new.faces[fi] for fi in steal_faces if fi < len(bm_new.faces)]
-        bmesh.ops.delete(bm_new, geom=faces_to_remove, context='FACES')
-        _cleanup_mesh(bm_new)
-        bm_new.normal_update()
-        bm_new.to_mesh(source_mesh)
-        bm_new.free()
-        source_mesh.update()
-
-        bm_orig.free()
-        log(f"    {name}: 从 {best_source_obj.name} 借取 {steal_count} 个面")
+        log(f"    {name}: 生成占位网格 @ ({world_x:.3f}, {world_y:.3f}, {world_z:.3f})")
 
 
 def _normalize_coord(cx, cy, cz, model_center, half_x, half_y, half_z):

@@ -7,7 +7,9 @@
     "dev": "npx serve .",
     "server": "node server.js",
     "start": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node tests/e2e-test.mjs",
+    "lint": "npx eslint main.js server.js src/ tests/ --fix",
+    "format": "npx prettier --write \"main.js\" \"server.js\" \"src/**/*.js\" \"tests/**/*.mjs\""
   },
   "keywords": ["three.js", "blender", "glb", "3d", "exploded-view", "webxr"],
   "author": "",

@@ -1,6 +1,8 @@
 import * as THREE from './vendor/three.module.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { RoundedBoxGeometry } from './vendor/RoundedBoxGeometry.js';
+import { quest3Specs, partInfo } from './src/quest3-data.js';
+import { defaultStepGroups } from './src/quest3-steps.js';
 
 // 动态导入 GLTFLoader（本地化 + Import Map 支持）
 let GLTFLoader = null;
@@ -808,11 +810,11 @@ ${partNames.map(n => `• ${n}`).join('<br>')}<br><br>
 }
 
 // ===== Quest 3 原始 15 部位名称及归一化位置模板 =====
-// 基于 quest3_exploded_blender.py 中真实模型坐标计算
+// 从共享配置文件 quest3_config.json 加载，回退到内置默认值
 // 坐标系: X=左右 Y=上下 Z=前后, 归一化到 [-1, 1]
 // 模型包围盒: X[-1.25,1.25] Y[-0.575,1.6] Z[-0.64,0.72]
 // 中心=(0, 0.5125, 0.04) 半幅=(1.25, 1.0875, 0.68)
-const QUEST3_PART_TEMPLATES = [
+let QUEST3_PART_TEMPLATES = [
   { name: '主机身',           pos: [ 0.00, -0.47, -0.06] },
   { name: '前面板',           pos: [ 0.00, -0.47,  0.75] },
   { name: '面罩海绵',         pos: [ 0.00, -0.47, -0.87] },
@@ -829,6 +831,19 @@ const QUEST3_PART_TEMPLATES = [
   { name: '右头带臂',         pos: [ 1.00, -0.47, -0.06] },
   { name: '头带',             pos: [ 0.00,  0.45, -0.59] },
 ];
+
+// 异步加载共享配置文件，覆盖内置默认值
+fetch('quest3_config.json')
+  .then(r => r.json())
+  .then(cfg => {
+    if (cfg.parts && cfg.parts.length > 0) {
+      QUEST3_PART_TEMPLATES = cfg.parts;
+      console.log(`📋 已加载 quest3_config.json (${cfg.parts.length} 个部位)`);
+    }
+  })
+  .catch(() => {
+    console.log('📋 使用内置 Quest 3 配置（quest3_config.json 不可用）');
+  });
 
 /**
  * 根据部件空间位置，将检测到的部件匹配到 Quest 3 原始 15 部位名称
@@ -2025,180 +2040,14 @@ const axisMat = new THREE.MeshBasicMaterial({ color: 0x44464f, transparent: true
 const axisLine = new THREE.Mesh(axisGeo, axisMat);
 questGroup.add(axisLine);
 
-// ===== Quest 3 技术规格数据库（教学用）=====
-const quest3Specs = {
-  name: 'Meta Quest 3',
-  releaseDate: '2023年10月',
-  price: '$499.99 (128GB) / $599.99 (512GB)',
-  weight: '515g',
-  dimensions: '129 × 70 × 85 mm (深度 × 宽度 × 高度)',
-  processor: '高通 Snapdragon XR2 Gen 2',
-  gpu: 'Adreno 740 @ 750 MHz',
-  memory: '8GB LPDDR5 RAM',
-  storage: ['128GB', '512GB'],
-  display: '2× 2064 × 2208 (LCD, RGB-stripe)',
-  refreshRate: '90Hz / 120Hz (可切换)',
-  fov: '约 110° (水平)',
-  lenses: 'Pancake 透镜',
-  ipdAdjustment: '支持电子调节',
-  cameras: '2× 1000万像素 RGB + 2× 红外追踪 + 1× ToF 深度传感器',
-  tracking: 'Inside-Out 6DoF追踪',
-  connectivity: 'Wi-Fi 6E, Bluetooth 5.2',
-  battery: '4879 mAh 锂离子电池 (约2-3小时使用)',
-  os: 'Meta Horizon OS (基于Android)',
-};
+// quest3Specs 已从 ./src/quest3-data.js 导入
 
 // 自动适配相机到默认模型
 fitCameraToModel(questGroup, false);
 
 // ===== 分步骤拆解（教学导向，参考 iFixit 风格）=====
-let stepGroups = [
-  {
-    name: '👋 欢迎认识 Quest 3',
-    parts: [],
-    tools: [],
-    description: `Meta Quest 3（2023年10月发售）是 Meta 的第三代 VR 一体机。
-
-📊 核心参数：
-• 重量：${quest3Specs.weight}
-• 芯片：${quest3Specs.processor}
-• 屏幕：${quest3Specs.display} @ ${quest3Specs.refreshRate}
-• 摄像头：${quest3Specs.cameras}
-
-💡 点击"下一步"开始拆解之旅。用鼠标左键旋转，滚轮缩放。`
-  },
-  {
-    name: '① 前面板 - 脸面',
-    parts: ['前面板'],
-    tools: ['👁️ 肉眼观察', '💡 良好的光线'],
-    description: `前面板是 Quest 3 的"门面"：
-
-🎨 设计
-• 白色哑光磨砂塑料外壳
-• 中央印有 Meta 标志（可反光）
-• 四周有细密的散热通风口（共5条）
-
-🔍 摄像头阵列
-从左上到右下：
-• 左上 + 右上：1000万像素 RGB 摄像头（彩色透视）
-• 正中上方：ToF 深度传感器
-• 底部：红外追踪摄像头
-
-💡 试试在 3D 视图中找找这些摄像头！`
-  },
-  {
-    name: '② 摄像头模组 - 眼睛',
-    parts: ['左摄像头', '右摄像头', '中置摄像头', '下置追踪摄像头'],
-    tools: ['🔍 放大镜（可选）', '💡 充足光线'],
-    description: `Quest 3 有 **4 颗摄像头** 负责"看懂"世界：
-
-📷 彩色透视（2颗）
-• 左右各一颗 1000万像素 RGB 摄像头
-• 提供高清彩色 Mixed Reality 体验
-• 比 Quest 2 的黑白透视提升巨大
-
-👁️ 追踪摄像头（2颗）
-• 红外摄像头，不可见光
-• 追踪头显在空间中的位置（6DoF）
-• 追踪 Touch Plus 手柄
-
-⚡ 这就是 Inside-Out 追踪的核心！`
-  },
-  {
-    name: '③ 头带与头带臂 - 支撑',
-    parts: ['左头带臂', '右头带臂', '头带'],
-    tools: ['✋ 双手', '💪 轻微力气'],
-    description: `佩戴舒适的关键组件：
-
-🎯 正确佩戴方法
-1. 头显放在眼睛前方
-2. 头带拉到后脑勺**偏下**位置
-3. 调整旋钮让重心平衡
-
-🧩 组件说明
-• 头带臂：塑料支架，连接主机身
-• 柔性头带：可拉伸材质，分散重量
-• 总重量 515g 均匀分布在额头和后脑勺
-
-💡 Quest 3 的头带比 Quest 2 更短更紧凑。`
-  },
-  {
-    name: '④ 面罩海绵 - 亲密接触',
-    parts: ['面罩海绵'],
-    tools: ['✋ 双手', '🔧 塑料撬棒（可选）'],
-    description: `紧贴你脸部的记忆海绵：
-
-☁️ 作用
-• 阻挡外部光线，提升沉浸感
-• 柔软缓冲，长时间佩戴舒适
-• 防止"漏光"导致的眩晕
-
-📦 官方配件
-Meta 提供 4 种厚度可选：
-• 2mm（薄）- 适合戴眼镜用户
-• 4mm（标准）- 大多数人
-• 6mm（厚）- 深眼窝用户
-• 8mm（特厚）- 需要最大遮光
-
-🔄 可轻松更换，撕下旧的，贴上新的。`
-  },
-  {
-    name: '⑤ 透镜模组 - 通往虚拟世界',
-    parts: ['左透镜模组', '右透镜模组'],
-    tools: ['👁️ 仔细观察', '💡 旋转查看内部'],
-    description: `这是 VR 头显**最重要的部件**！
-
-🔬 Pancake 透镜技术
-• 比 Quest 2 的菲涅尔透镜**更薄**
-• 光路折叠设计，减少头显厚度
-• 边缘画质大幅改善
-
-📐 光学规格
-• 单眼分辨率：${quest3Specs.display}
-• 刷新率：${quest3Specs.refreshRate}
-• 视场角（FOV）：${quest3Specs.fov}
-• 屈光度调节：±50°（近视党福音！）
-
-💡 你可以不用戴眼镜，直接调节旋钮就能看清！`
-  },
-  {
-    name: '⑥ 主板与显示屏 - 大脑',
-    parts: ['主板/显示屏'],
-    tools: ['🔧 精密螺丝刀（虚拟）', '📋 耐心细致'],
-    description: `Quest 3 的"大脑"和"眼睛"：
-
-🧠 主板（绿色 PCB）
-• 芯片：${quest3Specs.processor}
-• 图形：${quest3Specs.gpu}
-• 内存：${quest3Specs.memory}
-• 存储：${quest3Specs.storage.join(' / ')}
-
-👁️ 显示屏（主板后面）
-• 2× LCD 面板（你看到的是透过透镜的像）
-• ${quest3Specs.display}
-• ${quest3Specs.refreshRate}
-• RGB-stripe 排列（减少纱窗效应）
-
-⚡ 散热
-主板上有散热片覆盖 SoC 芯片，保持冷静运行。`
-  },
-  {
-    name: '🎉 拆解完成！',
-    parts: [],
-    tools: [],
-    description: `恭喜！你已经完成 Quest 3 的完整拆解之旅！
-
-📦 总共发现了 15 个主要部件
-
-💡 下一步你可以：
-• 点击"爆炸视图"重新组合
-• 点击"重置"回到初始状态
-• 上传自己的 3D 模型来拆解
-• 在 3D 视图中旋转观察细节
-
-❓ 有疑问？可以问我任何关于 Quest 3 的问题！`
-  },
-];
+// defaultStepGroups 已从 ./src/quest3-steps.js 导入
+let stepGroups = defaultStepGroups;
 
 // 工具清单更新
 function updateToolsList(step) {
@@ -2216,7 +2065,7 @@ function updateToolsList(step) {
   }
 }
 
-const defaultStepGroups = stepGroups;
+// defaultStepGroups 已从 ./src/quest3-steps.js 导入
 let totalSteps = stepGroups.length;
 const partStepMap = new Map();
 
@@ -2330,113 +2179,7 @@ const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 let hoveredPart = null;
 
-// 部件详细信息数据库
-const partInfo = {
-  '前面板': {
-    name: '前面板 (Front Cover)',
-    material: 'PC 塑料（聚碳酸酯）',
-    weight: '约 45g',
-    function: '保护内部组件，提供佩戴支撑',
-    specs: '尺寸：129×70×12mm，白色哑光磨砂',
-    funFact: 'Meta 标志在光线下会反光！'
-  },
-  '主机身': {
-    name: '主机身 (Main Body)',
-    material: 'ABS 塑料（哑光黑）',
-    weight: '约 180g',
-    function: '容纳所有电子组件的主框架',
-    specs: '深空黑，散热通风口设计',
-    funFact: '内部有精密散热系统，保持冷静运行'
-  },
-  '左透镜模组': {
-    name: '透镜模组 (Lens Module)',
-    material: 'Pancake 光学透镜 + 塑料外壳',
-    weight: '约 30g/个',
-    function: '将显示屏图像投射到用户眼中',
-    specs: '屈光度调节范围 ±50°，FOV 110°',
-    funFact: 'Pancake 技术让头显比 Quest 2 薄了 40%'
-  },
-  '右透镜模组': {
-    name: '透镜模组 (Lens Module)',
-    material: 'Pancake 光学透镜 + 塑料外壳',
-    weight: '约 30g/个',
-    function: '将显示屏图像投射到用户眼中',
-    specs: '屈光度调节范围 ±50°，FOV 110°',
-    funFact: '每个透镜模组是独立可调的！'
-  },
-  '左摄像头': {
-    name: '彩色摄像头 (Color Camera)',
-    material: '玻璃镜片 + 金属外壳',
-    weight: '约 8g',
-    function: '彩色透视 Mixed Reality',
-    specs: '1000万像素，RGB 传感器',
-    funFact: '比 Quest 2 的黑白摄像头体验提升巨大！'
-  },
-  '右摄像头': {
-    name: '彩色摄像头 (Color Camera)',
-    material: '玻璃镜片 + 金属外壳',
-    weight: '约 8g',
-    function: '彩色透视 Mixed Reality',
-    specs: '1000万像素，RGB 传感器',
-    funFact: '左右摄像头协同工作，创建立体深度'
-  },
-  '中置摄像头': {
-    name: 'ToF 深度传感器',
-    material: '红外传感器',
-    weight: '约 3g',
-    function: '深度感知，空间映射',
-    specs: 'Time-of-Flight 传感器',
-    funFact: '帮助 Quest 3 理解房间的 3D 结构'
-  },
-  '下置追踪摄像头': {
-    name: '红外追踪摄像头',
-    material: '红外镜头',
-    weight: '约 3g',
-    function: '6DoF 头部追踪',
-    specs: '红外摄像头，追踪头显位置',
-    funFact: '即使在完全黑暗中也能追踪！'
-  },
-  '左头带臂': {
-    name: '头带臂 (Strap Arm)',
-    material: '增强塑料',
-    weight: '约 15g/个',
-    function: '连接主机身和头带',
-    specs: '可调节角度，适配不同头型',
-    funFact: '支持快速拆装'
-  },
-  '右头带臂': {
-    name: '头带臂 (Strap Arm)',
-    material: '增强塑料',
-    weight: '约 15g/个',
-    function: '连接主机身和头带',
-    specs: '可调节角度，适配不同头型',
-    funFact: '与左头带臂对称设计'
-  },
-  '头带': {
-    name: '柔性头带 (Flexible Strap)',
-    material: '可拉伸硅胶/塑料混合',
-    weight: '约 35g',
-    function: '固定头显，分散重量',
-    specs: '魔术贴可调节，适配不同头围',
-    funFact: '绕到后脑勺偏下位置最舒适'
-  },
-  '面罩海绵': {
-    name: '面罩海绵 (Face Interface)',
-    material: '记忆海绵 + 磁性可更换',
-    weight: '约 25g',
-    function: '遮光、缓冲、舒适佩戴',
-    specs: '4 种厚度可选（2/4/6/8mm）',
-    funFact: '记忆海绵会根据你的脸型塑形'
-  },
-  '主板/显示屏': {
-    name: '主板与显示屏 (Motherboard & Display)',
-    material: '绿色 PCB + LCD 面板',
-    weight: '约 120g',
-    function: '运行系统，显示图像',
-    specs: 'XR2 Gen 2 + Adreno 740 + 8GB RAM',
-    funFact: '显示屏在主板后面，你看到的是透过透镜的像！'
-  }
-};
+// partInfo 已从 ./src/quest3-data.js 导入
 
 // 显示工具提示
 function showTooltip(partName, x, y) {
@@ -2910,46 +2653,96 @@ function setupUpload() {
 
   /**
    * 尝试调用 Blender 后端拆解 GLB
+   * 改进：使用 XMLHttpRequest 获取上传进度 + 二进制响应（不再 base64）
    * @param {File} file 上传的 GLB/GLTF 文件
    * @returns {Promise<{arrayBuffer: ArrayBuffer, manifest: object} | null>}
    */
-  async function tryBlenderSplit(file) {
-    try {
-      showStatus('🔧 正在通过 Blender 拆解模型...', 'info');
-
+  function tryBlenderSplit(file) {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
       const formData = new FormData();
       formData.append('file', file);
 
-      const resp = await fetch(`${BLENDER_SERVER}/api/split`, {
-        method: 'POST',
-        body: formData,
+      showStatus('🔧 正在通过 Blender 拆解模型... (上传中)', 'info');
+
+      // 上传进度
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          if (pct < 100) {
+            showStatus(`📤 上传中... ${pct}% (${(e.loaded / 1024).toFixed(0)} / ${(e.total / 1024).toFixed(0)} KB)`, 'info');
+          } else {
+            showStatus('🔧 Blender 正在拆解模型... (已上传)', 'info');
+          }
+        }
       });
 
-      if (!resp.ok) {
-        const errData = await resp.json().catch(() => ({}));
-        throw new Error(errData.error || `服务器错误 ${resp.status}`);
-      }
+      xhr.addEventListener('load', () => {
+        try {
+          if (xhr.status !== 200) {
+            // 错误响应是 JSON
+            const errData = JSON.parse(xhr.responseText || '{}');
+            throw new Error(errData.error || `服务器错误 ${xhr.status}`);
+          }
 
-      const data = await resp.json();
-      if (!data.success) {
-        throw new Error(data.error || '拆解失败');
-      }
+          // 检查是否是二进制响应（成功）
+          const successHeader = xhr.getResponseHeader('X-Success');
+          if (successHeader !== 'true') {
+            // 可能是旧的 JSON 格式，尝试解析
+            const data = JSON.parse(xhr.responseText);
+            if (!data.success) {
+              throw new Error(data.error || '拆解失败');
+            }
+            // 兼容旧格式（base64）
+            const binaryStr = atob(data.glb_base64);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+            showStatus(`✅ Blender 拆解完成：${data.total_parts} 个部件 (${data.elapsed_seconds}s)`, 'success');
+            resolve({ arrayBuffer: bytes.buffer, manifest: data });
+            return;
+          }
 
-      // base64 → ArrayBuffer
-      const binaryStr = atob(data.glb_base64);
-      const bytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+          // 新格式：二进制 GLB body + manifest 在 header
+          const totalParts = parseInt(xhr.getResponseHeader('X-Total-Parts') || '0');
+          const elapsedSeconds = parseFloat(xhr.getResponseHeader('X-Elapsed-Seconds') || '0');
+          const manifestBase64 = xhr.getResponseHeader('X-Manifest') || '';
 
-      showStatus(`✅ Blender 拆解完成：${data.total_parts} 个部件 (${data.elapsed_seconds}s)`, 'success');
+          // 解析 manifest（base64 → JSON）
+          let manifest = null;
+          if (manifestBase64) {
+            const manifestJson = atob(manifestBase64);
+            manifest = JSON.parse(manifestJson);
+          } else {
+            throw new Error('响应中缺少 manifest 头');
+          }
 
-      return {
-        arrayBuffer: bytes.buffer,
-        manifest: data,
-      };
-    } catch (err) {
-      console.warn('Blender 后端不可用，回退到 JS 拆解:', err.message);
-      return null;
-    }
+          showStatus(`✅ Blender 拆解完成：${totalParts} 个部件 (${elapsedSeconds}s)`, 'success');
+
+          resolve({
+            arrayBuffer: xhr.response,
+            manifest,
+          });
+        } catch (err) {
+          console.warn('Blender 响应解析失败:', err.message);
+          resolve(null);
+        }
+      });
+
+      xhr.addEventListener('error', () => {
+        console.warn('Blender 后端不可用，回退到 JS 拆解: 网络错误');
+        resolve(null);
+      });
+
+      xhr.addEventListener('timeout', () => {
+        console.warn('Blender 后端超时，回退到 JS 拆解');
+        resolve(null);
+      });
+
+      xhr.responseType = 'arraybuffer';
+      xhr.timeout = 600000; // 10 分钟
+      xhr.open('POST', `${BLENDER_SERVER}/api/split`);
+      xhr.send(formData);
+    });
   }
 
   async function handleFile(file) {

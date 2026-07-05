@@ -3,8 +3,14 @@
  * GLB 拆解服务器（零依赖版 — 仅使用 Node.js 内置模块）
  *
  * 功能：
- *   POST /api/split  —  接收 GLB 文件，调用 Blender CLI 拆解，返回拆解后的 GLB + JSON 清单
+ *   POST /api/split  —  接收 GLB 文件，调用 Blender CLI 拆解，返回二进制 GLB + manifest 头
  *   GET  /api/health —  健康检查（检测 Blender 是否可用）
+ *
+ * 改进：
+ *   - 错误处理作用域修复（blenderStdout/blenderStderr 提到外层）
+ *   - GLB 以二进制流返回（不再 base64 编码，节省 33% 带宽和内存）
+ *   - multipart 解析器增加输入校验（boundary 长度、part 数量、文件名消毒）
+ *   - 启动时清理超过 1 小时的残留临时文件
  *
  * 用法：
  *   node server.js                 # 默认端口 3001
@@ -28,10 +34,51 @@ const PORT = process.env.PORT || 3001;
 // ── 配置 ──────────────────────────────────────────────
 const BLENDER_PATH = process.env.BLENDER_PATH || findBlender();
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
+const MAX_PARTS = 10; // multipart 最大 part 数量
+const MAX_BOUNDARY_LENGTH = 200; // boundary 最大长度
+const MAX_HEADER_SIZE = 8192; // 单个 multipart part header 最大大小
+const TEMP_FILE_TTL_MS = 60 * 60 * 1000; // 临时文件存活时间：1 小时
 const UPLOAD_DIR = path.join(os.tmpdir(), 'blender-split-uploads');
 
 // 确保上传目录存在
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// ── 临时文件清理 ──────────────────────────────────────
+
+/**
+ * 清理上传目录中超过 TTL 的残留临时文件
+ * 在服务器启动时调用
+ */
+function cleanupOldTempFiles() {
+  try {
+    const files = fs.readdirSync(UPLOAD_DIR);
+    const now = Date.now();
+    let cleaned = 0;
+
+    for (const file of files) {
+      const filePath = path.join(UPLOAD_DIR, file);
+      try {
+        const stats = fs.statSync(filePath);
+        const ageMs = now - stats.mtimeMs;
+        if (ageMs > TEMP_FILE_TTL_MS) {
+          fs.unlinkSync(filePath);
+          cleaned++;
+        }
+      } catch {
+        // 文件可能已被删除，忽略
+      }
+    }
+
+    if (cleaned > 0) {
+      console.log(`  🧹 清理 ${cleaned} 个残留临时文件`);
+    }
+  } catch (err) {
+    console.warn(`  ⚠️ 临时文件清理失败: ${err.message}`);
+  }
+}
+
+// 启动时清理
+cleanupOldTempFiles();
 
 // ── 工具函数 ──────────────────────────────────────────
 
@@ -80,27 +127,49 @@ async function runBlenderSplit(inputPath, outputPath, manifestPath, originalFile
   return { stdout, stderr };
 }
 
+// ── 安全的 multipart 解析器 ────────────────────────────
+
+/**
+ * 消毒文件名：移除路径分隔符、控制字符等危险字符
+ */
+function sanitizeFilename(name) {
+  // 移除路径分隔符和 ..
+  const cleaned = name.replace(/[/\\]/g, '').replace(/\.\./g, '');
+  // 移除控制字符
+  return cleaned.replace(/[\x00-\x1f\x7f]/g, '');
+}
+
 /**
  * 解析 multipart/form-data 请求体
- * 提取上传的文件内容
+ * 提取上传的文件内容（增加输入校验）
  * @param {http.IncomingMessage} req
  * @returns {Promise<{filename: string, data: Buffer, contentType: string}>}
  */
 function parseMultipart(req) {
   return new Promise((resolve, reject) => {
     const contentType = req.headers['content-type'] || '';
-    const boundaryMatch = contentType.match(/boundary=(.+)/);
+    const boundaryMatch = contentType.match(/boundary=([^\s;]+)/);
     if (!boundaryMatch) {
       reject(new Error('未找到 multipart boundary'));
       return;
     }
 
-    const boundary = '--' + boundaryMatch[1];
+    const boundaryStr = boundaryMatch[1];
+
+    // 校验 boundary 长度，防止恶意构造
+    if (boundaryStr.length > MAX_BOUNDARY_LENGTH) {
+      reject(new Error('boundary 过长'));
+      req.destroy();
+      return;
+    }
+
+    const boundary = '--' + boundaryStr;
     const chunks = [];
+    let totalReceived = 0;
 
     req.on('data', (chunk) => {
-      const totalSize = chunks.reduce((sum, c) => sum + c.length, 0) + chunk.length;
-      if (totalSize > MAX_FILE_SIZE) {
+      totalReceived += chunk.length;
+      if (totalReceived > MAX_FILE_SIZE) {
         reject(new Error('文件太大'));
         req.destroy();
         return;
@@ -127,13 +196,14 @@ function parseMultipart(req) {
 }
 
 /**
- * 从 Buffer 中解析 multipart 数据
+ * 从 Buffer 中解析 multipart 数据（增加安全校验）
  */
 function parseMultipartBuffer(buffer, boundary) {
   const boundaryBuf = Buffer.from(boundary);
   const parts = [];
-
   let start = 0;
+  let partCount = 0;
+
   while (true) {
     const bStart = buffer.indexOf(boundaryBuf, start);
     if (bStart === -1) break;
@@ -147,8 +217,20 @@ function parseMultipartBuffer(buffer, boundary) {
     const nextBoundary = buffer.indexOf(boundaryBuf, afterBoundary);
     if (nextBoundary === -1) break;
 
+    // 限制 part 数量，防止 DoS
+    partCount++;
+    if (partCount > MAX_PARTS) {
+      throw new Error(`multipart part 数量超过限制 (${MAX_PARTS})`);
+    }
+
     // 提取 part 数据
     const partData = buffer.slice(afterBoundary, nextBoundary);
+
+    // 校验 part header 大小
+    if (partData.length > MAX_HEADER_SIZE && partData.indexOf(Buffer.from('\r\n\r\n')) === -1) {
+      throw new Error('multipart part header 过大');
+    }
+
     // 去掉前后的 \r\n
     const partStr = partData.toString('latin1');
 
@@ -162,13 +244,20 @@ function parseMultipartBuffer(buffer, boundary) {
 
     // 提取文件名
     const nameMatch = headerStr.match(/name="([^"]+)"/);
-    const filenameMatch = headerStr.match(/filename="([^"]+)"/);
+    const filenameMatch = headerStr.match(/filename="([^"]*)"/);
     const contentTypeMatch = headerStr.match(/Content-Type:\s*(.+)/i);
 
-    if (filenameMatch && filenameMatch[1]) {
+    if (filenameMatch) {
+      const rawFilename = filenameMatch[1];
+      // 跳过空文件名
+      if (!rawFilename) continue;
+
+      const safeFilename = sanitizeFilename(rawFilename);
+      if (!safeFilename) continue;
+
       parts.push({
         fieldname: nameMatch ? nameMatch[1] : 'file',
-        filename: filenameMatch[1],
+        filename: safeFilename,
         contentType: contentTypeMatch ? contentTypeMatch[1].trim() : 'application/octet-stream',
         data: buffer.slice(bodyStart, bodyEnd),
       });
@@ -180,6 +269,8 @@ function parseMultipartBuffer(buffer, boundary) {
   return parts.length > 0 ? parts[0] : null;
 }
 
+// ── 响应工具 ──────────────────────────────────────────
+
 /**
  * 发送 JSON 响应
  */
@@ -189,9 +280,34 @@ function sendJSON(res, statusCode, data) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Manifest',
+    'Access-Control-Expose-Headers': 'X-Manifest, X-Total-Parts, X-Elapsed-Seconds, X-Success',
   });
   res.end(json);
+}
+
+/**
+ * 发送二进制 GLB + manifest 头
+ * 改进：GLB 以二进制流返回，manifest 通过自定义头传递
+ * 节省 33% 带宽（不再 base64 编码）
+ */
+function sendBinaryResult(res, glbBuffer, manifest, elapsed) {
+  const manifestJson = JSON.stringify(manifest);
+  const manifestBase64 = Buffer.from(manifestJson, 'utf-8').toString('base64');
+
+  res.writeHead(200, {
+    'Content-Type': 'application/octet-stream',
+    'Content-Length': glbBuffer.length,
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Manifest',
+    'Access-Control-Expose-Headers': 'X-Manifest, X-Total-Parts, X-Elapsed-Seconds, X-Success',
+    'X-Success': 'true',
+    'X-Total-Parts': String(manifest.total_parts || 0),
+    'X-Elapsed-Seconds': elapsed,
+    'X-Manifest': manifestBase64,
+  });
+  res.end(glbBuffer);
 }
 
 // ── 路由处理 ──────────────────────────────────────────
@@ -220,9 +336,13 @@ async function handleHealth(req, res) {
 
 /**
  * 拆解 GLB
+ * 修复：blenderStdout/blenderStderr 提到 try 外层，catch 可访问
  */
 async function handleSplit(req, res) {
   const startTime = Date.now();
+  // 提到外层 try 之前，确保 catch 块可以访问
+  let blenderStdout = '';
+  let blenderStderr = '';
 
   try {
     // 1. 解析上传的文件
@@ -253,7 +373,6 @@ async function handleSplit(req, res) {
       console.log(`  📝 临时文件: ${inputPath}`);
 
       // 4. 调用 Blender
-      let blenderStdout = '', blenderStderr = '';
       try {
         const result = await runBlenderSplit(inputPath, outputPath, manifestPath, fileName);
         blenderStdout = result.stdout || '';
@@ -285,16 +404,8 @@ async function handleSplit(req, res) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
       console.log(`  ✅ 拆解完成: ${manifest.total_parts} 个部件 (${elapsed}s)`);
 
-      // 7. 返回结果
-      sendJSON(res, 200, {
-        success: true,
-        parts: manifest.parts,
-        total_parts: manifest.total_parts,
-        model_center: manifest.model_center,
-        model_size: manifest.model_size,
-        elapsed_seconds: parseFloat(elapsed),
-        glb_base64: outputBuffer.toString('base64'),
-      });
+      // 7. 返回二进制 GLB + manifest 头（不再 base64 编码）
+      sendBinaryResult(res, outputBuffer, manifest, elapsed);
 
     } finally {
       // 清理临时文件
@@ -321,7 +432,8 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Manifest',
+      'Access-Control-Expose-Headers': 'X-Manifest, X-Total-Parts, X-Elapsed-Seconds, X-Success',
     });
     res.end();
     return;
@@ -342,13 +454,13 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log('═'.repeat(50));
-  console.log('  🔧 GLB 拆解服务器（零依赖版）');
+  console.log('  🔧 GLB 拆解服务器（零依赖版 v2）');
   console.log(`  📡 http://localhost:${PORT}`);
   console.log(`  🎨 Blender: ${BLENDER_PATH}`);
   console.log('═'.repeat(50));
   console.log('\n  端点:');
   console.log(`    GET  /api/health  — 健康检查`);
-  console.log(`    POST /api/split   — 拆解 GLB\n`);
+  console.log(`    POST /api/split   — 拆解 GLB（二进制响应）\n`);
 
   // 启动时检测 Blender
   execFileAsync(BLENDER_PATH, ['--version'], { timeout: 10_000 })

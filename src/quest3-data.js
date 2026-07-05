@@ -1,0 +1,135 @@
+/**
+ * Quest 3 技术规格数据库 + 部件详细信息
+ * 从 main.js 中提取的纯数据模块，无外部依赖
+ */
+
+// ===== Quest 3 技术规格数据库（教学用）=====
+export const quest3Specs = {
+  name: 'Meta Quest 3',
+  releaseDate: '2023年10月',
+  price: '$499.99 (128GB) / $599.99 (512GB)',
+  weight: '515g',
+  dimensions: '129 × 70 × 85 mm (深度 × 宽度 × 高度)',
+  processor: '高通 Snapdragon XR2 Gen 2',
+  gpu: 'Adreno 740 @ 750 MHz',
+  memory: '8GB LPDDR5 RAM',
+  storage: ['128GB', '512GB'],
+  display: '2× 2064 × 2208 (LCD, RGB-stripe)',
+  refreshRate: '90Hz / 120Hz (可切换)',
+  fov: '约 110° (水平)',
+  lenses: 'Pancake 透镜',
+  ipdAdjustment: '支持电子调节',
+  cameras: '2× 1000万像素 RGB + 2× 红外追踪 + 1× ToF 深度传感器',
+  tracking: 'Inside-Out 6DoF追踪',
+  connectivity: 'Wi-Fi 6E, Bluetooth 5.2',
+  battery: '4879 mAh 锂离子电池 (约2-3小时使用)',
+  os: 'Meta Horizon OS (基于Android)',
+};
+
+// ===== 部件详细信息数据库 =====
+export const partInfo = {
+  '前面板': {
+    name: '前面板 (Front Cover)',
+    material: 'PC 塑料（聚碳酸酯）',
+    weight: '约 45g',
+    function: '保护内部组件，提供佩戴支撑',
+    specs: '尺寸：129×70×12mm，白色哑光磨砂',
+    funFact: 'Meta 标志在光线下会反光！'
+  },
+  '主机身': {
+    name: '主机身 (Main Body)',
+    material: 'ABS 塑料（哑光黑）',
+    weight: '约 180g',
+    function: '容纳所有电子组件的主框架',
+    specs: '深空黑，散热通风口设计',
+    funFact: '内部有精密散热系统，保持冷静运行'
+  },
+  '左透镜模组': {
+    name: '透镜模组 (Lens Module)',
+    material: 'Pancake 光学透镜 + 塑料外壳',
+    weight: '约 30g/个',
+    function: '将显示屏图像投射到用户眼中',
+    specs: '屈光度调节范围 ±50°，FOV 110°',
+    funFact: 'Pancake 技术让头显比 Quest 2 薄了 40%'
+  },
+  '右透镜模组': {
+    name: '透镜模组 (Lens Module)',
+    material: 'Pancake 光学透镜 + 塑料外壳',
+    weight: '约 30g/个',
+    function: '将显示屏图像投射到用户眼中',
+    specs: '屈光度调节范围 ±50°，FOV 110°',
+    funFact: '每个透镜模组是独立可调的！'
+  },
+  '左摄像头': {
+    name: '彩色摄像头 (Color Camera)',
+    material: '玻璃镜片 + 金属外壳',
+    weight: '约 8g',
+    function: '彩色透视 Mixed Reality',
+    specs: '1000万像素，RGB 传感器',
+    funFact: '比 Quest 2 的黑白摄像头体验提升巨大！'
+  },
+  '右摄像头': {
+    name: '彩色摄像头 (Color Camera)',
+    material: '玻璃镜片 + 金属外壳',
+    weight: '约 8g',
+    function: '彩色透视 Mixed Reality',
+    specs: '1000万像素，RGB 传感器',
+    funFact: '左右摄像头协同工作，创建立体深度'
+  },
+  '中置摄像头': {
+    name: 'ToF 深度传感器',
+    material: '红外传感器',
+    weight: '约 3g',
+    function: '深度感知，空间映射',
+    specs: 'Time-of-Flight 传感器',
+    funFact: '帮助 Quest 3 理解房间的 3D 结构'
+  },
+  '下置追踪摄像头': {
+    name: '红外追踪摄像头',
+    material: '红外镜头',
+    weight: '约 3g',
+    function: '6DoF 头部追踪',
+    specs: '红外摄像头，追踪头显位置',
+    funFact: '即使在完全黑暗中也能追踪！'
+  },
+  '左头带臂': {
+    name: '头带臂 (Strap Arm)',
+    material: '增强塑料',
+    weight: '约 15g/个',
+    function: '连接主机身和头带',
+    specs: '可调节角度，适配不同头型',
+    funFact: '支持快速拆装'
+  },
+  '右头带臂': {
+    name: '头带臂 (Strap Arm)',
+    material: '增强塑料',
+    weight: '约 15g/个',
+    function: '连接主机身和头带',
+    specs: '可调节角度，适配不同头型',
+    funFact: '与左头带臂对称设计'
+  },
+  '头带': {
+    name: '柔性头带 (Flexible Strap)',
+    material: '可拉伸硅胶/塑料混合',
+    weight: '约 35g',
+    function: '固定头显，分散重量',
+    specs: '魔术贴可调节，适配不同头围',
+    funFact: '绕到后脑勺偏下位置最舒适'
+  },
+  '面罩海绵': {
+    name: '面罩海绵 (Face Interface)',
+    material: '记忆海绵 + 磁性可更换',
+    weight: '约 25g',
+    function: '遮光、缓冲、舒适佩戴',
+    specs: '4 种厚度可选（2/4/6/8mm）',
+    funFact: '记忆海绵会根据你的脸型塑形'
+  },
+  '主板/显示屏': {
+    name: '主板与显示屏 (Motherboard & Display)',
+    material: '绿色 PCB + LCD 面板',
+    weight: '约 120g',
+    function: '运行系统，显示图像',
+    specs: 'XR2 Gen 2 + Adreno 740 + 8GB RAM',
+    funFact: '显示屏在主板后面，你看到的是透过透镜的像！'
+  }
+};
