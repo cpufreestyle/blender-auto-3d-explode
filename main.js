@@ -13,6 +13,16 @@ async function loadGLTFLoader() {
   return GLTFLoader;
 }
 
+// 动态导入 STLLoader
+let STLLoader = null;
+async function loadSTLLoader() {
+  if (!STLLoader) {
+    const module = await import('./vendor/STLLoader.js');
+    STLLoader = module.STLLoader;
+  }
+  return STLLoader;
+}
+
 // ===== WebGL 支持检测 =====
 try {
   const canvas = document.createElement('canvas');
@@ -479,21 +489,1187 @@ scene.add(customModelGroup);
 let customModelParts = []; // 存储自定义模型的部件
 let hasCustomModel = false;
 
-// 从物体的包围盒中心计算爆炸方向
-function computeExplodeDirection(mesh, groupCenter) {
-  const worldPos = new THREE.Vector3();
-  mesh.getWorldPosition(worldPos);
-  const dir = worldPos.clone().sub(groupCenter).normalize();
-  const dist = worldPos.distanceTo(groupCenter) * 2.5;
-  return dir.multiplyScalar(dist);
+// ===== 模型自动拆分系统 =====
+
+// Union-Find 数据结构（用于连通分量分析）
+class UnionFind {
+  constructor(size) {
+    this.parent = new Int32Array(size);
+    for (let i = 0; i < size; i++) this.parent[i] = i;
+  }
+  find(x) {
+    while (this.parent[x] !== x) {
+      this.parent[x] = this.parent[this.parent[x]];
+      x = this.parent[x];
+    }
+    return x;
+  }
+  union(a, b) {
+    const ra = this.find(a), rb = this.find(b);
+    if (ra !== rb) this.parent[ra] = rb;
+  }
 }
 
-async function loadCustomModel(arrayBuffer, fileName) {
+// 从几何体中提取指定面，创建新的非索引几何体
+function extractFacesToGeometry(geometry, faceIndices) {
+  const pos = geometry.attributes.position;
+  const norm = geometry.attributes.normal;
+  const uv = geometry.attributes.uv;
+  const index = geometry.index;
+  const hasIndex = !!index;
+
+  const newPositions = [];
+  const newNormals = norm ? [] : null;
+  const newUVs = uv ? [] : null;
+
+  for (const f of faceIndices) {
+    for (let v = 0; v < 3; v++) {
+      const srcIdx = hasIndex ? index.getX(f * 3 + v) : f * 3 + v;
+      newPositions.push(pos.getX(srcIdx), pos.getY(srcIdx), pos.getZ(srcIdx));
+      if (norm) newNormals.push(norm.getX(srcIdx), norm.getY(srcIdx), norm.getZ(srcIdx));
+      if (uv) newUVs.push(uv.getX(srcIdx), uv.getY(srcIdx));
+    }
+  }
+
+  const newGeo = new THREE.BufferGeometry();
+  newGeo.setAttribute('position', new THREE.Float32BufferAttribute(newPositions, 3));
+  if (newNormals) newGeo.setAttribute('normal', new THREE.Float32BufferAttribute(newNormals, 3));
+  if (newUVs) newGeo.setAttribute('uv', new THREE.Float32BufferAttribute(newUVs, 2));
+  return newGeo;
+}
+
+// 按连通分量拆分几何体（将单个 mesh 拆成多个独立部件）
+function splitByConnectedComponents(geometry) {
+  const pos = geometry.attributes.position;
+  const index = geometry.index;
+  const vertexCount = pos.count;
+  if (vertexCount === 0) return [];
+
+  const uf = new UnionFind(vertexCount);
+
+  // 连接共享面的顶点
+  if (index) {
+    for (let i = 0; i < index.count; i += 3) {
+      uf.union(index.getX(i), index.getX(i + 1));
+      uf.union(index.getX(i + 1), index.getX(i + 2));
+      uf.union(index.getX(i + 2), index.getX(i));
+    }
+  } else {
+    for (let i = 0; i < vertexCount; i += 3) {
+      uf.union(i, i + 1);
+      uf.union(i + 1, i + 2);
+      uf.union(i + 2, i);
+    }
+  }
+
+  // 按根节点分组面
+  const componentFaces = new Map();
+  const faceCount = index ? index.count / 3 : vertexCount / 3;
+
+  for (let f = 0; f < faceCount; f++) {
+    const v0 = index ? index.getX(f * 3) : f * 3;
+    const root = uf.find(v0);
+    if (!componentFaces.has(root)) componentFaces.set(root, []);
+    componentFaces.get(root).push(f);
+  }
+
+  // 按面数降序排列，过滤太小的分量（< 12 个面）
+  const sorted = [...componentFaces.entries()]
+    .sort((a, b) => b[1].length - a[1].length)
+    .filter(([, faces]) => faces.length >= 12);
+
+  // 为每个分量创建新几何体
+  const results = [];
+  for (const [, faces] of sorted) {
+    const newGeo = extractFacesToGeometry(geometry, faces);
+    if (newGeo) results.push(newGeo);
+  }
+
+  // 如果有被过滤掉的小分量，合并成一个大分量
+  const smallFaces = [];
+  for (const [, faces] of [...componentFaces.entries()]
+    .sort((a, b) => b[1].length - a[1].length)
+    .filter(([, faces]) => faces.length < 12)) {
+    smallFaces.push(...faces);
+  }
+  if (smallFaces.length >= 3) {
+    const newGeo = extractFacesToGeometry(geometry, smallFaces);
+    if (newGeo) results.push(newGeo);
+  }
+
+  return results;
+}
+
+// 按材质组拆分
+function splitByMaterialGroups(geometry) {
+  if (!geometry.groups || geometry.groups.length <= 1) return [];
+  const index = geometry.index;
+  const results = [];
+
+  for (const group of geometry.groups) {
+    const faceStart = Math.floor(group.start / 3);
+    const faceCount = Math.floor(group.count / 3);
+    const faces = [];
+    for (let f = faceStart; f < faceStart + faceCount; f++) faces.push(f);
+    if (faces.length > 0) {
+      const newGeo = extractFacesToGeometry(geometry, faces);
+      if (newGeo) results.push({ geometry: newGeo, materialIndex: group.materialIndex || 0 });
+    }
+  }
+  return results;
+}
+
+// 空间切分（按包围盒最长轴均分）
+function splitSpatially(geometry, material, targetParts) {
+  const pos = geometry.attributes.position;
+  const box = new THREE.Box3().setFromBufferAttribute(pos);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+
+  const maxAxis = size.x >= size.y && size.x >= size.z ? 'x' : (size.y >= size.z ? 'y' : 'z');
+  const axisSize = size[maxAxis];
+  if (axisSize < 0.001) return [];
+
+  const getter = maxAxis === 'x' ? 'getX' : (maxAxis === 'y' ? 'getY' : 'getZ');
+  const index = geometry.index;
+  const faceCount = index ? index.count / 3 : pos.count / 3;
+  const results = [];
+
+  for (let i = 0; i < targetParts; i++) {
+    const minBound = box.min[maxAxis] + (i / targetParts) * axisSize;
+    const maxBound = box.min[maxAxis] + ((i + 1) / targetParts) * axisSize;
+    const faces = [];
+
+    for (let f = 0; f < faceCount; f++) {
+      const v0 = index ? index.getX(f * 3) : f * 3;
+      const val = pos[getter](v0);
+      if (val >= minBound && (i === targetParts - 1 ? val <= maxBound : val < maxBound)) {
+        faces.push(f);
+      }
+    }
+
+    if (faces.length >= 3) {
+      const newGeo = extractFacesToGeometry(geometry, faces);
+      if (newGeo) results.push(newGeo);
+    }
+  }
+  return results;
+}
+
+// 根据位置生成部件名称
+function generatePartName(index, position, bbox) {
+  const center = bbox.getCenter(new THREE.Vector3());
+  const dx = position.x - center.x;
+  const dy = position.y - center.y;
+  const dz = position.z - center.z;
+
+  const absX = Math.abs(dx), absY = Math.abs(dy), absZ = Math.abs(dz);
+  const maxAbs = Math.max(absX, absY, absZ);
+
+  let direction;
+  if (maxAbs < bbox.getSize(new THREE.Vector3()).length() * 0.05) {
+    direction = '中心';
+  } else if (absX === maxAbs) {
+    direction = dx > 0 ? '右侧' : '左侧';
+  } else if (absY === maxAbs) {
+    direction = dy > 0 ? '顶部' : '底部';
+  } else {
+    direction = dz > 0 ? '前方' : '后方';
+  }
+  return `部件${index + 1}·${direction}`;
+}
+
+// 自动拆分编排器：收集 mesh，按材质和连通分量准确拆分
+function autoSplitModel(model) {
+  // 第一步：收集所有 mesh 及其世界变换
+  const rawMeshes = [];
+  model.traverse((child) => {
+    if (child.isMesh && child.geometry && child.geometry.attributes.position) {
+      rawMeshes.push(child);
+    }
+  });
+
+  // 如果 mesh 数量 >= 2，直接使用原始 mesh（保持准确）
+  if (rawMeshes.length >= 2) {
+    return rawMeshes.map((mesh, i) => {
+      const name = mesh.name || mesh.userData.name || `部件${i + 1}`;
+      return { mesh, name, isOriginal: true };
+    });
+  }
+
+  // 只有一个 mesh 时，尝试按材质组或连通分量拆分（自然拆分，不强制）
+  const splitParts = [];
+  for (const mesh of rawMeshes) {
+    const geometry = mesh.geometry;
+    const material = mesh.material;
+
+    // 尝试材质组拆分（如果模型本身有多个材质组，说明设计上就是多部件）
+    const groupResults = splitByMaterialGroups(geometry);
+    if (groupResults.length >= 2) {
+      for (const gr of groupResults) {
+        const newMesh = new THREE.Mesh(gr.geometry, Array.isArray(material) ? (material[gr.materialIndex] || material[0]) : material);
+        newMesh.matrix.copy(mesh.matrixWorld);
+        newMesh.matrixAutoUpdate = false;
+        splitParts.push({ mesh: newMesh, name: '', isOriginal: false });
+      }
+      continue;
+    }
+
+    // 尝试连通分量拆分（检测物理上分离的部件）
+    const ccResults = splitByConnectedComponents(geometry);
+    if (ccResults.length >= 2) {
+      for (const ccGeo of ccResults) {
+        const newMesh = new THREE.Mesh(ccGeo, material);
+        newMesh.matrix.copy(mesh.matrixWorld);
+        newMesh.matrixAutoUpdate = false;
+        splitParts.push({ mesh: newMesh, name: '', isOriginal: false });
+      }
+      continue;
+    }
+
+    // 无法自然拆分，保留原始 mesh（不强制空间切分，保持准确）
+    splitParts.push({ mesh, name: mesh.name || '', isOriginal: true });
+  }
+
+  // 计算整体包围盒用于命名
+  const bbox = new THREE.Box3();
+  for (const part of splitParts) {
+    const partBox = new THREE.Box3().setFromObject(part.mesh);
+    bbox.union(partBox);
+  }
+
+  // 为拆分后的部件命名
+  return splitParts.map((part, i) => {
+    if (!part.name) {
+      const pos = new THREE.Vector3();
+      part.mesh.getWorldPosition(pos);
+      part.name = generatePartName(i, pos, bbox);
+    }
+    return part;
+  });
+}
+
+// 为自定义模型生成动态步骤
+function generateCustomStepGroups(customParts, fileName) {
+  const partCount = customParts.length;
+  // 步骤数：欢迎(1) + 部件分组 + 完成(1)，最多 8 步
+  const groupCount = Math.min(Math.max(Math.ceil(partCount / 3), 2), 6);
+
+  const groups = [];
+
+  // 步骤 0：欢迎
+  groups.push({
+    name: '👋 模型概览',
+    parts: [],
+    tools: [],
+    description: `已加载模型：<strong>${fileName}</strong><br><br>
+📦 检测到 <strong>${partCount}</strong> 个独立部件<br>
+🤖 已自动完成拆分分析<br><br>
+💡 点击"下一步"开始逐步拆解，或点击"爆炸视图"一键展开。`
+  });
+
+  // 按距离中心排序（外层先拆）
+  const sortedParts = [...customParts].sort((a, b) => {
+    const distA = (a.partCenter || a.homePos).length();
+    const distB = (b.partCenter || b.homePos).length();
+    return distB - distA; // 距离远的先拆
+  });
+
+  // 将部件分组到各步骤
+  const partsPerGroup = Math.ceil(partCount / groupCount);
+  for (let g = 0; g < groupCount; g++) {
+    const groupParts = sortedParts.slice(g * partsPerGroup, (g + 1) * partsPerGroup);
+    const partNames = groupParts.map(p => p.name);
+    groups.push({
+      name: `${g + 1}️⃣ 第 ${g + 1} 组部件`,
+      parts: partNames,
+      tools: ['🖱️ 鼠标拖拽旋转', '🔍 滚轮缩放观察'],
+      description: `正在拆解第 ${g + 1} 组（共 ${groupCount} 组）<br><br>
+📦 本组包含 ${groupParts.length} 个部件：<br>
+${partNames.map(n => `• ${n}`).join('<br>')}<br><br>
+💡 拖动旋转视角，仔细观察每个部件的细节。`
+    });
+  }
+
+  // 最后一步：完成
+  groups.push({
+    name: '🎉 拆解完成',
+    parts: [],
+    tools: [],
+    description: `拆解完成！共展示 ${partCount} 个部件。<br><br>
+💡 你可以：<br>
+• 点击"爆炸视图"重新展开<br>
+• 点击"重置"回到初始状态<br>
+• 拖动"爆炸深度"滑块控制展开程度<br>
+• 上传新的模型继续探索`
+  });
+
+  return groups;
+}
+
+// ===== Quest 3 原始 15 部位名称及归一化位置模板 =====
+// 基于 quest3_exploded_blender.py 中真实模型坐标计算
+// 坐标系: X=左右 Y=上下 Z=前后, 归一化到 [-1, 1]
+// 模型包围盒: X[-1.25,1.25] Y[-0.575,1.6] Z[-0.64,0.72]
+// 中心=(0, 0.5125, 0.04) 半幅=(1.25, 1.0875, 0.68)
+const QUEST3_PART_TEMPLATES = [
+  { name: '主机身',           pos: [ 0.00, -0.47, -0.06] },
+  { name: '前面板',           pos: [ 0.00, -0.47,  0.75] },
+  { name: '面罩海绵',         pos: [ 0.00, -0.47, -0.87] },
+  { name: '左透镜模组',       pos: [-0.42, -0.43, -0.24] },
+  { name: '右透镜模组',       pos: [ 0.42, -0.43, -0.24] },
+  { name: '左透镜',           pos: [-0.42, -0.43, -0.56] },
+  { name: '右透镜',           pos: [ 0.42, -0.43, -0.56] },
+  { name: '主板',             pos: [ 0.00, -0.43, -0.13] },
+  { name: '左摄像头',         pos: [-0.60, -0.31,  0.94] },
+  { name: '右摄像头',         pos: [ 0.60, -0.31,  0.94] },
+  { name: '中置摄像头',       pos: [ 0.00, -0.21,  0.94] },
+  { name: '下置追踪摄像头',   pos: [ 0.00, -0.79,  0.82] },
+  { name: '左头带臂',         pos: [-1.00, -0.47, -0.06] },
+  { name: '右头带臂',         pos: [ 1.00, -0.47, -0.06] },
+  { name: '头带',             pos: [ 0.00,  0.45, -0.59] },
+];
+
+/**
+ * 根据部件空间位置，将检测到的部件匹配到 Quest 3 原始 15 部位名称
+ * 使用贪心最近邻匹配算法：计算所有 部件-模板 对的加权距离，
+ * 按距离升序贪心分配，确保全局最优近似。
+ *
+ * @param {Array} parts  - customModelParts 数组，每个元素含 partCenter
+ * @param {THREE.Box3} modelBox - 已居中的模型包围盒
+ * @returns {string[]} 与 parts 等长的名称数组
+ */
+function assignQuest3PartNames(parts, modelBox) {
+  if (parts.length === 0) return [];
+
+  const size = modelBox.getSize(new THREE.Vector3());
+  const halfExtents = new THREE.Vector3(
+    Math.max(size.x / 2, 0.001),
+    Math.max(size.y / 2, 0.001),
+    Math.max(size.z / 2, 0.001)
+  );
+
+  // 将每个部件的中心位置归一化到 [-1, 1]
+  const normalizedCenters = parts.map(part => {
+    return new THREE.Vector3(
+      part.partCenter.x / halfExtents.x,
+      part.partCenter.y / halfExtents.y,
+      part.partCenter.z / halfExtents.z
+    );
+  });
+
+  // 计算所有 部件-模板 对的加权距离
+  const pairs = [];
+  for (let t = 0; t < QUEST3_PART_TEMPLATES.length; t++) {
+    const tpl = QUEST3_PART_TEMPLATES[t];
+    for (let p = 0; p < parts.length; p++) {
+      const nc = normalizedCenters[p];
+      const dx = nc.x - tpl.pos[0];
+      const dy = nc.y - tpl.pos[1];
+      const dz = nc.z - tpl.pos[2];
+      // 加权距离：X、Z 权重 1.0（左右/前后更可靠），Y 权重 0.7（高度可能因头带比例变化）
+      const dist = Math.sqrt(dx * dx + dy * dy * 0.7 + dz * dz);
+      pairs.push({ templateIdx: t, partIdx: p, dist });
+    }
+  }
+
+  // 按距离升序排列，贪心匹配
+  pairs.sort((a, b) => a.dist - b.dist);
+
+  const usedParts = new Set();
+  const usedTemplates = new Set();
+  const assignments = new Array(parts.length).fill(null);
+
+  for (const pair of pairs) {
+    if (usedParts.has(pair.partIdx) || usedTemplates.has(pair.templateIdx)) continue;
+    usedParts.add(pair.partIdx);
+    usedTemplates.add(pair.templateIdx);
+    assignments[pair.partIdx] = QUEST3_PART_TEMPLATES[pair.templateIdx].name;
+  }
+
+  // 未匹配到 Quest 3 模板的部件使用通用名称
+  let extraIdx = 1;
+  for (let i = 0; i < parts.length; i++) {
+    if (!assignments[i]) {
+      assignments[i] = `附加部件${extraIdx++}`;
+    }
+  }
+
+  console.log('🏷️ Quest 3 部件名称匹配结果:',
+    parts.map((p, i) => ({ name: assignments[i], center: p.partCenter.toArray().map(v => v.toFixed(2)) }))
+  );
+
+  return assignments;
+}
+
+/** 检查文件名是否包含 Quest 3（不区分大小写） */
+function isQuest3Model(fileName) {
+  const lower = (fileName || '').toLowerCase();
+  return lower.includes('quest 3') || lower.includes('quest3');
+}
+
+/**
+ * 合并多个 BufferGeometry 为一个（手动拼接 position/normal/uv 属性）
+ * @param {THREE.BufferGeometry[]} geometries
+ * @returns {THREE.BufferGeometry}
+ */
+function mergeGeometries(geometries) {
+  if (geometries.length === 0) return new THREE.BufferGeometry();
+  if (geometries.length === 1) return geometries[0].clone();
+
+  // 统一转为非索引几何体
+  const nonIndexed = geometries.map(g => g.index ? g.toNonIndexed() : g);
+
+  // 确定要合并的属性
+  const attrNames = ['position', 'normal', 'uv'];
+  const activeAttrs = attrNames.filter(name =>
+    nonIndexed.every(g => g.attributes[name])
+  );
+
+  // 计算总顶点数
+  let totalVerts = 0;
+  for (const g of nonIndexed) totalVerts += g.attributes.position.count;
+
+  const merged = new THREE.BufferGeometry();
+  for (const attrName of activeAttrs) {
+    const itemSize = nonIndexed[0].attributes[attrName].itemSize;
+    const array = new Float32Array(totalVerts * itemSize);
+    let offset = 0;
+    for (const g of nonIndexed) {
+      const data = g.attributes[attrName].array;
+      array.set(data, offset);
+      offset += data.length;
+    }
+    merged.setAttribute(attrName, new THREE.BufferAttribute(array, itemSize));
+  }
+
+  return merged;
+}
+
+/**
+ * 将拆解后的多个部件按 Quest 3 原始 15 部位模板聚类合并
+ * 把属于同一 Quest 3 区域的部件几何体合并为一个 mesh
+ *
+ * @param {Array} splitParts - autoSplitModel 返回的数组，每项含 mesh
+ * @param {THREE.Box3} modelBox - 已居中的模型包围盒
+ * @returns {Array} 合并后的 splitParts（最多 15 个），每项已含 Quest 3 名称
+ */
+function mergePartsToQuest3(splitParts, modelBox) {
+  if (splitParts.length === 0) return splitParts;
+
+  const size = modelBox.getSize(new THREE.Vector3());
+  const halfExtents = new THREE.Vector3(
+    Math.max(size.x / 2, 0.001),
+    Math.max(size.y / 2, 0.001),
+    Math.max(size.z / 2, 0.001)
+  );
+
+  // 为每个 splitPart 找最近的 Quest 3 模板
+  const groups = {}; // templateIdx -> [splitParts indices]
+  for (let p = 0; p < splitParts.length; p++) {
+    const mesh = splitParts[p].mesh;
+    mesh.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(mesh);
+    const center = box.getCenter(new THREE.Vector3());
+
+    // 归一化到 [-1, 1]
+    const nx = center.x / halfExtents.x;
+    const ny = center.y / halfExtents.y;
+    const nz = center.z / halfExtents.z;
+
+    let bestT = 0, bestDist = Infinity;
+    for (let t = 0; t < QUEST3_PART_TEMPLATES.length; t++) {
+      const tpl = QUEST3_PART_TEMPLATES[t];
+      const dx = nx - tpl.pos[0];
+      const dy = ny - tpl.pos[1];
+      const dz = nz - tpl.pos[2];
+      const dist = Math.sqrt(dx * dx + dy * dy * 0.7 + dz * dz);
+      if (dist < bestDist) { bestDist = dist; bestT = t; }
+    }
+
+    if (!groups[bestT]) groups[bestT] = [];
+    groups[bestT].push(p);
+  }
+
+  console.log(`🏷️ Quest 3 聚类: ${splitParts.length} 个部件 -> ${Object.keys(groups).length} 组`);
+
+  // 对每组合并几何体
+  const mergedParts = [];
+  for (const tStr of Object.keys(groups)) {
+    const t = parseInt(tStr);
+    const indices = groups[t];
+    const name = QUEST3_PART_TEMPLATES[t].name;
+
+    if (indices.length === 1) {
+      // 只有一个部件，直接使用
+      const part = splitParts[indices[0]];
+      part.name = name;
+      mergedParts.push(part);
+    } else {
+      // 合并多个几何体
+      const meshes = indices.map(i => splitParts[i].mesh);
+      const geometries = meshes.map(m => {
+        m.updateMatrixWorld(true);
+        const geo = m.geometry.clone();
+        geo.applyMatrix4(m.matrixWorld);
+        return geo;
+      });
+      const mergedGeo = mergeGeometries(geometries);
+      // 使用第一个 mesh 的材质
+      const firstMesh = meshes[0];
+      const material = Array.isArray(firstMesh.material) ? firstMesh.material[0] : firstMesh.material;
+      const newMesh = new THREE.Mesh(mergedGeo, material);
+      newMesh.position.set(0, 0, 0);
+      newMesh.rotation.set(0, 0, 0);
+      newMesh.scale.set(1, 1, 1);
+      newMesh.matrixAutoUpdate = true;
+      newMesh.matrix.identity();
+      newMesh.castShadow = true;
+      newMesh.receiveShadow = true;
+      newMesh.name = name;
+      newMesh.userData = { name };
+      mergedParts.push({ mesh: newMesh, name, isOriginal: false });
+    }
+  }
+
+  return mergedParts;
+}
+
+/**
+ * 直接将模型几何体按面分配到 Quest 3 原始 15 个区域
+ * 不经过"先拆后合"，而是对每个三角面计算其归一化中心，
+ * 分配到最近的 Quest 3 模板区域，保证 15 个部位都有几何体。
+ *
+ * @param {THREE.Group} model - gltf.scene
+ * @returns {Array} splitParts 数组，恰好 15 个（跳过完全空的）
+ */
+function splitModelToQuest3Regions(model) {
+  // 1. 收集所有 mesh，烘焙世界变换到几何体
+  const allGeometries = [];
+  const allMaterials = [];
+  model.traverse((child) => {
+    if (child.isMesh && child.geometry && child.geometry.attributes.position) {
+      child.updateMatrixWorld(true);
+      const geo = child.geometry.clone();
+      geo.applyMatrix4(child.matrixWorld);
+      allGeometries.push(geo);
+      const mat = Array.isArray(child.material) ? child.material[0] : child.material;
+      allMaterials.push(mat);
+    }
+  });
+
+  if (allGeometries.length === 0) return [];
+
+  // 2. 计算整体包围盒，用于归一化
+  const bbox = new THREE.Box3();
+  for (const geo of allGeometries) {
+    geo.computeBoundingBox();
+    bbox.union(geo.boundingBox);
+  }
+  const center = bbox.getCenter(new THREE.Vector3());
+  const size = bbox.getSize(new THREE.Vector3());
+  const halfExtents = new THREE.Vector3(
+    Math.max(size.x / 2, 0.001),
+    Math.max(size.y / 2, 0.001),
+    Math.max(size.z / 2, 0.001)
+  );
+
+  // 3. 居中所有几何体
+  for (const geo of allGeometries) {
+    geo.translate(-center.x, -center.y, -center.z);
+  }
+
+  // 4. 为每个面分配到最近的 Quest 3 模板
+  //    templateIdx -> [{geo, faces}]
+  const templateFaces = Array.from({ length: QUEST3_PART_TEMPLATES.length }, () => ({
+    faces: [],
+    material: null,
+  }));
+
+  const tmpCenter = new THREE.Vector3();
+  const tmpV = new THREE.Vector3();
+
+  for (let gi = 0; gi < allGeometries.length; gi++) {
+    const geo = allGeometries[gi];
+    const pos = geo.attributes.position;
+    const index = geo.index;
+    const faceCount = index ? index.count / 3 : pos.count / 3;
+
+    for (let f = 0; f < faceCount; f++) {
+      // 计算三角面中心的归一化坐标
+      tmpCenter.set(0, 0, 0);
+      for (let v = 0; v < 3; v++) {
+        const srcIdx = index ? index.getX(f * 3 + v) : f * 3 + v;
+        tmpV.fromBufferAttribute(pos, srcIdx);
+        tmpCenter.add(tmpV);
+      }
+      tmpCenter.divideScalar(3);
+
+      const nx = tmpCenter.x / halfExtents.x;
+      const ny = tmpCenter.y / halfExtents.y;
+      const nz = tmpCenter.z / halfExtents.z;
+
+      // 找最近的 Quest 3 模板
+      let bestT = 0, bestDist = Infinity;
+      for (let t = 0; t < QUEST3_PART_TEMPLATES.length; t++) {
+        const tpl = QUEST3_PART_TEMPLATES[t];
+        const dx = nx - tpl.pos[0];
+        const dy = ny - tpl.pos[1];
+        const dz = nz - tpl.pos[2];
+        const dist = Math.sqrt(dx * dx + dy * dy * 0.7 + dz * dz);
+        if (dist < bestDist) { bestDist = dist; bestT = t; }
+      }
+
+      templateFaces[bestT].faces.push({ geoIndex: gi, faceIndex: f, nx, ny, nz });
+      if (!templateFaces[bestT].material) {
+        templateFaces[bestT].material = allMaterials[gi];
+      }
+    }
+  }
+
+  // 4.5. 面重分配：对于没有分配到任何面的空模板，
+  //      从最近的已占用模板中「借取」距离空模板最近的面。
+  //      这解决了透镜/透镜模组、主板/主机身等位置过近导致的面被「抢走」问题。
+  for (let t = 0; t < QUEST3_PART_TEMPLATES.length; t++) {
+    if (templateFaces[t].faces.length > 0) continue;
+
+    const emptyPos = QUEST3_PART_TEMPLATES[t].pos;
+
+    // 找到距离空模板最近的已占用模板
+    let bestSourceT = -1, bestSourceDist = Infinity;
+    for (let s = 0; s < QUEST3_PART_TEMPLATES.length; s++) {
+      if (s === t || templateFaces[s].faces.length === 0) continue;
+      const sPos = QUEST3_PART_TEMPLATES[s].pos;
+      const dx = emptyPos[0] - sPos[0];
+      const dy = emptyPos[1] - sPos[1];
+      const dz = emptyPos[2] - sPos[2];
+      const dist = Math.sqrt(dx * dx + dy * dy * 0.7 + dz * dz);
+      if (dist < bestSourceDist) { bestSourceDist = dist; bestSourceT = s; }
+    }
+
+    if (bestSourceT === -1) continue;
+
+    // 按到空模板的距离升序排列源模板的所有面
+    const sourceFaces = templateFaces[bestSourceT].faces;
+    sourceFaces.sort((a, b) => {
+      const da = Math.sqrt(
+        (a.nx - emptyPos[0]) ** 2 +
+        (a.ny - emptyPos[1]) ** 2 * 0.7 +
+        (a.nz - emptyPos[2]) ** 2
+      );
+      const db = Math.sqrt(
+        (b.nx - emptyPos[0]) ** 2 +
+        (b.ny - emptyPos[1]) ** 2 * 0.7 +
+        (b.nz - emptyPos[2]) ** 2
+      );
+      return da - db;
+    });
+
+    // 借取最近的 15% 面（至少 5 个，最多 50%）
+    const stealCount = Math.max(
+      5,
+      Math.min(Math.floor(sourceFaces.length * 0.15), Math.floor(sourceFaces.length * 0.5))
+    );
+    const stolenFaces = sourceFaces.splice(0, stealCount);
+    templateFaces[t].faces = stolenFaces;
+    if (!templateFaces[t].material && templateFaces[bestSourceT].material) {
+      templateFaces[t].material = templateFaces[bestSourceT].material;
+    }
+
+    console.log(`🔄 面重分配: "${QUEST3_PART_TEMPLATES[t].name}" 从 "${QUEST3_PART_TEMPLATES[bestSourceT].name}" 借取 ${stealCount} 个面`);
+  }
+
+  // 5. 为每个模板创建 mesh
+  const splitParts = [];
+  for (let t = 0; t < QUEST3_PART_TEMPLATES.length; t++) {
+    const tf = templateFaces[t];
+    if (tf.faces.length === 0) continue;
+
+    const name = QUEST3_PART_TEMPLATES[t].name;
+
+    // 收集属于这个模板的所有面，按源几何体分组
+    const byGeo = new Map();
+    for (const { geoIndex, faceIndex } of tf.faces) {
+      if (!byGeo.has(geoIndex)) byGeo.set(geoIndex, []);
+      byGeo.get(geoIndex).push(faceIndex);
+    }
+
+    // 提取面到新几何体
+    const geometries = [];
+    for (const [gi, faceIndices] of byGeo) {
+      const srcGeo = allGeometries[gi];
+      const newGeo = extractFacesToGeometry(srcGeo, faceIndices);
+      if (newGeo && newGeo.attributes.position.count > 0) {
+        geometries.push(newGeo);
+      }
+    }
+
+    if (geometries.length === 0) continue;
+
+    const mergedGeo = geometries.length === 1 ? geometries[0] : mergeGeometries(geometries);
+    const material = tf.material || new THREE.MeshStandardMaterial({ color: 0x888888 });
+    const mesh = new THREE.Mesh(mergedGeo, material);
+    mesh.position.set(0, 0, 0);
+    mesh.rotation.set(0, 0, 0);
+    mesh.scale.set(1, 1, 1);
+    mesh.matrixAutoUpdate = true;
+    mesh.matrix.identity();
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.name = name;
+    mesh.userData = { name };
+
+    splitParts.push({ mesh, name, isOriginal: false });
+  }
+
+  console.log(`🏷️ Quest 3 区域切割: ${splitParts.length} 个部件`);
+  return splitParts;
+}
+
+// ===== STL 模型加载 =====
+async function loadSTLModel(arrayBuffer, fileName) {
   try {
+    showStatus('📦 正在解析 STL 模型...', 'info');
+
+    const STLLoaderClass = await loadSTLLoader();
+    const loader = new STLLoaderClass();
+    const geometry = loader.parse(arrayBuffer);
+
+    // 清除之前的自定义模型
+    while (customModelGroup.children.length > 0) {
+      customModelGroup.remove(customModelGroup.children[0]);
+    }
+    customModelParts = [];
+    customModelGroup.scale.set(1, 1, 1);
+    customModelGroup.position.set(0, 0, 0);
+
+    // 居中几何体
+    geometry.computeBoundingBox();
+    const box = geometry.boundingBox;
+    const center = box.getCenter(new THREE.Vector3());
+    geometry.translate(-center.x, -center.y, -center.z);
+
+    // 计算缩放使模型适配视图
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const scale = maxDim > 0 ? 2.0 / maxDim : 1.0;
+    geometry.scale(scale, scale, scale);
+
+    // 创建材质和 mesh
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x808080,
+      metalness: 0.3,
+      roughness: 0.7,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.name = fileName;
+
+    // 计算部件中心和爆炸方向
+    const partBox = new THREE.Box3().setFromObject(mesh);
+    const partCenter = partBox.getCenter(new THREE.Vector3());
+
+    customModelParts.push({
+      mesh,
+      homePos: new THREE.Vector3(0, 0, 0),
+      explodePos: new THREE.Vector3(0, 2, 0),
+      homeRot: new THREE.Euler(0, 0, 0),
+      explodeRot: new THREE.Euler(0, 0, 0),
+      name: fileName, // 稍后由命名步骤覆盖
+      partCenter: partCenter.clone(),
+      stepIndex: 1,
+    });
+
+    customModelGroup.add(mesh);
+
+    // ========== 命名 ==========
+    if (isQuest3Model(fileName)) {
+      // Quest 3 模型：使用 Quest 3 原始部位名称
+      const stlBox = new THREE.Box3().setFromObject(mesh);
+      const stlNames = assignQuest3PartNames(customModelParts, stlBox);
+      customModelParts[0].name = stlNames[0];
+      customModelParts[0].mesh.userData = { name: stlNames[0] };
+      customModelParts[0].mesh.name = stlNames[0];
+    } else {
+      // 非 Quest 3 模型：使用文件名
+      customModelParts[0].name = fileName;
+      customModelParts[0].mesh.userData = { name: fileName };
+      customModelParts[0].mesh.name = fileName;
+    }
+
+    // 隐藏默认模型，显示自定义模型
+    questGroup.visible = false;
+    customModelGroup.visible = true;
+    hasCustomModel = true;
+
+    // 生成动态步骤
+    stepGroups = generateCustomStepGroups(customModelParts, fileName);
+    totalSteps = stepGroups.length;
+    currentStep = 0;
+    displayedStep = 0;
+    animatingStep = 0;
+
+    // 更新 UI
+    updateCustomModelUI(1, fileName);
+    if (typeof updateStepUI === 'function') updateStepUI();
+    showStatus('✅ STL 模型加载完成（单部件）\n💡 提示: 启动 Blender 后端可获得自动拆解', 'success');
+
+    // ========== 自动放大微小的模型 ==========
+    const autoBox = new THREE.Box3().setFromObject(customModelGroup);
+    const autoSize = new THREE.Vector3();
+    autoBox.getSize(autoSize);
+    const autoMaxDim = Math.max(autoSize.x, autoSize.y, autoSize.z);
+
+    let autoScale = 1.0;
+    if (autoMaxDim < 5.0 && autoMaxDim > 0.001) {
+      autoScale = 10.0 / autoMaxDim;
+      autoScale = Math.min(autoScale, 20);
+    }
+
+    if (autoScale > 1.0) {
+      customModelGroup.scale.set(autoScale, autoScale, autoScale);
+      console.log(`🔍 STL 模型自动放大 ${autoScale.toFixed(1)} 倍`);
+    }
+
+    // 自动适配相机
+    fitCameraToModel(customModelGroup, false);
+
+    // 自动开启爆炸模式
+    goToStep(totalSteps);
+    isExploded = true;
+    if (typeof explodeBtn !== 'undefined') {
+      explodeBtn.classList.add('exploded');
+      explodeBtn.textContent = '🔄 合体';
+    }
+
+    console.log(`✅ STL 模型加载完成：${fileName}`);
+
+  } catch (err) {
+    console.error('STL 加载错误:', err);
+    showStatus(`❌ STL 加载失败: ${err.message}`, 'error');
+  }
+}
+
+// ===== URDF 模型加载 =====
+async function loadURDFModel(urdfText, fileName) {
+  try {
+    showStatus('🔍 正在解析 URDF 结构...', 'info');
+
+    // 解析 URDF XML
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(urdfText, 'text/xml');
+    const parseError = doc.querySelector('parsererror');
+    if (parseError) {
+      throw new Error('URDF XML 解析错误');
+    }
+
+    // 提取所有 links
+    const linkEls = doc.querySelectorAll('link');
+    if (linkEls.length === 0) {
+      throw new Error('URDF 中未找到任何 link');
+    }
+
+    // 提取所有 joints（建立父子关系）
+    const jointEls = doc.querySelectorAll('joint');
+    const jointMap = {}; // child_link_name -> joint info
+    jointEls.forEach(joint => {
+      const jointType = joint.getAttribute('type') || 'fixed';
+      const parent = joint.querySelector('parent')?.getAttribute('link');
+      const child = joint.querySelector('child')?.getAttribute('link');
+      const origin = joint.querySelector('origin');
+      const originXYZ = origin?.getAttribute('xyz')?.trim().split(/\s+/).map(parseFloat) || [0, 0, 0];
+      const originRPY = origin?.getAttribute('rpy')?.trim().split(/\s+/).map(parseFloat) || [0, 0, 0];
+      const jointName = joint.getAttribute('name') || 'joint';
+      if (child) {
+        jointMap[child] = { parent, child, type: jointType, xyz: originXYZ, rpy: originRPY, name: jointName };
+      }
+    });
+
+    // ── 辅助函数：从 xyz + rpy 构建 4×4 变换矩阵 ──
+    function makeTransform(xyz, rpy) {
+      const m = new THREE.Matrix4();
+      const pos = new THREE.Vector3(xyz[0], xyz[1], xyz[2]);
+      const euler = new THREE.Euler(rpy[0], rpy[1], rpy[2], 'ZYX');
+      const quat = new THREE.Quaternion().setFromEuler(euler);
+      m.compose(pos, quat, new THREE.Vector3(1, 1, 1));
+      return m;
+    }
+
+    // ── 递归计算每个 link 的世界变换矩阵 ──
+    const linkWorldMatrix = {};
+    function computeLinkWorldMatrix(linkName) {
+      if (linkWorldMatrix[linkName]) return linkWorldMatrix[linkName];
+      if (!jointMap[linkName]) {
+        linkWorldMatrix[linkName] = new THREE.Matrix4();
+        return linkWorldMatrix[linkName];
+      }
+      const joint = jointMap[linkName];
+      const parentWorld = computeLinkWorldMatrix(joint.parent);
+      const jointTransform = makeTransform(joint.xyz, joint.rpy);
+      const world = new THREE.Matrix4().multiplyMatrices(parentWorld, jointTransform);
+      linkWorldMatrix[linkName] = world;
+      return world;
+    }
+
+    // 预计算所有 link 的世界变换
+    linkEls.forEach(linkEl => {
+      const name = linkEl.getAttribute('name');
+      if (name) computeLinkWorldMatrix(name);
+    });
+
+    // 清除之前的自定义模型
+    while (customModelGroup.children.length > 0) {
+      customModelGroup.remove(customModelGroup.children[0]);
+    }
+    customModelParts = [];
+    customModelGroup.scale.set(1, 1, 1);
+    customModelGroup.position.set(0, 0, 0);
+
+    // ── 为每个 link 创建 mesh，变换烘焙到几何体 ──
+    const splitParts = [];
+    let partIndex = 0;
+
+    linkEls.forEach(linkEl => {
+      const linkName = linkEl.getAttribute('name') || `link_${partIndex}`;
+
+      // 获取 visual geometry 信息
+      const visual = linkEl.querySelector('visual');
+      const geometryEl = visual?.querySelector('geometry');
+      const meshEl = geometryEl?.querySelector('mesh');
+      const meshFile = meshEl?.getAttribute('filename') || '';
+
+      // 获取 visual origin
+      const visOrigin = visual?.querySelector('origin');
+      const visXYZ = visOrigin?.getAttribute('xyz')?.trim().split(/\s+/).map(parseFloat) || [0, 0, 0];
+      const visRPY = visOrigin?.getAttribute('rpy')?.trim().split(/\s+/).map(parseFloat) || [0, 0, 0];
+
+      // 获取 box/cylinder/sphere 尺寸
+      const boxEl = geometryEl?.querySelector('box');
+      const cylEl = geometryEl?.querySelector('cylinder');
+      const sphereEl = geometryEl?.querySelector('sphere');
+
+      // 创建几何体
+      let geometry;
+      if (boxEl) {
+        const size = boxEl.getAttribute('size')?.trim().split(/\s+/).map(parseFloat) || [0.1, 0.1, 0.1];
+        geometry = new THREE.BoxGeometry(size[0] || 0.1, size[1] || 0.1, size[2] || 0.1);
+      } else if (cylEl) {
+        const radius = parseFloat(cylEl.getAttribute('radius')) || 0.05;
+        const length = parseFloat(cylEl.getAttribute('length')) || 0.1;
+        geometry = new THREE.CylinderGeometry(radius, radius, length, 32);
+        geometry.rotateX(Math.PI / 2); // URDF 圆柱沿 Z 轴
+      } else if (sphereEl) {
+        const radius = parseFloat(sphereEl.getAttribute('radius')) || 0.05;
+        geometry = new THREE.SphereGeometry(radius, 32, 24);
+      } else {
+        geometry = new THREE.BoxGeometry(0.08, 0.08, 0.08);
+      }
+
+      // 计算 visual 的世界变换矩阵 = link世界 × visual origin
+      const linkWorld = linkWorldMatrix[linkName] || new THREE.Matrix4();
+      const visLocal = makeTransform(visXYZ, visRPY);
+      const visWorld = new THREE.Matrix4().multiplyMatrices(linkWorld, visLocal);
+
+      // 烘焙世界变换到几何体（与 GLB 一致）
+      geometry.applyMatrix4(visWorld);
+
+      // 创建材质
+      const hue = (partIndex * 137.5) % 360;
+      const color = new THREE.Color().setHSL(hue / 360, 0.6, 0.5);
+      const material = new THREE.MeshStandardMaterial({
+        color,
+        metalness: 0.3,
+        roughness: 0.6,
+      });
+
+      // mesh 归零（变换已烘焙到几何体）
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(0, 0, 0);
+      mesh.rotation.set(0, 0, 0);
+      mesh.scale.set(1, 1, 1);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.name = linkName;
+      mesh.userData = { name: linkName, isURDF: true, meshFile };
+
+      splitParts.push({ mesh, name: linkName, isOriginal: true });
+      partIndex++;
+    });
+
+    // ========== 计算模型中心，将几何体居中 ==========
+    const modelBox = new THREE.Box3();
+    for (const part of splitParts) {
+      const partBox = new THREE.Box3().setFromObject(part.mesh);
+      modelBox.union(partBox);
+    }
+    const modelCenter = modelBox.getCenter(new THREE.Vector3());
+
+    for (const part of splitParts) {
+      part.mesh.geometry.translate(-modelCenter.x, -modelCenter.y, -modelCenter.z);
+    }
+
+    // ========== Quest 3 模型：按 15 部位聚类合并 ==========
+    const isQ3URDF = isQuest3Model(fileName);
+    if (isQ3URDF && splitParts.length > 15) {
+      showStatus('🔧 Quest 3 模型：按 15 部位聚类合并...', 'info');
+      const merged = mergePartsToQuest3(splitParts, modelBox);
+      splitParts.length = 0;
+      splitParts.push(...merged);
+      console.log(`✅ Quest 3 URDF 合并完成：${splitParts.length} 个部件`);
+    }
+
+    // ========== 创建部件数据 ==========
+    for (let i = 0; i < splitParts.length; i++) {
+      const mesh = splitParts[i].mesh;
+
+      // 计算部件中心（相对于模型中心，即原点）
+      const partBox = new THREE.Box3().setFromObject(mesh);
+      const partCenter = partBox.getCenter(new THREE.Vector3());
+
+      // 爆炸方向：从模型中心指向部件中心
+      let explodeDir;
+      const distFromCenter = partCenter.length();
+      if (distFromCenter < 0.001) {
+        const angle = (i / splitParts.length) * Math.PI * 2;
+        explodeDir = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0);
+      } else {
+        explodeDir = partCenter.clone().normalize();
+      }
+
+      const initialDist = Math.max(distFromCenter * 3, 1.0);
+      const explodePos = explodeDir.multiplyScalar(initialDist);
+
+      customModelParts.push({
+        mesh,
+        homePos: new THREE.Vector3(0, 0, 0),
+        explodePos,
+        homeRot: new THREE.Euler(0, 0, 0),
+        explodeRot: new THREE.Euler(0, 0, 0),
+        name: splitParts[i].name,
+        partCenter: partCenter.clone(),
+        stepIndex: 1,
+      });
+
+      customModelGroup.add(mesh);
+    }
+
+    // ========== 按距离中心排序（外层先拆）==========
+    customModelParts.sort((a, b) => b.partCenter.length() - a.partCenter.length());
+
+    // ========== 分配步骤索引 ==========
+    const partCount = customModelParts.length;
+    const groupCount = Math.min(Math.max(Math.ceil(partCount / 3), 2), 6);
+    const partsPerGroup = Math.ceil(partCount / groupCount);
+
+    // 重新计算包围盒（已居中）
+    const centeredBoxURDF = new THREE.Box3();
+    for (const part of customModelParts) {
+      centeredBoxURDF.union(new THREE.Box3().setFromObject(part.mesh));
+    }
+
+    // ========== 命名 ==========
+    if (isQ3URDF) {
+      // Quest 3 模型：使用 Quest 3 原始 15 部位名称
+      const quest3NamesURDF = assignQuest3PartNames(customModelParts, centeredBoxURDF);
+      customModelParts.forEach((part, i) => {
+        part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
+        part.name = quest3NamesURDF[i];
+        part.mesh.userData = { name: part.name, isURDF: true };
+        part.mesh.name = part.name;
+      });
+    } else {
+      // 非 Quest 3 模型：使用 URDF link 原始名称
+      customModelParts.forEach((part, i) => {
+        part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
+        part.mesh.userData = { name: part.name, isURDF: true };
+        part.mesh.name = part.name;
+      });
+    }
+
+    hasCustomModel = true;
+
+    // 隐藏默认模型
+    questGroup.visible = false;
+    customModelGroup.visible = true;
+
+    // 生成动态步骤
+    stepGroups = generateCustomStepGroups(customModelParts, fileName);
+    totalSteps = stepGroups.length;
+    currentStep = 0;
+    displayedStep = 0;
+    animatingStep = 0;
+
+    // 更新 UI
+    updateCustomModelUI(partCount, fileName);
+    updateStepUI();
+
+    const meshNote = partCount > 0 && splitParts[0]?.mesh?.userData?.meshFile
+      ? `\n⚠️ 注意: URDF 引用的 mesh 文件 (${splitParts[0].mesh.userData.meshFile}) 需单独上传\n当前使用占位几何体`
+      : '';
+    showStatus(`✅ URDF 解析完成：${partCount} 个 link（部件）${meshNote}`, 'success');
+
+    // ========== 自动放大微小的模型 ==========
+    const autoBox = new THREE.Box3().setFromObject(customModelGroup);
+    const autoSize = new THREE.Vector3();
+    autoBox.getSize(autoSize);
+    const autoMaxDim = Math.max(autoSize.x, autoSize.y, autoSize.z);
+
+    let autoScale = 1.0;
+    if (autoMaxDim < 5.0 && autoMaxDim > 0.001) {
+      autoScale = 10.0 / autoMaxDim;
+      autoScale = Math.min(autoScale, 20);
+    }
+
+    if (autoScale > 1.0) {
+      customModelGroup.scale.set(autoScale, autoScale, autoScale);
+      console.log(`🔍 URDF 模型自动放大 ${autoScale.toFixed(1)} 倍`);
+    }
+
+    // 自动适配相机
+    fitCameraToModel(customModelGroup, false);
+
+    // ========== 智能调整爆炸距离 ==========
+    requestAnimationFrame(() => {
+      const groupScale = customModelGroup.scale.x || 1;
+      for (let i = 0; i < customModelParts.length; i++) {
+        const part = customModelParts[i];
+        let explodeDir = part.explodePos.clone();
+        if (explodeDir.length() < 0.001) {
+          explodeDir = part.partCenter.clone();
+          if (explodeDir.length() < 0.001) {
+            const angle = (i / customModelParts.length) * Math.PI * 2;
+            explodeDir.set(Math.cos(angle), 0.5, Math.sin(angle));
+          }
+        }
+        explodeDir.normalize();
+        const smartDist = calculateSmartExplodeDist(customModelGroup, explodeDir);
+        part.explodePos.copy(explodeDir.multiplyScalar(smartDist / groupScale));
+      }
+      console.log('✅ URDF 爆炸距离已智能调整');
+    });
+
+    // 自动开启爆炸模式
+    goToStep(totalSteps);
+    isExploded = true;
+    explodeBtn.classList.add('exploded');
+    explodeBtn.textContent = '🔄 合体';
+
+    console.log(`✅ URDF 模型加载完成：${partCount} 个部件`);
+
+  } catch (err) {
+    console.error('URDF 加载错误:', err);
+    showStatus(`❌ URDF 解析失败: ${err.message}`, 'error');
+  }
+}
+
+async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
+  try {
+    const splitMethod = blenderManifest ? 'Blender CLI' : '前端 JS';
+    showStatus(`📦 正在解析模型（${splitMethod}）...`, 'info');
+
     const LoaderClass = await loadGLTFLoader();
     const loader = new LoaderClass();
-    const blob = new Blob([arrayBuffer]);
-    const url = URL.createObjectURL(blob);
 
     const gltf = await new Promise((resolve, reject) => {
       loader.parse(arrayBuffer, '', resolve, (err) => reject(new Error('解析失败：' + err.message)));
@@ -504,64 +1680,237 @@ async function loadCustomModel(arrayBuffer, fileName) {
       customModelGroup.remove(customModelGroup.children[0]);
     }
     customModelParts = [];
+    customModelGroup.scale.set(1, 1, 1);
+    customModelGroup.position.set(0, 0, 0);
 
     const model = gltf.scene;
+    model.updateMatrixWorld(true);
 
-    // 计算所有 mesh 的中心包围盒
-    const box = new THREE.Box3().setFromObject(model);
-    const center = box.getCenter(new THREE.Vector3());
+    const isQ3 = isQuest3Model(fileName);
 
-    // 遍历所有 Mesh
-    let partIndex = 0;
-    model.traverse((child) => {
-      if (child.isMesh) {
-        // 保存原始材质
-        const origMat = child.material;
+    // ========== 自动拆分 ==========
+    let splitParts;
+    if (isQ3 && !blenderManifest) {
+      // Quest 3 模型且无 Blender 清单（Blender 不可用时回退）：前端按 15 区域切割
+      showStatus('🔍 Quest 3 模型：前端按 15 部位区域切割...', 'info');
+      splitParts = splitModelToQuest3Regions(model);
+    } else {
+      showStatus('🔍 正在分析模型结构并自动拆分...', 'info');
+      splitParts = autoSplitModel(model);
+    }
 
-        // 计算爆炸方向
-        const worldPos = new THREE.Vector3();
-        child.getWorldPosition(worldPos);
-        const homePos = worldPos.clone().sub(center); // 相对于中心
-        const explodeDir = worldPos.clone().sub(center).normalize();
-        // 先计算原始爆炸距离，后面会智能调整
-        const originalDist = Math.max(worldPos.distanceTo(center) * 5, 0.5);
-        // 暂时使用原始距离，加载完成后会用智能计算更新
-        const explodePos = explodeDir.clone().multiplyScalar(originalDist);
+    if (splitParts.length === 0) {
+      throw new Error('模型中未找到可渲染的网格');
+    }
 
-        // 保存引用
-        child.userData = { name: `${fileName}_part${partIndex}` };
-        child.castShadow = true;
-        child.receiveShadow = true;
-
-        customModelParts.push({
-          mesh: child,
-          homePos,
-          explodePos,
-          homeRot: child.rotation.clone(),
-          explodeRot: child.rotation.clone(),
-          name: child.userData.name,
-        });
-
-        partIndex++;
+    // ========== 烘焙世界矩阵到几何体（非前端 Quest 3 路径需要）==========
+    if (!(isQ3 && !blenderManifest)) {
+      for (const part of splitParts) {
+        const mesh = part.mesh;
+        mesh.updateMatrixWorld(true);
+        mesh.geometry.applyMatrix4(mesh.matrixWorld);
+        mesh.position.set(0, 0, 0);
+        mesh.rotation.set(0, 0, 0);
+        mesh.scale.set(1, 1, 1);
+        mesh.matrixAutoUpdate = true;
+        mesh.matrix.identity();
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
       }
-    });
 
-    // 隐藏原始模型，用 group 代替
-    customModelGroup.position.copy(center);
-    model.position.sub(center); // 将模型中心移回 (0,0,0)
-    customModelGroup.add(model);
+      // 计算模型中心，将几何体居中
+      const modelBox = new THREE.Box3();
+      for (const part of splitParts) {
+        const partBox = new THREE.Box3().setFromObject(part.mesh);
+        modelBox.union(partBox);
+      }
+      const modelCenter = modelBox.getCenter(new THREE.Vector3());
+      for (const part of splitParts) {
+        part.mesh.geometry.translate(-modelCenter.x, -modelCenter.y, -modelCenter.z);
+      }
+    }
+
+    // ========== 创建部件数据 ==========
+    for (let i = 0; i < splitParts.length; i++) {
+      const mesh = splitParts[i].mesh;
+
+      // 计算部件中心（相对于模型中心，即原点）
+      const partBox = new THREE.Box3().setFromObject(mesh);
+      const partCenter = partBox.getCenter(new THREE.Vector3());
+
+      // 爆炸方向：从模型中心指向部件中心
+      let explodeDir;
+      const distFromCenter = partCenter.length();
+      if (distFromCenter < 0.001) {
+        // 部件在中心，随机分配一个方向
+        const angle = (i / splitParts.length) * Math.PI * 2;
+        explodeDir = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0);
+      } else {
+        explodeDir = partCenter.clone().normalize();
+      }
+
+      // 初始爆炸距离（后面会用智能计算调整）
+      const initialDist = Math.max(distFromCenter * 3, 1.0);
+      const explodePos = explodeDir.multiplyScalar(initialDist);
+
+      customModelParts.push({
+        mesh,
+        homePos: new THREE.Vector3(0, 0, 0),
+        explodePos,
+        homeRot: new THREE.Euler(0, 0, 0),
+        explodeRot: new THREE.Euler(0, 0, 0),
+        name: '', // 稍后分配
+        partCenter: partCenter.clone(),
+        stepIndex: 1,
+      });
+
+      customModelGroup.add(mesh);
+    }
+
+    // ========== 按距离中心排序（外层先拆）==========
+    // 如果有 Blender 清单，按清单顺序排列；否则按距离排序
+    if (blenderManifest && blenderManifest.parts) {
+      // 清单已按距离降序排列，直接使用清单顺序
+      const manifestOrder = blenderManifest.parts.map((p, idx) => ({ name: p.display_name || p.name, idx }));
+      // 按 manifest 顺序重排 customModelParts（根据 partCenter 匹配）
+      const used = new Set();
+      const reordered = [];
+      for (const mp of manifestOrder) {
+        // 用 center 匹配
+        const targetCenter = blenderManifest.parts[mp.idx].center;
+        let bestIdx = -1, bestDist = Infinity;
+        for (let i = 0; i < customModelParts.length; i++) {
+          if (used.has(i)) continue;
+          const d = customModelParts[i].partCenter.distanceTo(
+            new THREE.Vector3(targetCenter[0], targetCenter[1], targetCenter[2])
+          );
+          if (d < bestDist) { bestDist = d; bestIdx = i; }
+        }
+        if (bestIdx >= 0) {
+          used.add(bestIdx);
+          reordered.push(customModelParts[bestIdx]);
+        }
+      }
+      // 补充未匹配的
+      for (let i = 0; i < customModelParts.length; i++) {
+        if (!used.has(i)) reordered.push(customModelParts[i]);
+      }
+      customModelParts.length = 0;
+      customModelParts.push(...reordered);
+    } else {
+      customModelParts.sort((a, b) => b.partCenter.length() - a.partCenter.length());
+    }
+
+    // ========== 分配步骤索引和名称 ==========
+    const partCount = customModelParts.length;
+    const groupCount = Math.min(Math.max(Math.ceil(partCount / 3), 2), 6);
+    const partsPerGroup = Math.ceil(partCount / groupCount);
+
+    // 重新计算包围盒（已居中）
+    const centeredBox = new THREE.Box3();
+    for (const part of customModelParts) {
+      centeredBox.union(new THREE.Box3().setFromObject(part.mesh));
+    }
+
+    // ========== 命名 ==========
+    if (isQ3 && blenderManifest && blenderManifest.parts) {
+      // Quest 3 模型 + Blender 清单：使用 Blender 分配的名称
+      customModelParts.forEach((part, i) => {
+        part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
+        if (blenderManifest.parts[i]) {
+          part.name = blenderManifest.parts[i].display_name || blenderManifest.parts[i].name || `部件${i + 1}`;
+        }
+        part.mesh.userData = { name: part.name };
+        part.mesh.name = part.name;
+      });
+    } else if (isQ3) {
+      // Quest 3 模型 + 前端拆解：splitModelToQuest3Regions 已分配名称
+      customModelParts.forEach((part, i) => {
+        part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
+        const origName = splitParts.find(sp => sp.mesh === part.mesh)?.name;
+        if (origName) part.name = origName;
+        part.mesh.userData = { name: part.name };
+        part.mesh.name = part.name;
+      });
+    } else {
+      // 非 Quest 3 模型：Blender 清单名称 → GLB 原始名称 → 位置生成名称
+      customModelParts.forEach((part, i) => {
+        part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
+        if (blenderManifest && blenderManifest.parts && blenderManifest.parts[i]) {
+          part.name = blenderManifest.parts[i].display_name || blenderManifest.parts[i].name || `部件${i + 1}`;
+        } else {
+          const origName = splitParts.find(sp => sp.mesh === part.mesh)?.name;
+          if (origName && !origName.startsWith('部件')) {
+            part.name = origName;
+          } else {
+            part.name = generatePartName(i, part.partCenter, centeredBox);
+          }
+        }
+        part.mesh.userData = { name: part.name };
+        part.mesh.name = part.name;
+      });
+    }
 
     hasCustomModel = true;
 
-    // 隐藏默认模型，显示自定义模型
+    // 隐藏默认模型
     questGroup.visible = false;
-    console.log('✅ 已隐藏默认 Quest 3 模型，显示自定义模型');
 
-    URL.revokeObjectURL(url);
+    // ========== 生成动态步骤 ==========
+    stepGroups = generateCustomStepGroups(customModelParts, fileName);
+    totalSteps = stepGroups.length;
+
+    // 重置步骤状态
+    currentStep = 0;
+    displayedStep = 0;
+    animatingStep = 0;
 
     // 更新 UI
-    updateCustomModelUI(partIndex, fileName);
-    showStatus(`✅ 成功加载：${fileName}\n检测到 ${partIndex} 个独立部件`, 'success');
+    updateCustomModelUI(partCount, fileName);
+    updateStepUI();
+    showStatus(`✅ 成功加载：${fileName}\n自动拆分为 ${partCount} 个部件`, 'success');
+
+    // ========== 自动放大微小的模型 ==========
+    const autoBox = new THREE.Box3().setFromObject(customModelGroup);
+    const autoSize = new THREE.Vector3();
+    autoBox.getSize(autoSize);
+    const autoMaxDim = Math.max(autoSize.x, autoSize.y, autoSize.z);
+
+    let autoScale = 1.0;
+    if (autoMaxDim < 5.0) {
+      autoScale = 10.0 / autoMaxDim;
+      autoScale = Math.min(autoScale, 20);
+    }
+
+    if (autoScale > 1.0) {
+      customModelGroup.scale.set(autoScale, autoScale, autoScale);
+      console.log(`🔍 模型自动放大 ${autoScale.toFixed(1)} 倍`);
+    }
+
+    // 自动适配相机
+    fitCameraToModel(customModelGroup, false);
+
+    // ========== 智能调整爆炸距离 ==========
+    requestAnimationFrame(() => {
+      const groupScale = customModelGroup.scale.x || 1;
+      for (let i = 0; i < customModelParts.length; i++) {
+        const part = customModelParts[i];
+        // 防止零向量 normalize 产生 NaN
+        let explodeDir = part.explodePos.clone();
+        if (explodeDir.length() < 0.001) {
+          // 用 partCenter 方向替代
+          explodeDir = part.partCenter.clone();
+          if (explodeDir.length() < 0.001) {
+            const angle = (i / customModelParts.length) * Math.PI * 2;
+            explodeDir.set(Math.cos(angle), 0.5, Math.sin(angle));
+          }
+        }
+        explodeDir.normalize();
+        const smartDist = calculateSmartExplodeDist(customModelGroup, explodeDir);
+        part.explodePos.copy(explodeDir.multiplyScalar(smartDist / groupScale));
+      }
+      console.log('✅ 爆炸距离已智能调整');
+    });
 
     // 自动开启爆炸模式
     goToStep(totalSteps);
@@ -569,56 +1918,7 @@ async function loadCustomModel(arrayBuffer, fileName) {
     explodeBtn.classList.add('exploded');
     explodeBtn.textContent = '🔄 合体';
 
-    // ========== 自动放大微小的模型 ==========
-    // 计算包围盒
-    const autoBox = new THREE.Box3().setFromObject(customModelGroup);
-    const autoSize = new THREE.Vector3();
-    autoBox.getSize(autoSize);
-    const autoMaxDim = Math.max(autoSize.x, autoSize.y, autoSize.z);
-    const autoCenter = autoBox.getCenter(new THREE.Vector3());
-
-    // 计算需要放大多少倍，让模型最大尺寸约为 10 单位
-    let autoScale = 1.0;
-    if (autoMaxDim < 5.0) {
-      autoScale = 10.0 / autoMaxDim;
-      // 限制最大 20 倍，防止过大
-      autoScale = Math.min(autoScale, 20);
-    }
-
-    if (autoScale > 1.0) {
-      // 缩放模型组（几何体和局部位置会自动随之缩放，无需手动缩放 homePos）
-      customModelGroup.scale.set(autoScale, autoScale, autoScale);
-      // 调整位置：将放大后的模型中心移回原点
-      customModelGroup.position.sub(autoCenter.clone().multiplyScalar(autoScale));
-      console.log(`🔍 模型自动放大 ${autoScale.toFixed(1)} 倍（原始 ${autoMaxDim.toFixed(3)} → 放大后 ${(autoMaxDim * autoScale).toFixed(1)}）`);
-    }
-
-    // 自动适配相机
-    fitCameraToModel(customModelGroup, false);
-
-    // ========== 智能调整爆炸距离（确保不飞出屏幕）==========
-    // 等待一帧，确保相机和模型都已就位
-    requestAnimationFrame(() => {
-      // 组缩放因子：smartDist 是世界空间距离，需转换为局部空间距离
-      const groupScale = customModelGroup.scale.x || 1;
-      for (let i = 0; i < customModelParts.length; i++) {
-        const part = customModelParts[i];
-        const explodeDir = part.explodePos.clone().normalize();
-        // 计算智能爆炸距离（世界空间）
-        const smartDist = calculateSmartExplodeDist(customModelGroup, explodeDir);
-        // 转换为局部空间距离（因为 mesh.position 受 group.scale 影响）
-        part.explodePos.copy(explodeDir.multiplyScalar(smartDist / groupScale));
-      }
-      console.log('✅ 爆炸距离已智能调整（适应模型大小和相机位置）');
-    });
-
-    console.log(`✅ 自定义模型加载完成：${partIndex} 个部件`);
-    console.log('📊 customModelParts:', customModelParts);
-    console.log('🔍 第一个部件:', customModelParts[0]);
-    if (customModelParts[0]) {
-      console.log('   homePos:', customModelParts[0].homePos);
-      console.log('   explodePos:', customModelParts[0].explodePos);
-    }
+    console.log(`✅ 自定义模型加载完成：${partCount} 个部件（自动拆分，${groupCount} 个步骤组）`);
   } catch (err) {
     console.error('加载模型失败：', err);
     showStatus(`❌ 加载失败：${err.message}`, 'error');
@@ -637,6 +1937,15 @@ function updateCustomModelUI(partCount, fileName) {
 
   const clearBtn = document.getElementById('clear-model-btn');
   if (clearBtn) clearBtn.style.display = 'inline-block';
+
+  // 更新时间轴总数
+  const timelineTotalEl = document.getElementById('timeline-total');
+  if (timelineTotalEl) timelineTotalEl.textContent = totalSteps;
+
+  // 更新时间轴滑块范围
+  if (timelineSlider) {
+    timelineSlider.max = totalSteps;
+  }
 }
 
 function clearCustomModel() {
@@ -645,13 +1954,30 @@ function clearCustomModel() {
   }
   customModelParts = [];
   hasCustomModel = false;
+  customModelGroup.scale.set(1, 1, 1);
+  customModelGroup.position.set(0, 0, 0);
 
   // 恢复默认模型可见性
   questGroup.visible = true;
-  console.log('✅ 已恢复默认 Quest 3 模型');
 
+  // 恢复默认步骤系统
+  stepGroups = defaultStepGroups;
+  totalSteps = stepGroups.length;
+  currentStep = 0;
+  displayedStep = 0;
+  animatingStep = 0;
+
+  // 恢复 UI
   const countEl = document.getElementById('part-count');
   if (countEl) countEl.textContent = '15';
+
+  const timelineTotalEl = document.getElementById('timeline-total');
+  if (timelineTotalEl) timelineTotalEl.textContent = totalSteps;
+
+  if (timelineSlider) {
+    timelineSlider.max = totalSteps;
+    timelineSlider.value = 0;
+  }
 
   const clearBtn = document.getElementById('clear-model-btn');
   if (clearBtn) clearBtn.style.display = 'none';
@@ -662,7 +1988,34 @@ function clearCustomModel() {
     status.textContent = '';
   }
 
-  showStatus('已清除自定义模型', 'info');
+  const fileNameEl = document.getElementById('uploaded-file-name');
+  if (fileNameEl) fileNameEl.textContent = '';
+
+  // 重置爆炸状态
+  isExploded = false;
+  if (explodeBtn) {
+    explodeBtn.classList.remove('exploded');
+    explodeBtn.textContent = '💥 爆炸视图';
+  }
+
+  // 重新分配 Quest 3 部件的步骤索引
+  parts.forEach((part) => {
+    const meshName = part.mesh.userData.name;
+    let stepIndex = totalSteps;
+    stepGroups.forEach((group, idx) => {
+      if (group.parts.includes(meshName)) {
+        stepIndex = idx;
+      }
+    });
+    part.stepIndex = stepIndex;
+  });
+
+  // 更新 UI
+  updateStepUI();
+  fitCameraToModel(questGroup, false);
+
+  showStatus('已清除自定义模型，恢复默认', 'info');
+  console.log('✅ 已恢复默认 Quest 3 模型和步骤系统');
 }
 
 // ===== 中心轴线（拆解时显示）=====
@@ -699,7 +2052,7 @@ const quest3Specs = {
 fitCameraToModel(questGroup, false);
 
 // ===== 分步骤拆解（教学导向，参考 iFixit 风格）=====
-const stepGroups = [
+let stepGroups = [
   {
     name: '👋 欢迎认识 Quest 3',
     parts: [],
@@ -863,7 +2216,8 @@ function updateToolsList(step) {
   }
 }
 
-const totalSteps = stepGroups.length;
+const defaultStepGroups = stepGroups;
+let totalSteps = stepGroups.length;
 const partStepMap = new Map();
 
 // 给每个部件分配步骤序号（默认最后一步）
@@ -945,7 +2299,7 @@ let highlightedPart = null;  // 当前高亮的部件
 function highlightPart(partName) {
   // 清除之前的高亮
   if (highlightedPart) {
-    if (highlightedPart.mesh.material.emissive) {
+    if (highlightedPart.mesh.material && highlightedPart.mesh.material.emissive) {
       highlightedPart.mesh.material.emissive.setHex(0x000000);
     }
     highlightedPart.mesh.scale.setScalar(1);
@@ -953,10 +2307,15 @@ function highlightPart(partName) {
 
   // 设置新高亮
   if (partName) {
-    const part = parts.find(p => p.name === partName);
+    // 先在默认部件中查找
+    let part = parts.find(p => p.name === partName);
+    // 如果没找到且正在使用自定义模型，在自定义部件中查找
+    if (!part && hasCustomModel) {
+      part = customModelParts.find(p => p.name === partName);
+    }
     if (part) {
       highlightedPart = part;
-      if (part.mesh.material.emissive) {
+      if (part.mesh.material && part.mesh.material.emissive) {
         part.mesh.material.emissive.copy(highlightEmissive);
       }
       part.mesh.scale.setScalar(highlightScale);
@@ -1337,7 +2696,10 @@ function focusCurrentPart() {
 
   // 找到第一个部件的位置
   const partName = step.parts[0];
-  const part = parts.find(p => p.name === partName);
+  let part = parts.find(p => p.name === partName);
+  if (!part && hasCustomModel) {
+    part = customModelParts.find(p => p.name === partName);
+  }
   if (!part) return;
 
   // 平滑移动相机到部件位置
@@ -1453,20 +2815,20 @@ function updateExplodedView(now) {
     part.mesh.rotation.z = THREE.MathUtils.lerp(part.homeRot.z, part.explodeRot.z, partFactor);
   });
 
-  // 自定义模型部件（如果有）
+  // 自定义模型部件（渐进式拆解，每个部件有自己的 stepIndex）
   if (hasCustomModel && customModelParts.length > 0) {
-    // 使用与步骤动画相同的因子
-    const customFactor = mouseControlEnabled ? mouseFactor : (currentStep / totalSteps);
-
     customModelParts.forEach((part) => {
-      const startPos = part.homePos;
-      const endPos = part.explodePos;
+      let partFactor;
+      if (mouseControlEnabled) {
+        partFactor = smoothStep(part.stepIndex - 1, part.stepIndex, mouseFactor * totalSteps);
+      } else {
+        partFactor = smoothStep(part.stepIndex - 1, part.stepIndex, currentStep);
+      }
 
-      // 应用插值
-      part.mesh.position.lerpVectors(startPos, endPos, customFactor);
-      part.mesh.rotation.x = THREE.MathUtils.lerp(part.homeRot.x, part.explodeRot.x, customFactor);
-      part.mesh.rotation.y = THREE.MathUtils.lerp(part.homeRot.y, part.explodeRot.y, customFactor);
-      part.mesh.rotation.z = THREE.MathUtils.lerp(part.homeRot.z, part.explodeRot.z, customFactor);
+      part.mesh.position.lerpVectors(part.homePos, part.explodePos, partFactor);
+      part.mesh.rotation.x = THREE.MathUtils.lerp(part.homeRot.x, part.explodeRot.x, partFactor);
+      part.mesh.rotation.y = THREE.MathUtils.lerp(part.homeRot.y, part.explodeRot.y, partFactor);
+      part.mesh.rotation.z = THREE.MathUtils.lerp(part.homeRot.z, part.explodeRot.z, partFactor);
     });
   }
 }
@@ -1543,25 +2905,113 @@ function setupUpload() {
     return;
   }
 
-  function handleFile(file) {
+  // ── Blender 后端配置 ──
+  const BLENDER_SERVER = 'http://localhost:3001';
+
+  /**
+   * 尝试调用 Blender 后端拆解 GLB
+   * @param {File} file 上传的 GLB/GLTF 文件
+   * @returns {Promise<{arrayBuffer: ArrayBuffer, manifest: object} | null>}
+   */
+  async function tryBlenderSplit(file) {
+    try {
+      showStatus('🔧 正在通过 Blender 拆解模型...', 'info');
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const resp = await fetch(`${BLENDER_SERVER}/api/split`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.error || `服务器错误 ${resp.status}`);
+      }
+
+      const data = await resp.json();
+      if (!data.success) {
+        throw new Error(data.error || '拆解失败');
+      }
+
+      // base64 → ArrayBuffer
+      const binaryStr = atob(data.glb_base64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+
+      showStatus(`✅ Blender 拆解完成：${data.total_parts} 个部件 (${data.elapsed_seconds}s)`, 'success');
+
+      return {
+        arrayBuffer: bytes.buffer,
+        manifest: data,
+      };
+    } catch (err) {
+      console.warn('Blender 后端不可用，回退到 JS 拆解:', err.message);
+      return null;
+    }
+  }
+
+  async function handleFile(file) {
     if (!file) return;
 
     const ext = file.name.split('.').pop().toLowerCase();
-    if (!['glb', 'gltf'].includes(ext)) {
-      showStatus('❌ 不支持的文件格式\n请上传 .glb 或 .gltf 文件', 'error');
+    if (!['glb', 'gltf', 'stl', 'urdf'].includes(ext)) {
+      showStatus('❌ 不支持的文件格式\n请上传 .glb / .gltf / .stl / .urdf 文件', 'error');
       return;
     }
 
-    if (file.size > 50 * 1024 * 1024) {
-      showStatus('❌ 文件太大\n请上传小于 50MB 的文件', 'error');
+    if (file.size > 100 * 1024 * 1024) {
+      showStatus('❌ 文件太大\n请上传小于 100MB 的文件', 'error');
       return;
     }
 
-    showStatus('⏳ 正在加载模型...', 'info');
+    // URDF 文件：前端解析 XML 结构
+    if (ext === 'urdf') {
+      showStatus('📦 正在解析 URDF 文件...', 'info');
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        loadURDFModel(e.target.result, file.name);
+      };
+      reader.onerror = () => showStatus('❌ 读取文件失败', 'error');
+      reader.readAsText(file);
+      return;
+    }
+
+    // STL 文件：前端 STLLoader 加载，或送 Blender 拆解
+    if (ext === 'stl') {
+      // 优先尝试 Blender 后端拆解
+      const blenderResult = await tryBlenderSplit(file);
+      if (blenderResult) {
+        loadCustomModel(blenderResult.arrayBuffer, file.name, blenderResult.manifest);
+        return;
+      }
+      // 回退：前端 STLLoader 直接加载（单部件）
+      showStatus('⏳ 正在用前端加载 STL 模型...', 'info');
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        loadSTLModel(e.target.result, file.name);
+      };
+      reader.onerror = () => showStatus('❌ 读取文件失败', 'error');
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+
+    // GLB / GLTF 文件：优先尝试 Blender 后端拆解（包括 Quest 3 模型）
+    const blenderResult = await tryBlenderSplit(file);
+
+    if (blenderResult) {
+      // Blender 拆解成功，使用拆解后的 GLB + 清单
+      loadCustomModel(blenderResult.arrayBuffer, file.name, blenderResult.manifest);
+      return;
+    }
+
+    // 回退：读取文件用 JS 拆解（包括 Quest 3 面级别切割）
+    showStatus('⏳ 正在用前端 JS 拆解模型...', 'info');
 
     const reader = new FileReader();
     reader.onload = (e) => {
-      loadCustomModel(e.target.result, file.name);
+      loadCustomModel(e.target.result, file.name, null);
     };
     reader.onerror = () => showStatus('❌ 读取文件失败', 'error');
     reader.readAsArrayBuffer(file);

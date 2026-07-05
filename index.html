@@ -78,14 +78,14 @@
         <span>上传你自己的 3D 模型</span>
       </div>
       <div class="upload-formats">
-        支持 .glb / .gltf（最多 50MB）
+        支持 .glb / .gltf / .stl / .urdf（最多 100MB）
       </div>
       <div id="drop-zone" class="drop-zone">
         <div class="drop-zone-text">
           <div class="drop-icon">📦</div>
           <div>拖拽文件到这里，或点击选择</div>
         </div>
-        <input type="file" id="file-input" accept=".glb,.gltf" style="display:none" />
+        <input type="file" id="file-input" accept=".glb,.gltf,.stl,.urdf" style="display:none" />
       </div>
       <div id="upload-status" class="upload-status hidden"></div>
       <div id="uploaded-file-name" class="uploaded-file-name"></div>
@@ -135,8 +135,8 @@
       </div>
       <div class="timeline-wrapper">
         <span id="timeline-step">0</span>
-        <input type="range" id="timeline-slider" min="0" max="100" value="0" />
-        <span id="timeline-total">7</span>
+<input type="range" id="timeline-slider" min="0" max="8" value="0" />
+<span id="timeline-total">8</span>
       </div>
     </div>
 
@@ -200,6 +200,6 @@
     <p class="hint">🎓 专为 VR 新手设计 · 点击"下一步"开始学习</p>
   </div>
 
-  <script type="module" src="main.js?v=1783169001"></script>
+  <script type="module" src="main.js?v=1783569007"></script>
 </body>
 </html>

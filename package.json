@@ -1,12 +1,15 @@
 {
   "name": "quest3-exploded",
-  "version": "1.0.0",
+  "version": "1.9.0",
   "description": "Blender 自动拆解三维模型并自动做拆解教学 - 预览。基于 Three.js 构建的交互式 3D 拆解教学工具，支持鼠标拖拽旋转、滚轮缩放、滑块控制拆解程度。",
   "main": "main.js",
   "scripts": {
+    "dev": "npx serve .",
+    "server": "node server.js",
+    "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": ["three.js", "blender", "glb", "3d", "exploded-view", "webxr"],
   "author": "",
   "license": "ISC",
   "type": "module",

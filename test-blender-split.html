@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blender 3D 模型拆解测试</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; padding: 20px; }
+  .container { max-width: 900px; margin: 0 auto; }
+  h1 { text-align: center; margin-bottom: 20px; font-size: 24px; }
+  .card { background: #16213e; border-radius: 12px; padding: 20px; margin-bottom: 16px; border: 1px solid #0f3460; }
+  .card h2 { font-size: 16px; margin-bottom: 12px; color: #e94560; }
+  .status { padding: 8px 14px; border-radius: 8px; font-size: 14px; margin: 8px 0; }
+  .status.info { background: rgba(33,150,243,0.15); border: 1px solid #2196F3; }
+  .status.success { background: rgba(76,175,80,0.15); border: 1px solid #4CAF50; }
+  .status.error { background: rgba(244,67,54,0.15); border: 1px solid #f44336; }
+  .status.warn { background: rgba(255,152,0,0.15); border: 1px solid #ff9800; }
+  button { background: #e94560; color: #fff; border: none; padding: 10px 24px; border-radius: 8px; font-size: 14px; cursor: pointer; margin: 4px; transition: 0.2s; }
+  button:hover { background: #c81e45; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary { background: #0f3460; }
+  button.secondary:hover { background: #1a4a7a; }
+  pre { background: #0d1117; border-radius: 8px; padding: 14px; overflow-x: auto; font-size: 13px; line-height: 1.6; max-height: 500px; overflow-y: auto; }
+  .parts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 12px; }
+  .part-item { background: #0d1117; border-radius: 8px; padding: 10px; font-size: 13px; border: 1px solid #1a2332; }
+  .part-item .name { color: #e94560; font-weight: bold; }
+  .part-item .meta { color: #8b949e; margin-top: 4px; font-size: 12px; }
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #333; border-top: 2px solid #e94560; border-radius: 50%; animation: spin 1s linear infinite; vertical-align: middle; margin-right: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .url-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .url-bar input { flex: 1; background: #0d1117; border: 1px solid #1a2332; color: #eee; padding: 8px 12px; border-radius: 8px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🔧 Blender GLB 拆解测试面板</h1>
+
+  <!-- 服务器地址 -->
+  <div class="card">
+    <h2>服务器地址</h2>
+    <div class="url-bar">
+      <input type="text" id="server-url" value="http://localhost:3001" placeholder="服务器 URL">
+      <button class="secondary" onclick="checkHealth()">检查连接</button>
+    </div>
+    <div id="health-result"></div>
+  </div>
+
+  <!-- 健康状态 -->
+  <div class="card">
+    <h2>Blender 状态</h2>
+    <div id="blender-status">
+      <div class="status info">点击「检查连接」查看 Blender 状态</div>
+    </div>
+  </div>
+
+  <!-- 拆解测试 -->
+  <div class="card">
+    <h2>GLB 拆解测试</h2>
+    <div style="margin-bottom: 12px;">
+      <button onclick="testWithQuest3()">用 Quest3.glb 测试</button>
+<button class="secondary" onclick="document.getElementById('file-input').click()">上传自定义模型</button>
+<input type="file" id="file-input" accept=".glb,.gltf,.stl" style="display:none" onchange="testWithFile(this.files[0])">
+    </div>
+    <div id="split-status"></div>
+    <div id="split-result"></div>
+  </div>
+
+  <!-- 日志 -->
+  <div class="card">
+    <h2>详细日志</h2>
+    <pre id="log">等待操作...</pre>
+  </div>
+</div>
+
+<script>
+const logEl = document.getElementById('log');
+function log(msg) {
+  const time = new Date().toLocaleTimeString();
+  logEl.textContent = `[${time}] ${msg}\n` + logEl.textContent;
+  console.log(msg);
+}
+
+function getServerUrl() {
+  return document.getElementById('server-url').value.replace(/\/$/, '');
+}
+
+async function checkHealth() {
+  const url = getServerUrl();
+  const el = document.getElementById('health-result');
+  const bsEl = document.getElementById('blender-status');
+  
+  el.innerHTML = '<div class="status info"><span class="spinner"></span>正在连接...</div>';
+  bsEl.innerHTML = '<div class="status info"><span class="spinner"></span>检查中...</div>';
+  
+  try {
+    log(`GET ${url}/api/health`);
+    const resp = await fetch(`${url}/api/health`);
+    const data = await resp.json();
+    log(`响应: ${JSON.stringify(data, null, 2)}`);
+    
+    if (data.status === 'ok') {
+      el.innerHTML = `<div class="status success">✅ 服务器连接成功</div>`;
+      bsEl.innerHTML = `<div class="status success">✅ Blender ${data.version} 可用<br><small>路径: ${data.blender}</small></div>`;
+    } else {
+      el.innerHTML = `<div class="status success">✅ 服务器已连接</div>`;
+      bsEl.innerHTML = `<div class="status error">❌ ${data.message}</div>`;
+    }
+  } catch (err) {
+    log(`错误: ${err.message}`);
+    el.innerHTML = `<div class="status error">❌ 无法连接服务器<br><small>${err.message}</small></div>`;
+    bsEl.innerHTML = `<div class="status warn">⚠️ 服务器未运行<br><small>请在终端执行: <code>node server.js</code></small></div>`;
+  }
+}
+
+async function testWithQuest3() {
+  log('尝试获取 Quest3.glb...');
+  
+  // 尝试从同目录加载
+  try {
+    const resp = await fetch('models/Quest3.glb');
+    if (resp.ok) {
+      const blob = await resp.blob();
+      const file = new File([blob], 'Quest3.glb', { type: 'model/gltf-binary' });
+      log(`Quest3.glb 加载成功 (${(blob.size/1024).toFixed(1)} KB)`);
+      await splitFile(file);
+      return;
+    }
+  } catch (e) {
+    log('无法从本地加载 Quest3.glb，请使用「上传自定义 GLB」');
+  }
+  
+  document.getElementById('split-status').innerHTML = 
+    '<div class="status warn">⚠️ 无法自动加载 Quest3.glb，请点击「上传自定义 GLB」手动选择文件</div>';
+}
+
+async function testWithFile(file) {
+  if (!file) return;
+  log(`文件: ${file.name} (${(file.size/1024).toFixed(1)} KB)`);
+  await splitFile(file);
+}
+
+async function splitFile(file) {
+  const url = getServerUrl();
+  const statusEl = document.getElementById('split-status');
+  const resultEl = document.getElementById('split-result');
+  
+  statusEl.innerHTML = `<div class="status info"><span class="spinner"></span>正在通过 Blender 拆解 ${file.name}...<br><small>这可能需要 10-60 秒</small></div>`;
+  resultEl.innerHTML = '';
+  
+  const startTime = Date.now();
+  
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    log(`POST ${url}/api/split (file: ${file.name}, ${file.size} bytes)`);
+    const resp = await fetch(`${url}/api/split`, {
+      method: 'POST',
+      body: formData,
+    });
+    
+    const data = await resp.json();
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    log(`响应 (${elapsed}s): success=${data.success}, parts=${data.total_parts}`);
+    
+    if (data.success) {
+      statusEl.innerHTML = `<div class="status success">✅ 拆解成功！${data.total_parts} 个部件 (耗时 ${data.elapsed_seconds}s)</div>`;
+      
+      // 显示模型信息
+      let html = `<div style="margin-bottom: 12px;">
+        <strong>模型中心:</strong> [${(data.model_center||[]).map(v=>v.toFixed(3)).join(', ')}]<br>
+        <strong>模型尺寸:</strong> [${(data.model_size||[]).map(v=>v.toFixed(3)).join(', ')}]
+      </div>`;
+      
+      // 显示部件列表
+      html += '<div class="parts-grid">';
+      (data.parts || []).forEach((p, i) => {
+        html += `<div class="part-item">
+          <div class="name">${i+1}. ${p.display_name || p.name}</div>
+          <div class="meta">
+            面数: ${p.face_count}<br>
+            顶点: ${p.vertex_count}<br>
+            中心: [${(p.center||[]).map(v=>v.toFixed(2)).join(', ')}]<br>
+            尺寸: [${(p.size||[]).map(v=>v.toFixed(2)).join(', ')}]
+          </div>
+        </div>`;
+      });
+      html += '</div>';
+      
+      // GLB 大小
+      const glbSize = data.glb_base64 ? Math.round(data.glb_base64.length * 3 / 4 / 1024) : 0;
+      html += `<div style="margin-top:12px;color:#8b949e;font-size:13px;">拆解后 GLB: ${glbSize} KB (base64: ${data.glb_base64?.length || 0} chars)</div>`;
+      
+      resultEl.innerHTML = html;
+      log(`拆解完成: ${data.total_parts} 个部件, GLB ${glbSize} KB`);
+    } else {
+      const errShort = (data.error || '').split('\n')[0].slice(0, 200);
+      statusEl.innerHTML = `<div class="status error">❌ 拆解失败: ${errShort}</div>`;
+      let errHtml = '';
+      if (data.error) {
+        errHtml += `<pre style="color:#f44336;">${data.error}</pre>`;
+      }
+      if (data.blender_output) {
+        errHtml += `<pre style="color:#ff9800;">📄 Blender 输出:\n${data.blender_output}</pre>`;
+      }
+      resultEl.innerHTML = errHtml || '<pre>无详细输出</pre>';
+      log(`错误: ${data.error}`);
+    }
+  } catch (err) {
+    log(`请求失败: ${err.message}`);
+    statusEl.innerHTML = `<div class="status error">❌ 请求失败: ${err.message}<br><small>请确认服务器已启动: <code>node server.js</code></small></div>`;
+  }
+}
+
+// 页面加载后自动检查
+window.addEventListener('load', () => {
+  log('页面加载完成');
+  setTimeout(checkHealth, 500);
+});
+</script>
+</body>
+</html>
