@@ -12,6 +12,12 @@ build/
 .cache/
 .parcel-cache
 
+# Python (IMPORTANT: never commit __pycache__)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
 # Environment
 .env
 .env.local
@@ -27,6 +33,9 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+.catpaw/
+.agents/
+skills-lock.json
 
 # Logs
 npm-debug.log*
@@ -36,8 +45,10 @@ yarn-install.log*
 # Build artifacts
 *.tmp
 *.temp
-blender_output/**/*.txt
-blender_output/logs/
+blender_output/
+*.glb
+!models/*.glb
+!meta-quest-3/source/*.glb
 
 # Temporary files
 *.log
