@@ -1341,56 +1341,320 @@ def create_lego_style(prompt):
 
     # 根据提示词创建不同类型的乐高模型
     if any(kw in prompt_lower for kw in ['人', '角色', '人物', 'character', 'person', 'human', 'figure', 'minifig']):
-        # 乐高人仔
-        # 腿部 (2个方块)
-        create_lego_brick('左腿', (-0.25, 0, 0.3), size=(0.4, 0.5, 0.6))
-        create_lego_brick('右腿', (0.25, 0, 0.3), size=(0.4, 0.5, 0.6))
-        # 身体
-        create_lego_brick('身体', (0, 0, 0.9), size=(0.9, 0.5, 0.6))
-        # 手臂
-        create_lego_brick('左臂', (-0.6, 0, 0.9), size=(0.3, 0.3, 0.5), has_stud=False)
-        create_lego_brick('右臂', (0.6, 0, 0.9), size=(0.3, 0.3, 0.5), has_stud=False)
-        # 头部 (圆柱形)
-        bpy.ops.mesh.primitive_cylinder_add(radius=0.35, depth=0.5, location=(0, 0, 1.45))
+        # ===== 乐高人仔（经典Minifig造型）=====
+        # 裤子颜色（默认蓝色）
+        pants_color = (0.1, 0.3, 0.8) if '蓝' in prompt_lower else (0.1, 0.1, 0.1) if '黑' in prompt_lower else (0.5, 0.3, 0.15) if '棕' in prompt_lower else base_color
+        mat_pants = make_mat('LegoPants', pants_color, roughness=0.3)
+        
+        # 腿部（梯形，上宽下窄，中间有缝隙）
+        # 左大腿
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(-0.22, 0, 0.35))
+        leg_l = bpy.context.active_object
+        leg_l.scale = (0.35, 0.4, 0.4)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(leg_l, width=0.02, segments=2)
+        parts.append(add_obj(leg_l, '左大腿', mat_pants))
+        # 左小腿
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(-0.22, 0, 0.1))
+        shin_l = bpy.context.active_object
+        shin_l.scale = (0.3, 0.35, 0.25)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(shin_l, width=0.015, segments=2)
+        parts.append(add_obj(shin_l, '左小腿', mat_pants))
+        
+        # 右大腿
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0.22, 0, 0.35))
+        leg_r = bpy.context.active_object
+        leg_r.scale = (0.35, 0.4, 0.4)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(leg_r, width=0.02, segments=2)
+        parts.append(add_obj(leg_r, '右大腿', mat_pants))
+        # 右小腿
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0.22, 0, 0.1))
+        shin_r = bpy.context.active_object
+        shin_r.scale = (0.3, 0.35, 0.25)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(shin_r, width=0.015, segments=2)
+        parts.append(add_obj(shin_r, '右小腿', mat_pants))
+        
+        # 臀部连接块
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.55))
+        hips = bpy.context.active_object
+        hips.scale = (0.9, 0.45, 0.25)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(hips, width=0.02, segments=2)
+        parts.append(add_obj(hips, '臀部', mat_pants))
+        
+        # 身体（梯形，上宽下窄，有凸点）
+        shirt_color = base_color if base_color != pants_color else (0.8, 0.1, 0.1)
+        mat_shirt = make_mat('LegoShirt', shirt_color, roughness=0.3)
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.95))
+        torso = bpy.context.active_object
+        torso.scale = (0.9, 0.5, 0.7)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(torso, width=0.02, segments=2)
+        parts.append(add_obj(torso, '身体', mat_shirt))
+        # 身体凸点（领口）
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.1, depth=0.08, location=(0, 0, 1.32))
+        neck = bpy.context.active_object
+        apply_bevel_mod(neck, width=0.005, segments=1)
+        parts.append(add_obj(neck, '领口', mat_shirt))
+        
+        # 手臂（圆柱形关节+手）
+        skin_color = (0.96, 0.82, 0.72)
+        mat_skin = make_mat('LegoSkin', skin_color, roughness=0.4)
+        # 左臂
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.12, depth=0.5, location=(-0.6, 0, 0.95))
+        arm_l = bpy.context.active_object
+        arm_l.rotation_euler = (0, 1.5708, 0)
+        bpy.ops.object.transform_apply(rotation=True)
+        apply_bevel_mod(arm_l, width=0.01, segments=2)
+        parts.append(add_obj(arm_l, '左臂', mat_shirt))
+        # 左手
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.1, depth=0.15, location=(-0.85, 0, 0.95))
+        hand_l = bpy.context.active_object
+        hand_l.rotation_euler = (0, 1.5708, 0)
+        bpy.ops.object.transform_apply(rotation=True)
+        apply_bevel_mod(hand_l, width=0.005, segments=1)
+        parts.append(add_obj(hand_l, '左手', mat_skin))
+        
+        # 右臂
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.12, depth=0.5, location=(0.6, 0, 0.95))
+        arm_r = bpy.context.active_object
+        arm_r.rotation_euler = (0, -1.5708, 0)
+        bpy.ops.object.transform_apply(rotation=True)
+        apply_bevel_mod(arm_r, width=0.01, segments=2)
+        parts.append(add_obj(arm_r, '右臂', mat_shirt))
+        # 右手
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.1, depth=0.15, location=(0.85, 0, 0.95))
+        hand_r = bpy.context.active_object
+        hand_r.rotation_euler = (0, -1.5708, 0)
+        bpy.ops.object.transform_apply(rotation=True)
+        apply_bevel_mod(hand_r, width=0.005, segments=1)
+        parts.append(add_obj(hand_r, '右手', mat_skin))
+        
+        # 头部（圆柱形，顶部有凸点接口）
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.32, depth=0.45, location=(0, 0, 1.55))
         head = bpy.context.active_object
         apply_bevel_mod(head, width=0.03, segments=2)
-        parts.append(add_obj(head, '头部', mat_lego))
-        # 头顶凸点
-        bpy.ops.mesh.primitive_cylinder_add(radius=0.12, depth=0.15, location=(0, 0, 1.75))
-        top_stud = bpy.context.active_object
-        parts.append(add_obj(top_stud, '头顶凸点', mat_stud))
+        parts.append(add_obj(head, '头部', mat_skin))
+        # 头顶接口（凹陷）
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.15, depth=0.08, location=(0, 0, 1.79))
+        top_connector = bpy.context.active_object
+        parts.append(add_obj(top_connector, '头顶接口', mat_skin))
+        # 面部（简单的眼睛）
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(-0.12, 0.28, 1.55))
+        eye_l = bpy.context.active_object
+        eye_l.scale = (0.08, 0.05, 0.08)
+        bpy.ops.object.transform_apply(scale=True)
+        mat_eye = make_mat('LegoEye', (0, 0, 0), roughness=0.1)
+        parts.append(add_obj(eye_l, '左眼', mat_eye))
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0.12, 0.28, 1.55))
+        eye_r = bpy.context.active_object
+        eye_r.scale = (0.08, 0.05, 0.08)
+        bpy.ops.object.transform_apply(scale=True)
+        parts.append(add_obj(eye_r, '右眼', mat_eye))
 
     elif any(kw in prompt_lower for kw in ['车', '汽车', 'car', 'vehicle', '跑车']):
-        # 乐高汽车
-        # 底盘
-        create_lego_brick('底盘', (0, 0, 0.3), size=(2.0, 1.0, 0.4))
-        # 车身
-        create_lego_brick('车身', (0, 0, 0.8), size=(1.6, 0.8, 0.6))
-        # 车顶
-        create_lego_brick('车顶', (0, 0, 1.3), size=(1.0, 0.7, 0.4))
-        # 轮子 (4个圆柱)
-        wheel_locs = [(-0.8, 0.5, 0.3), (0.8, 0.5, 0.3), (-0.8, -0.5, 0.3), (0.8, -0.5, 0.3)]
+        # ===== 乐高汽车（经典赛车造型）=====
+        # 底盘（长平板，有轮子凹槽）
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.25))
+        chassis = bpy.context.active_object
+        chassis.scale = (2.2, 1.0, 0.3)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(chassis, width=0.02, segments=2)
+        parts.append(add_obj(chassis, '底盘', mat_lego))
+        
+        # 底盘凸点（前后各4个）
+        for x in [-0.8, 0.8]:
+            for y in [-0.3, 0.3]:
+                bpy.ops.mesh.primitive_cylinder_add(radius=0.12, depth=0.15, location=(x, y, 0.45))
+                stud = bpy.context.active_object
+                apply_bevel_mod(stud, width=0.005, segments=1)
+                parts.append(add_obj(stud, f'底盘凸点_{x}_{y}', mat_stud))
+        
+        # 车身前部（引擎盖，倾斜）
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0.7, 0, 0.6))
+        hood = bpy.context.active_object
+        hood.scale = (0.8, 0.9, 0.35)
+        bpy.ops.object.transform_apply(scale=True)
+        # 稍微倾斜
+        hood.rotation_euler = (-0.1, 0, 0)
+        bpy.ops.object.transform_apply(rotation=True)
+        apply_bevel_mod(hood, width=0.02, segments=2)
+        parts.append(add_obj(hood, '引擎盖', mat_lego))
+        
+        # 车身中部（驾驶舱底座）
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.75))
+        mid = bpy.context.active_object
+        mid.scale = (0.8, 0.9, 0.5)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(mid, width=0.02, segments=2)
+        parts.append(add_obj(mid, '车身中部', mat_lego))
+        
+        # 车顶（稍小）
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(-0.2, 0, 1.15))
+        roof = bpy.context.active_object
+        roof.scale = (0.7, 0.8, 0.3)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(roof, width=0.02, segments=2)
+        parts.append(add_obj(roof, '车顶', mat_lego))
+        
+        # 车顶凸点
+        for y in [-0.25, 0.25]:
+            bpy.ops.mesh.primitive_cylinder_add(radius=0.12, depth=0.15, location=(-0.2, y, 1.35))
+            stud = bpy.context.active_object
+            apply_bevel_mod(stud, width=0.005, segments=1)
+            parts.append(add_obj(stud, f'车顶凸点_{y}', mat_stud))
+        
+        # 轮子（4个，带轮胎纹理）
+        wheel_color = (0.1, 0.1, 0.1)
+        mat_wheel = make_mat('LegoWheel', wheel_color, roughness=0.7)
+        wheel_locs = [(-0.9, 0.55, 0.25), (0.9, 0.55, 0.25), (-0.9, -0.55, 0.25), (0.9, -0.55, 0.25)]
         for i, wl in enumerate(wheel_locs):
-            bpy.ops.mesh.primitive_cylinder_add(radius=0.25, depth=0.2, location=wl)
-            wheel = bpy.context.active_object
-            wheel.rotation_euler = (1.5708, 0, 0)  # 90度旋转
+            # 轮胎
+            bpy.ops.mesh.primitive_cylinder_add(radius=0.28, depth=0.25, location=wl)
+            tire = bpy.context.active_object
+            tire.rotation_euler = (1.5708, 0, 0)
             bpy.ops.object.transform_apply(rotation=True)
-            parts.append(add_obj(wheel, f'轮子_{i+1}', mat_stud))
+            apply_bevel_mod(tire, width=0.02, segments=2)
+            parts.append(add_obj(tire, f'轮胎_{i+1}', mat_wheel))
+            # 轮毂
+            bpy.ops.mesh.primitive_cylinder_add(radius=0.15, depth=0.26, location=wl)
+            hub = bpy.context.active_object
+            hub.rotation_euler = (1.5708, 0, 0)
+            bpy.ops.object.transform_apply(rotation=True)
+            parts.append(add_obj(hub, f'轮毂_{i+1}', mat_stud))
+        
+        # 挡风玻璃（透明材质）
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0.25, 0, 0.95))
+        windshield = bpy.context.active_object
+        windshield.scale = (0.05, 0.7, 0.4)
+        bpy.ops.object.transform_apply(scale=True)
+        windshield.rotation_euler = (-0.3, 0, 0)
+        bpy.ops.object.transform_apply(rotation=True)
+        mat_glass = make_mat('LegoGlass', (0.7, 0.9, 1.0), roughness=0.1, metallic=0.0)
+        mat_glass.use_screen_refraction = True
+        parts.append(add_obj(windshield, '挡风玻璃', mat_glass))
+        
+        # 车灯
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.08, depth=0.1, location=(1.1, 0.3, 0.5))
+        light_l = bpy.context.active_object
+        light_l.rotation_euler = (0, 1.5708, 0)
+        bpy.ops.object.transform_apply(rotation=True)
+        mat_light = make_mat('LegoLight', (1.0, 1.0, 0.8), roughness=0.2, metallic=0.5)
+        parts.append(add_obj(light_l, '左车灯', mat_light))
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.08, depth=0.1, location=(1.1, -0.3, 0.5))
+        light_r = bpy.context.active_object
+        light_r.rotation_euler = (0, 1.5708, 0)
+        bpy.ops.object.transform_apply(rotation=True)
+        parts.append(add_obj(light_r, '右车灯', mat_light))
 
     elif any(kw in prompt_lower for kw in ['房子', '建筑', 'house', 'building', 'home']):
-        # 乐高房子
-        # 地基
-        create_lego_brick('地基', (0, 0, 0.3), size=(2.0, 2.0, 0.6))
-        # 一层
-        create_lego_brick('一层', (0, 0, 0.9), size=(1.8, 1.8, 0.6))
-        # 二层
-        create_lego_brick('二层', (0, 0, 1.5), size=(1.4, 1.4, 0.6))
-        # 屋顶 (金字塔形堆叠)
-        create_lego_brick('屋顶_底', (0, 0, 2.0), size=(1.0, 1.0, 0.4))
-        create_lego_brick('屋顶_中', (0, 0, 2.4), size=(0.6, 0.6, 0.4))
-        create_lego_brick('屋顶_顶', (0, 0, 2.8), size=(0.3, 0.3, 0.4))
-        # 门
-        create_lego_brick('门', (0, 0.95, 0.6), size=(0.4, 0.1, 0.8), has_stud=False)
+        # ===== 乐高房子（经典房屋造型）=====
+        # 地基（带门廊）
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.3))
+        foundation = bpy.context.active_object
+        foundation.scale = (2.0, 1.8, 0.6)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(foundation, width=0.02, segments=2)
+        parts.append(add_obj(foundation, '地基', mat_lego))
+        
+        # 门（拱形门框）
+        door_color = (0.5, 0.3, 0.15)
+        mat_door = make_mat('LegoDoor', door_color, roughness=0.4)
+        # 门框
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0.85, 0.5))
+        door_frame = bpy.context.active_object
+        door_frame.scale = (0.5, 0.1, 0.8)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(door_frame, width=0.01, segments=1)
+        parts.append(add_obj(door_frame, '门框', mat_door))
+        # 门把手
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.04, depth=0.08, location=(0.15, 0.92, 0.5))
+        knob = bpy.context.active_object
+        knob.rotation_euler = (1.5708, 0, 0)
+        bpy.ops.object.transform_apply(rotation=True)
+        mat_knob = make_mat('LegoKnob', (0.8, 0.7, 0.1), roughness=0.3, metallic=0.8)
+        parts.append(add_obj(knob, '门把手', mat_knob))
+        
+        # 一层（带窗户）
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 1.0))
+        floor1 = bpy.context.active_object
+        floor1.scale = (1.8, 1.6, 0.8)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(floor1, width=0.02, segments=2)
+        parts.append(add_obj(floor1, '一层', mat_lego))
+        
+        # 一层凸点（顶部4个）
+        for x in [-0.5, 0.5]:
+            for y in [-0.4, 0.4]:
+                bpy.ops.mesh.primitive_cylinder_add(radius=0.12, depth=0.15, location=(x, y, 1.45))
+                stud = bpy.context.active_object
+                apply_bevel_mod(stud, width=0.005, segments=1)
+                parts.append(add_obj(stud, f'一层凸点_{x}_{y}', mat_stud))
+        
+        # 窗户（两侧）
+        mat_window = make_mat('LegoWindow', (0.8, 0.95, 1.0), roughness=0.1, metallic=0.0)
+        for x in [-0.9, 0.9]:
+            bpy.ops.mesh.primitive_cube_add(size=1, location=(x, 0, 1.0))
+            window = bpy.context.active_object
+            window.scale = (0.1, 0.5, 0.4)
+            bpy.ops.object.transform_apply(scale=True)
+            parts.append(add_obj(window, f'窗户_{x}', mat_window))
+            # 窗框
+            bpy.ops.mesh.primitive_cube_add(size=1, location=(x, 0, 1.0))
+            frame = bpy.context.active_object
+            frame.scale = (0.12, 0.55, 0.45)
+            bpy.ops.object.transform_apply(scale=True)
+            mat_frame = make_mat('LegoFrame', (0.9, 0.9, 0.9), roughness=0.3)
+            parts.append(add_obj(frame, f'窗框_{x}', mat_frame))
+        
+        # 二层（比一层小）
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 1.7))
+        floor2 = bpy.context.active_object
+        floor2.scale = (1.4, 1.2, 0.6)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(floor2, width=0.02, segments=2)
+        parts.append(add_obj(floor2, '二层', mat_lego))
+        
+        # 屋顶（三角坡屋顶，不是金字塔）
+        roof_color = (0.6, 0.15, 0.1) if '红' in prompt_lower else (0.3, 0.3, 0.35)
+        mat_roof = make_mat('LegoRoof', roof_color, roughness=0.4)
+        
+        # 屋顶左坡
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(-0.5, 0, 2.3))
+        roof_l = bpy.context.active_object
+        roof_l.scale = (1.0, 1.4, 0.3)
+        bpy.ops.object.transform_apply(scale=True)
+        roof_l.rotation_euler = (0, 0.5, 0)
+        bpy.ops.object.transform_apply(rotation=True)
+        apply_bevel_mod(roof_l, width=0.02, segments=2)
+        parts.append(add_obj(roof_l, '屋顶左坡', mat_roof))
+        
+        # 屋顶右坡
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0.5, 0, 2.3))
+        roof_r = bpy.context.active_object
+        roof_r.scale = (1.0, 1.4, 0.3)
+        bpy.ops.object.transform_apply(scale=True)
+        roof_r.rotation_euler = (0, -0.5, 0)
+        bpy.ops.object.transform_apply(rotation=True)
+        apply_bevel_mod(roof_r, width=0.02, segments=2)
+        parts.append(add_obj(roof_r, '屋顶右坡', mat_roof))
+        
+        # 烟囱
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0.5, 0.3, 2.8))
+        chimney = bpy.context.active_object
+        chimney.scale = (0.25, 0.25, 0.6)
+        bpy.ops.object.transform_apply(scale=True)
+        mat_chimney = make_mat('LegoChimney', (0.4, 0.4, 0.4), roughness=0.5)
+        parts.append(add_obj(chimney, '烟囱', mat_chimney))
+        # 烟囱顶部
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0.5, 0.3, 3.15))
+        chimney_top = bpy.context.active_object
+        chimney_top.scale = (0.3, 0.3, 0.1)
+        bpy.ops.object.transform_apply(scale=True)
+        parts.append(add_obj(chimney_top, '烟囱顶', mat_chimney))
 
     else:
         # 默认：乐高积木组合
