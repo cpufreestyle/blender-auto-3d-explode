@@ -1355,7 +1355,145 @@ def create_lego_style(prompt):
         return brick
 
     # 根据提示词创建不同类型的乐高模型
-    if any(kw in prompt_lower for kw in ['人', '角色', '人物', 'character', 'person', 'human', 'figure', 'minifig']):
+    
+    # ===== 乐高篮球 =====
+    if any(kw in prompt_lower for kw in ['篮球', 'basketball']):
+        # 橙色球体 + 黑色纹路
+        ball_color = (0.85, 0.35, 0.05)
+        mat_ball = make_mat('LegoBasketball', ball_color, roughness=0.4)
+        mat_line = make_mat('LegoBallLine', (0.1, 0.1, 0.1), roughness=0.5)
+        
+        # 主体球体（乐高风格 - 用方块拼成球）
+        # 中心方块
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0))
+        core = bpy.context.active_object
+        core.scale = (0.8, 0.8, 0.8)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(core, width=0.1, segments=2)
+        parts.append(add_obj(core, '篮球核心', mat_ball))
+        
+        # 表面凸点（模拟乐高积木）
+        for i in range(6):
+            angle = i * math.pi / 3
+            for j in range(3):
+                z = (j - 1) * 0.35
+                x = math.cos(angle) * 0.5
+                y = math.sin(angle) * 0.5
+                bpy.ops.mesh.primitive_cylinder_add(radius=0.12, depth=0.15, location=(x, y, z))
+                stud = bpy.context.active_object
+                apply_bevel_mod(stud, width=0.01, segments=1)
+                parts.append(add_obj(stud, f'篮球凸点_{i}_{j}', mat_ball))
+        
+        # 黑色纹路（经线）
+        for i in range(3):
+            angle = i * math.pi / 3
+            bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0))
+            line = bpy.context.active_object
+            line.scale = (0.05, 0.9, 0.05)
+            line.rotation_euler = (0, 0, angle)
+            bpy.ops.object.transform_apply(scale=True, rotation=True)
+            parts.append(add_obj(line, f'篮球纹路_{i}', mat_line))
+    
+    # ===== 乐高超级英雄（人仔造型）=====
+    elif any(kw in prompt_lower for kw in ['蝙蝠侠', 'batman', '超人', 'superman', '钢铁侠', 'ironman', '蜘蛛侠', 'spiderman', '美队', 'captain']):
+        # 检测英雄类型
+        hero_type = 'generic'
+        if any(kw in prompt_lower for kw in ['蝙蝠侠', 'batman']):
+            hero_type = 'batman'
+        elif any(kw in prompt_lower for kw in ['超人', 'superman']):
+            hero_type = 'superman'
+        elif any(kw in prompt_lower for kw in ['钢铁侠', 'ironman']):
+            hero_type = 'ironman'
+        elif any(kw in prompt_lower for kw in ['蜘蛛侠', 'spiderman']):
+            hero_type = 'spiderman'
+        elif any(kw in prompt_lower for kw in ['美队', 'captain']):
+            hero_type = 'captain'
+        
+        # 英雄配色
+        hero_colors = {
+            'batman': {'suit': (0.05, 0.05, 0.08), 'cape': (0.03, 0.03, 0.05), 'emblem': (0.8, 0.6, 0.0)},
+            'superman': {'suit': (0.05, 0.15, 0.55), 'cape': (0.7, 0.05, 0.05), 'emblem': (0.9, 0.85, 0.1)},
+            'ironman': {'suit': (0.75, 0.1, 0.05), 'cape': None, 'emblem': (0.9, 0.85, 0.1)},
+            'spiderman': {'suit': (0.7, 0.05, 0.05), 'cape': None, 'emblem': (0.05, 0.05, 0.5)},
+            'captain': {'suit': (0.05, 0.15, 0.45), 'cape': (0.7, 0.7, 0.75), 'emblem': (0.9, 0.9, 0.9)},
+            'generic': {'suit': base_color, 'cape': (0.7, 0.05, 0.05), 'emblem': (0.9, 0.85, 0.1)},
+        }
+        
+        colors = hero_colors.get(hero_type, hero_colors['generic'])
+        mat_suit = make_mat(f'Lego{hero_type}Suit', colors['suit'], roughness=0.3)
+        if colors['cape']:
+            mat_cape = make_mat(f'Lego{hero_type}Cape', colors['cape'], roughness=0.6)
+        mat_emblem = make_mat(f'Lego{hero_type}Emblem', colors['emblem'], roughness=0.2, metallic=0.8)
+        mat_skin = make_mat('LegoSkin', (0.96, 0.82, 0.72), roughness=0.4)
+        
+        # 腿部（英雄配色）
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(-0.22, 0, 0.25))
+        leg_l = bpy.context.active_object
+        leg_l.scale = (0.35, 0.4, 0.5)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(leg_l, width=0.02, segments=2)
+        parts.append(add_obj(leg_l, '左腿', mat_suit))
+        
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0.22, 0, 0.25))
+        leg_r = bpy.context.active_object
+        leg_r.scale = (0.35, 0.4, 0.5)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(leg_r, width=0.02, segments=2)
+        parts.append(add_obj(leg_r, '右腿', mat_suit))
+        
+        # 身体（带胸章）
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.85))
+        torso = bpy.context.active_object
+        torso.scale = (0.9, 0.5, 0.7)
+        bpy.ops.object.transform_apply(scale=True)
+        apply_bevel_mod(torso, width=0.02, segments=2)
+        parts.append(add_obj(torso, '身体', mat_suit))
+        
+        # 胸章
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.15, depth=0.05, location=(0, 0.26, 0.9))
+        emblem = bpy.context.active_object
+        apply_bevel_mod(emblem, width=0.01, segments=1)
+        parts.append(add_obj(emblem, '胸章', mat_emblem))
+        
+        # 披风（除了钢铁侠和蜘蛛侠）
+        if colors['cape']:
+            bpy.ops.mesh.primitive_cube_add(size=1, location=(0, -0.35, 0.7))
+            cape = bpy.context.active_object
+            cape.scale = (0.7, 0.1, 0.8)
+            bpy.ops.object.transform_apply(scale=True)
+            apply_bevel_mod(cape, width=0.02, segments=2)
+            parts.append(add_obj(cape, '披风', mat_cape))
+        
+        # 手臂
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.12, depth=0.5, location=(-0.6, 0, 0.85))
+        arm_l = bpy.context.active_object
+        arm_l.rotation_euler = (0, 1.5708, 0)
+        bpy.ops.object.transform_apply(rotation=True)
+        apply_bevel_mod(arm_l, width=0.01, segments=2)
+        parts.append(add_obj(arm_l, '左臂', mat_suit))
+        
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.12, depth=0.5, location=(0.6, 0, 0.85))
+        arm_r = bpy.context.active_object
+        arm_r.rotation_euler = (0, -1.5708, 0)
+        bpy.ops.object.transform_apply(rotation=True)
+        apply_bevel_mod(arm_r, width=0.01, segments=2)
+        parts.append(add_obj(arm_r, '右臂', mat_suit))
+        
+        # 头部
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.32, depth=0.45, location=(0, 0, 1.45))
+        head = bpy.context.active_object
+        apply_bevel_mod(head, width=0.03, segments=2)
+        parts.append(add_obj(head, '头部', mat_skin))
+        
+        # 面罩（蝙蝠侠和蜘蛛侠）
+        if hero_type in ['batman', 'spiderman']:
+            bpy.ops.mesh.primitive_cylinder_add(radius=0.33, depth=0.3, location=(0, 0, 1.5))
+            mask = bpy.context.active_object
+            apply_bevel_mod(mask, width=0.01, segments=1)
+            parts.append(add_obj(mask, '面罩', mat_suit))
+    
+    # ===== 乐高人仔（默认）=====
+    elif any(kw in prompt_lower for kw in ['人', '角色', '人物', 'character', 'person', 'human', 'figure', 'minifig']):
         # ===== 乐高人仔（经典Minifig造型）=====
         # 裤子颜色（默认蓝色）
         pants_color = (0.1, 0.3, 0.8) if '蓝' in prompt_lower else (0.1, 0.1, 0.1) if '黑' in prompt_lower else (0.5, 0.3, 0.15) if '棕' in prompt_lower else base_color
@@ -1672,11 +1810,59 @@ def create_lego_style(prompt):
         parts.append(add_obj(chimney_top, '烟囱顶', mat_chimney))
 
     else:
-        # 默认：乐高积木组合
-        create_lego_brick('积木_1', (0, 0, 0.3), size=(1.0, 1.0, 0.6))
-        create_lego_brick('积木_2', (0.6, 0.3, 0.9), size=(0.8, 0.8, 0.5))
-        create_lego_brick('积木_3', (-0.5, 0.4, 1.3), size=(0.6, 0.6, 0.4))
-        create_lego_brick('积木_4', (0.2, -0.3, 1.6), size=(0.5, 0.5, 0.4))
+        # ===== 程序化生成独特乐高模型 =====
+        # 使用提示词的哈希值来生成独特的模型结构
+        import hashlib
+        prompt_hash = hashlib.md5(prompt.encode()).hexdigest()
+        seed = int(prompt_hash[:8], 16)
+        
+        # 根据提示词长度和哈希决定模型复杂度
+        complexity = 3 + (len(prompt) % 5)  # 3-7个积木块
+        
+        log(f"  🎲 程序化生成: {complexity} 个积木块 (seed: {seed})")
+        
+        # 生成独特的积木堆叠
+        positions = []
+        for i in range(complexity):
+            # 使用哈希值生成伪随机位置
+            x = ((seed >> (i * 4)) & 0xF) / 10.0 - 0.8
+            y = ((seed >> (i * 4 + 2)) & 0xF) / 10.0 - 0.8
+            z = 0.3 + i * 0.5
+            
+            # 大小也根据哈希变化
+            sx = 0.4 + ((seed >> (i * 2)) & 0x7) / 20.0
+            sy = 0.4 + ((seed >> (i * 2 + 1)) & 0x7) / 20.0
+            sz = 0.3 + ((seed >> (i * 2 + 2)) & 0x5) / 20.0
+            
+            # 创建积木
+            bpy.ops.mesh.primitive_cube_add(size=1, location=(x, y, z))
+            brick = bpy.context.active_object
+            brick.scale = (sx, sy, sz)
+            bpy.ops.object.transform_apply(scale=True)
+            apply_bevel_mod(brick, width=0.02, segments=2)
+            parts.append(add_obj(brick, f'积木_{i+1}', mat_lego))
+            
+            # 添加凸点
+            stud_count_x = max(1, int(sx))
+            stud_count_y = max(1, int(sy))
+            for sx_i in range(stud_count_x):
+                for sy_j in range(stud_count_y):
+                    sx_pos = x + (sx_i - (stud_count_x-1)/2) * 0.4
+                    sy_pos = y + (sy_j - (stud_count_y-1)/2) * 0.4
+                    sz_pos = z + sz/2 + 0.075
+                    
+                    bpy.ops.mesh.primitive_cylinder_add(radius=0.12, depth=0.15, location=(sx_pos, sy_pos, sz_pos))
+                    stud = bpy.context.active_object
+                    apply_bevel_mod(stud, width=0.005, segments=1)
+                    parts.append(add_obj(stud, f'凸点_{i}_{sx_i}_{sy_j}', mat_stud))
+        
+        # 添加一些装饰元素（根据提示词特征）
+        if len(prompt) > 5:
+            # 添加一个特殊装饰块
+            bpy.ops.mesh.primitive_cylinder_add(radius=0.3, depth=0.4, location=(0, 0, 0.3 + complexity * 0.5))
+            top = bpy.context.active_object
+            apply_bevel_mod(top, width=0.02, segments=2)
+            parts.append(add_obj(top, '顶部装饰', mat_stud))    
 
     return parts
 
@@ -1882,8 +2068,12 @@ def match_prompt(prompt):
 
     if best_match:
         log(f"  ✅ 匹配: {best_match['desc']} (关键词: '{matched_kw}', 得分: {best_score})")
-        # 所有模型都使用乐高风格生成
-        return lambda: create_lego_style(prompt)
+        # 使用匹配的生成器，但包装成乐高风格
+        original_creator = best_match['creator']
+        if best_match['desc'] in ['篮球', '蝙蝠侠', '超人', '钢铁侠', '蜘蛛侠', '美队']:
+            # 这些有专门的乐高风格处理
+            return lambda: create_lego_style(prompt)
+        return original_creator
     else:
         log(f"  📦 未匹配预设，使用乐高风格生成")
         return lambda: create_lego_style(prompt)
