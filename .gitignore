@@ -1,43 +1,57 @@
 # Dependencies
-node_modules/
+node_modules
+/.pnp
+.pnp.js
+.pnp.js.map
 
-# Environment variables
+# Production builds
+dist/
+build/
+
+# Cache
+.cache/
+.parcel-cache
+
+# Environment
 .env
 .env.local
-.env.*.local
+.env.production
+.env.production.local
+
+# OS
+.DS_Store
+Thumbs.db
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
-
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
 
 # Logs
-*.log
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
+yarn-install.log*
 
-# Build outputs
-dist/
-build/
-
-# Temp files
+# Build artifacts
 *.tmp
 *.temp
-/tmp/
+blender_output/**/*.txt
+blender_output/logs/
 
-# Test coverage
-coverage/
+# Temporary files
+*.log
+*.bak
+*.backup
+
+# Webpack stats
+stats.json
+
+# Vercel
 .vercel
-__pycache__/
+.vercelignore
+
+# Local development
+.playwright
+coverage/
+.nyc_output

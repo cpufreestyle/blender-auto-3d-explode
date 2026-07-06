@@ -48,7 +48,7 @@
 
 如果本地网络测试失败，可以使用 Vercel 在线版本：
 
-**地址**：https://blender-auto-3d-explode.vercel.app
+**地址**：https://quest3-exploded.vercel.app
 
 **注意**：Vercel 自动提供 HTTPS，符合 WebXR 安全要求。
 
@@ -87,7 +87,7 @@
 **原因**：WebXR 要求 HTTPS，本地 HTTP（http://192.168.1.113:8080）不满足安全要求。
 
 **解决**：
-1. **使用 Vercel 在线版本**：https://blender-auto-3d-explode.vercel.app
+1. **使用 Vercel 在线版本**：https://quest3-exploded.vercel.app
 2. **或配置本地 HTTPS**（复杂，推荐使用 Vercel）
 
 **预期结果**：test-ar.html 会显示 HTTPS 检测失败，这是正常的。
@@ -182,7 +182,7 @@
 
 ### 在线测试（推荐）
 
-1. **打开** https://blender-auto-3d-explode.vercel.app
+1. **打开** https://quest3-exploded.vercel.app
 2. **点击"📱 AR 预览"**
 3. **授予权限**
 4. **扫描环境**
@@ -202,4 +202,4 @@
 
 **本地测试**：http://192.168.1.113:8080/test-ar.html
 
-**在线测试**：https://blender-auto-3d-explode.vercel.app
+**在线测试**：https://quest3-exploded.vercel.app

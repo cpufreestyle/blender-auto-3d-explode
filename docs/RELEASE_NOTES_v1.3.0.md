@@ -455,7 +455,7 @@ quick-test.html:           ~150 行
 
 ### 在线资源
 
-- **在线演示**：https://blender-auto-3d-explode.vercel.app
+- **在线演示**：https://quest3-exploded.vercel.app
 - **GitHub**：https://github.com/cpufreestyle/blender-auto-3d-explode
 - **问题反馈**：https://github.com/cpufreestyle/blender-auto-3d-explode/issues
 
@@ -473,7 +473,7 @@ quick-test.html:           ~150 行
 **维护者**：Claude Code
 **状态**：✅ Stable
 
-**在线访问**：https://blender-auto-3d-explode.vercel.app
+**在线访问**：https://quest3-exploded.vercel.app
 **GitHub**：https://github.com/cpufreestyle/blender-auto-3d-explode
 
 ---

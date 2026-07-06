@@ -19,7 +19,7 @@
 - ✅ 自动旋转 + 呼吸爆炸效果
 
 **使用方式**：
-1. 在手机上访问 https://blender-auto-3d-explode.vercel.app
+1. 在手机上访问 https://quest3-exploded.vercel.app
 2. 点击绿色 "📱 AR 预览" 按钮
 3. 授予相机权限
 4. 移动手机扫描环境
@@ -151,7 +151,7 @@ const posArray = new Float32Array(particlesCount * 3);
 
 ### AR 预览
 
-1. **在手机上打开** https://blender-auto-3d-explode.vercel.app
+1. **在手机上打开** https://quest3-exploded.vercel.app
 2. **点击** "📱 AR 预览" 按钮
 3. **授予** 相机权限
 4. **扫描** 周围环境（移动手机）
@@ -356,5 +356,5 @@ utils/BufferGeometryUtils.js:      31 KB
 **发布日期**：2026-06-22
 **维护者**：Claude Code
 
-**在线访问**：https://blender-auto-3d-explode.vercel.app
+**在线访问**：https://quest3-exploded.vercel.app
 **GitHub**：https://github.com/cpufreestyle/blender-auto-3d-explode

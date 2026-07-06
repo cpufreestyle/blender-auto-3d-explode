@@ -32,7 +32,7 @@
 
 **在手机上打开**：
 ```
-https://blender-auto-3d-explode.vercel.app
+https://quest3-exploded.vercel.app
 ```
 
 **预期行为**：
@@ -364,7 +364,7 @@ onAREnd();
 
 ## 🚀 快速测试（5 分钟）
 
-1. **手机打开** https://blender-auto-3d-explode.vercel.app
+1. **手机打开** https://quest3-exploded.vercel.app
 2. **检查按钮** 看到绿色 AR 按钮
 3. **点击按钮** 授予相机权限
 4. **扫描环境** 缓慢移动手机

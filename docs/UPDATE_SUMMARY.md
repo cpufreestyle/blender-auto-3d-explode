@@ -287,7 +287,7 @@ v1.2.0: ~4055 行（代码 + 文档）
 ### Vercel
 
 - **状态**：✅ 自动部署中
-- **主域名**：https://blender-auto-3d-explode.vercel.app
+- **主域名**：https://quest3-exploded.vercel.app
 - **自动部署**：每次 push 自动更新
 
 ### 本地服务器
@@ -368,7 +368,7 @@ e7548bb ✨ 完整实现 Quest 3 3D 爆炸图教学工具
 - ✅ Android Chrome
 - ✅ iOS Safari
 
-**访问**：https://blender-auto-3d-explode.vercel.app
+**访问**：https://quest3-exploded.vercel.app
 
 ### 主题切换 🌟🌟🌟🌟
 
@@ -564,7 +564,7 @@ v1.2.0:  18 项功能（+1 AR 预览）
 ## 📞 反馈和支持
 
 - **GitHub Issues**：https://github.com/cpufreestyle/blender-auto-3d-explode/issues
-- **在线演示**：https://blender-auto-3d-explode.vercel.app
+- **在线演示**：https://quest3-exploded.vercel.app
 - **文档**：https://github.com/cpufreestyle/blender-auto-3d-explode
 
 ---
@@ -579,7 +579,7 @@ v1.2.0:  18 项功能（+1 AR 预览）
 
 ## 🔗 快速链接
 
-- **在线演示**：https://blender-auto-3d-explode.vercel.app
+- **在线演示**：https://quest3-exploded.vercel.app
 - **GitHub**：https://github.com/cpufreestyle/blender-auto-3d-explode
 - **v1.0.0 Release**：https://github.com/cpufreestyle/blender-auto-3d-explode/releases/tag/v1.0.0
 - **v1.2.0 Release**：https://github.com/cpufreestyle/blender-auto-3d-explode/releases/tag/v1.2.0

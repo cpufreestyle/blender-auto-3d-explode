@@ -2,7 +2,23 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "public": true,
+  "framework": null,
+  "buildCommand": "",
+  "outputDirectory": ".",
   "github": {
-    "enabled": false
-  }
+    "enabled": true,
+    "autoAlias": true,
+    "silent": true
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" }
+      ]
+    }
+  ]
 }

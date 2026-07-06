@@ -9,13 +9,46 @@
     "start": "node server.js",
     "test": "node tests/e2e-test.mjs",
     "lint": "npx eslint main.js server.js src/ tests/ --fix",
-    "format": "npx prettier --write \"main.js\" \"server.js\" \"src/**/*.js\" \"tests/**/*.mjs\""
+    "format": "npx prettier --write \"main.js\" \"server.js\" \"src/**/*.js\" \"tests/**/*.mjs\"",
+    "lint:css": "npx stylelint \"style.css\" \"upload-enhancement.css\" --fix",
+    "lint:all": "npm run lint && npm run lint:css",
+    "format:all": "npm run format && npm run lint:css",
+    "audit": "npm audit",
+    "upgrade": "npx npm-check-updates -u && npm install",
+    "serve:https": "npx serve . --ssl-cert .cert/cert.pem --ssl-key .cert/key.pem",
+    "build:analyze": "npx webpack-bundle-analyzer dist/stats.html",
+    "build": "npx webpack --mode=production",
+    "build:dev": "npx webpack --mode=development",
+    "serve:dev": "npx webpack serve --mode=development",
+    "serve:prod": "npx serve dist/",
+    "validate": "npm run lint:all && npm test"
   },
-  "keywords": ["three.js", "blender", "glb", "3d", "exploded-view", "webxr"],
+  "keywords": [
+    "three.js",
+    "blender",
+    "glb",
+    "3d",
+    "exploded-view",
+    "webxr"
+  ],
   "author": "",
   "license": "ISC",
   "type": "module",
   "dependencies": {
     "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "compression-webpack-plugin": "^12.0.0",
+    "css-minimizer-webpack-plugin": "^8.0.0",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import": "^2.32.0",
+    "html-webpack-plugin": "^5.6.7",
+    "prettier": "^3.9.4",
+    "stylelint": "^17.14.0",
+    "terser-webpack-plugin": "^5.6.1",
+    "webpack": "^5.108.4",
+    "webpack-bundle-analyzer": "^5.3.0",
+    "webpack-cli": "^7.2.1"
   }
 }

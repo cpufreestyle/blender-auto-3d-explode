@@ -252,7 +252,7 @@ arRenderer.setAnimationLoop((timestamp, frame) => {
 
 **Android**：
 1. 打开 Chrome
-2. 访问 https://blender-auto-3d-explode.vercel.app
+2. 访问 https://quest3-exploded.vercel.app
 3. 点击 "📱 AR 预览"
 4. 授予相机权限
 5. 移动手机扫描平面
@@ -260,7 +260,7 @@ arRenderer.setAnimationLoop((timestamp, frame) => {
 
 **iOS**：
 1. 打开 Safari
-2. 访问 https://blender-auto-3d-explode.vercel.app
+2. 访问 https://quest3-exploded.vercel.app
 3. 点击 "📱 AR 预览"
 4. 授予相机权限
 5. 移动手机扫描平面
