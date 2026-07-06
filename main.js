@@ -2346,6 +2346,17 @@ function updateStepUI() {
   }
 }
 
+// 退出鼠标控制模式，将当前 mouseFactor 同步到 currentStep/displayedStep
+function exitMouseControl() {
+  mouseControlEnabled = false;
+  isExploded = false;
+  explodeBtn?.classList.remove("exploded");
+  if (explodeBtn) explodeBtn.textContent = "💥 爆炸";
+  // 把 mouseFactor 对应的步骤同步到 displayedStep，保证动画从当前位置开始
+  displayedStep = Math.round(mouseFactor * totalSteps);
+  currentStep = mouseFactor * totalSteps;
+}
+
 function goToStep(newStep) {
   newStep = THREE.MathUtils.clamp(newStep, 0, totalSteps);
   if (newStep === displayedStep || isAnimating) return;
@@ -2370,14 +2381,15 @@ let playInterval = null;
 
 if (timelineSlider) {
   timelineSlider.addEventListener("input", e => {
-    const value = parseInt(e.target.value);
-    const step = Math.round((value / 100) * totalSteps);
+    if (mouseControlEnabled) exitMouseControl();
+    const step = parseInt(e.target.value);
     goToStep(step);
   });
 }
 
 if (timelinePlayBtn) {
   timelinePlayBtn.addEventListener("click", () => {
+    if (mouseControlEnabled) exitMouseControl();
     if (isPlaying) {
       // 暂停
       clearInterval(playInterval);
@@ -2406,6 +2418,7 @@ if (timelinePlayBtn) {
 
 if (timelineResetBtn) {
   timelineResetBtn.addEventListener("click", () => {
+    if (mouseControlEnabled) exitMouseControl();
     if (isPlaying) {
       clearInterval(playInterval);
       isPlaying = false;
@@ -2434,9 +2447,19 @@ if (isMobile) {
   };
 }
 
-prevBtn.addEventListener("click", () => goToStep(displayedStep - 1));
-nextBtn.addEventListener("click", () => goToStep(displayedStep + 1));
-resetBtn.addEventListener("click", () => goToStep(0));
+// 点击步骤按钮时，自动退出鼠标控制模式，让步骤动画接管
+prevBtn.addEventListener("click", () => {
+  if (mouseControlEnabled) exitMouseControl();
+  goToStep(displayedStep - 1);
+});
+nextBtn.addEventListener("click", () => {
+  if (mouseControlEnabled) exitMouseControl();
+  goToStep(displayedStep + 1);
+});
+resetBtn.addEventListener("click", () => {
+  if (mouseControlEnabled) exitMouseControl();
+  goToStep(0);
+});
 
 // 爆炸按钮：在完全合体和完全爆炸之间切换
 const explodeBtn = document.getElementById("explode-btn");
@@ -2470,6 +2493,9 @@ if (depthSlider && depthValueEl) {
   depthSlider.addEventListener("input", e => {
     const depth = parseInt(e.target.value);
     depthValueEl.textContent = `${depth}%`;
+
+    // 退出鼠标控制模式，让滑块接管
+    if (mouseControlEnabled) exitMouseControl();
 
     // 计算炸开因子 (0-1)
     const factor = depth / 100;
