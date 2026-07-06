@@ -18,13 +18,13 @@
  *   BLENDER_PATH=/custom/blender node server.js  # 自定义 Blender 路径
  */
 
-import http from 'http';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { fileURLToPath } from 'url';
+import http from "http";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import fs from "fs";
+import path from "path";
+import os from "os";
+import { fileURLToPath } from "url";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -38,7 +38,7 @@ const MAX_PARTS = 10; // multipart 最大 part 数量
 const MAX_BOUNDARY_LENGTH = 200; // boundary 最大长度
 const MAX_HEADER_SIZE = 8192; // 单个 multipart part header 最大大小
 const TEMP_FILE_TTL_MS = 60 * 60 * 1000; // 临时文件存活时间：1 小时
-const UPLOAD_DIR = path.join(os.tmpdir(), 'blender-split-uploads');
+const UPLOAD_DIR = path.join(os.tmpdir(), "blender-split-uploads");
 
 // 确保上传目录存在
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -90,71 +90,77 @@ function findBlender() {
   const platform = os.platform();
   const candidates = [];
 
-  if (platform === 'darwin') {
+  if (platform === "darwin") {
     // macOS — /Applications, ~/Applications, Homebrew
     candidates.push(
-      '/Applications/Blender.app/Contents/MacOS/Blender',
-      '/Applications/Blender.app/Contents/MacOS/blender',
-      path.join(os.homedir(), 'Applications/Blender.app/Contents/MacOS/Blender'),
-      '/opt/homebrew/bin/blender',
-      '/usr/local/bin/blender',
+      "/Applications/Blender.app/Contents/MacOS/Blender",
+      "/Applications/Blender.app/Contents/MacOS/blender",
+      path.join(os.homedir(), "Applications/Blender.app/Contents/MacOS/Blender"),
+      "/opt/homebrew/bin/blender",
+      "/usr/local/bin/blender"
     );
-  } else if (platform === 'linux') {
+  } else if (platform === "linux") {
     candidates.push(
-      '/usr/bin/blender',
-      '/usr/local/bin/blender',
-      '/snap/bin/blender',
-      '/opt/blender/blender',
-      path.join(os.homedir(), '.local/bin/blender'),
+      "/usr/bin/blender",
+      "/usr/local/bin/blender",
+      "/snap/bin/blender",
+      "/opt/blender/blender",
+      path.join(os.homedir(), ".local/bin/blender")
     );
-  } else if (platform === 'win32') {
+  } else if (platform === "win32") {
     // Windows — Program Files, scoop, chocolatey
-    const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files';
-    const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+    const programFiles = process.env["ProgramFiles"] || "C:\\Program Files";
+    const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
     candidates.push(
-      path.join(programFiles, 'Blender Foundation', 'Blender', 'blender.exe'),
-      path.join(programFilesX86, 'Blender Foundation', 'Blender', 'blender.exe'),
-      path.join(os.homedir(), 'scoop', 'apps', 'blender', 'current', 'blender.exe'),
-      path.join('C:\\', 'ProgramData', 'chocolatey', 'bin', 'blender.exe'),
+      path.join(programFiles, "Blender Foundation", "Blender", "blender.exe"),
+      path.join(programFilesX86, "Blender Foundation", "Blender", "blender.exe"),
+      path.join(os.homedir(), "scoop", "apps", "blender", "current", "blender.exe"),
+      path.join("C:\\", "ProgramData", "chocolatey", "bin", "blender.exe")
     );
   }
 
   // 最后回退到 PATH 中的 blender
-  candidates.push('blender');
+  candidates.push("blender");
 
   for (const c of candidates) {
     try {
-      if (c === 'blender') return c; // 依赖 PATH 解析
+      if (c === "blender") return c; // 依赖 PATH 解析
       if (fs.existsSync(c)) {
         console.log(`  🔍 检测到 Blender: ${c}`);
         return c;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
-  console.log('  ⚠️  未找到 Blender 可执行文件，将使用 PATH 中的 blender');
-  return 'blender';
+  console.log("  ⚠️  未找到 Blender 可执行文件，将使用 PATH 中的 blender");
+  return "blender";
 }
 
 /**
  * 调用 Blender CLI 进行 AI 绘画（生成模型）
  */
 async function runBlenderAIPaint(prompt, outputPath, manifestPath, imageFeaturesPath) {
-  const scriptPath = path.join(__dirname, 'blender_ai_paint.py');
+  const scriptPath = path.join(__dirname, "blender_ai_paint.py");
   const args = [
-    '--background',
-    '--python', scriptPath,
-    '--',
-    '--prompt', prompt,
-    '--output', outputPath,
-    '--manifest', manifestPath,
+    "--background",
+    "--python",
+    scriptPath,
+    "--",
+    "--prompt",
+    prompt,
+    "--output",
+    outputPath,
+    "--manifest",
+    manifestPath,
   ];
 
   // 如果有图片特征文件，传递给 Blender
   if (imageFeaturesPath) {
-    args.push('--image-features', imageFeaturesPath);
+    args.push("--image-features", imageFeaturesPath);
   }
 
-  console.log(`  🎨 AI 绘画: ${BLENDER_PATH} ${args.join(' ')}`);
+  console.log(`  🎨 AI 绘画: ${BLENDER_PATH} ${args.join(" ")}`);
 
   const { stdout, stderr } = await execFileAsync(BLENDER_PATH, args, {
     timeout: 120_000, // 2 分钟超时
@@ -168,18 +174,23 @@ async function runBlenderAIPaint(prompt, outputPath, manifestPath, imageFeatures
  * 调用 Blender CLI 拆解 GLB
  */
 async function runBlenderSplit(inputPath, outputPath, manifestPath, originalFileName) {
-  const scriptPath = path.join(__dirname, 'blender_split_glb.py');
+  const scriptPath = path.join(__dirname, "blender_split_glb.py");
   const args = [
-    '--background',
-    '--python', scriptPath,
-    '--',
-    '--input', inputPath,
-    '--output', outputPath,
-    '--manifest', manifestPath,
-    '--original-filename', originalFileName,
+    "--background",
+    "--python",
+    scriptPath,
+    "--",
+    "--input",
+    inputPath,
+    "--output",
+    outputPath,
+    "--manifest",
+    manifestPath,
+    "--original-filename",
+    originalFileName,
   ];
 
-  console.log(`  🔧 调用 Blender: ${BLENDER_PATH} ${args.join(' ')}`);
+  console.log(`  🔧 调用 Blender: ${BLENDER_PATH} ${args.join(" ")}`);
 
   const { stdout, stderr } = await execFileAsync(BLENDER_PATH, args, {
     timeout: 600_000, // 10 分钟超时（大模型需要更久）
@@ -196,9 +207,9 @@ async function runBlenderSplit(inputPath, outputPath, manifestPath, originalFile
  */
 function sanitizeFilename(name) {
   // 移除路径分隔符和 ..
-  const cleaned = name.replace(/[/\\]/g, '').replace(/\.\./g, '');
+  const cleaned = name.replace(/[/\\]/g, "").replace(/\.\./g, "");
   // 移除控制字符
-  return cleaned.replace(/[\x00-\x1f\x7f]/g, '');
+  return cleaned.replace(/[\x00-\x1f\x7f]/g, "");
 }
 
 /**
@@ -209,10 +220,10 @@ function sanitizeFilename(name) {
  */
 function parseMultipart(req) {
   return new Promise((resolve, reject) => {
-    const contentType = req.headers['content-type'] || '';
+    const contentType = req.headers["content-type"] || "";
     const boundaryMatch = contentType.match(/boundary=([^\s;]+)/);
     if (!boundaryMatch) {
-      reject(new Error('未找到 multipart boundary'));
+      reject(new Error("未找到 multipart boundary"));
       return;
     }
 
@@ -220,31 +231,31 @@ function parseMultipart(req) {
 
     // 校验 boundary 长度，防止恶意构造
     if (boundaryStr.length > MAX_BOUNDARY_LENGTH) {
-      reject(new Error('boundary 过长'));
+      reject(new Error("boundary 过长"));
       req.destroy();
       return;
     }
 
-    const boundary = '--' + boundaryStr;
+    const boundary = "--" + boundaryStr;
     const chunks = [];
     let totalReceived = 0;
 
-    req.on('data', (chunk) => {
+    req.on("data", chunk => {
       totalReceived += chunk.length;
       if (totalReceived > MAX_FILE_SIZE) {
-        reject(new Error('文件太大'));
+        reject(new Error("文件太大"));
         req.destroy();
         return;
       }
       chunks.push(chunk);
     });
 
-    req.on('end', () => {
+    req.on("end", () => {
       try {
         const buffer = Buffer.concat(chunks);
         const result = parseMultipartBuffer(buffer, boundary);
         if (!result) {
-          reject(new Error('未能从请求中提取文件'));
+          reject(new Error("未能从请求中提取文件"));
         } else {
           resolve(result);
         }
@@ -253,7 +264,7 @@ function parseMultipart(req) {
       }
     });
 
-    req.on('error', reject);
+    req.on("error", reject);
   });
 }
 
@@ -273,7 +284,7 @@ function parseMultipartBuffer(buffer, boundary) {
     // 跳过 boundary 行
     const afterBoundary = bStart + boundaryBuf.length;
     // 检查是否结束
-    if (buffer.slice(afterBoundary, afterBoundary + 2).toString() === '--') break;
+    if (buffer.slice(afterBoundary, afterBoundary + 2).toString() === "--") break;
 
     // 找下一个 boundary
     const nextBoundary = buffer.indexOf(boundaryBuf, afterBoundary);
@@ -289,15 +300,15 @@ function parseMultipartBuffer(buffer, boundary) {
     const partData = buffer.slice(afterBoundary, nextBoundary);
 
     // 校验 part header 大小
-    if (partData.length > MAX_HEADER_SIZE && partData.indexOf(Buffer.from('\r\n\r\n')) === -1) {
-      throw new Error('multipart part header 过大');
+    if (partData.length > MAX_HEADER_SIZE && partData.indexOf(Buffer.from("\r\n\r\n")) === -1) {
+      throw new Error("multipart part header 过大");
     }
 
     // 去掉前后的 \r\n
-    const partStr = partData.toString('latin1');
+    const partStr = partData.toString("latin1");
 
     // 解析 headers
-    const headerEnd = partStr.indexOf('\r\n\r\n');
+    const headerEnd = partStr.indexOf("\r\n\r\n");
     if (headerEnd === -1) continue;
 
     const headerStr = partStr.substring(0, headerEnd);
@@ -318,9 +329,9 @@ function parseMultipartBuffer(buffer, boundary) {
       if (!safeFilename) continue;
 
       parts.push({
-        fieldname: nameMatch ? nameMatch[1] : 'file',
+        fieldname: nameMatch ? nameMatch[1] : "file",
         filename: safeFilename,
-        contentType: contentTypeMatch ? contentTypeMatch[1].trim() : 'application/octet-stream',
+        contentType: contentTypeMatch ? contentTypeMatch[1].trim() : "application/octet-stream",
         data: buffer.slice(bodyStart, bodyEnd),
       });
     }
@@ -339,11 +350,11 @@ function parseMultipartBuffer(buffer, boundary) {
 function sendJSON(res, statusCode, data) {
   const json = JSON.stringify(data);
   res.writeHead(statusCode, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Manifest',
-    'Access-Control-Expose-Headers': 'X-Manifest, X-Total-Parts, X-Elapsed-Seconds, X-Success',
+    "Content-Type": "application/json; charset=utf-8",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, X-Manifest",
+    "Access-Control-Expose-Headers": "X-Manifest, X-Total-Parts, X-Elapsed-Seconds, X-Success",
   });
   res.end(json);
 }
@@ -355,19 +366,19 @@ function sendJSON(res, statusCode, data) {
  */
 function sendBinaryResult(res, glbBuffer, manifest, elapsed) {
   const manifestJson = JSON.stringify(manifest);
-  const manifestBase64 = Buffer.from(manifestJson, 'utf-8').toString('base64');
+  const manifestBase64 = Buffer.from(manifestJson, "utf-8").toString("base64");
 
   res.writeHead(200, {
-    'Content-Type': 'application/octet-stream',
-    'Content-Length': glbBuffer.length,
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Manifest',
-    'Access-Control-Expose-Headers': 'X-Manifest, X-Total-Parts, X-Elapsed-Seconds, X-Success',
-    'X-Success': 'true',
-    'X-Total-Parts': String(manifest.total_parts || 0),
-    'X-Elapsed-Seconds': elapsed,
-    'X-Manifest': manifestBase64,
+    "Content-Type": "application/octet-stream",
+    "Content-Length": glbBuffer.length,
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, X-Manifest",
+    "Access-Control-Expose-Headers": "X-Manifest, X-Total-Parts, X-Elapsed-Seconds, X-Success",
+    "X-Success": "true",
+    "X-Total-Parts": String(manifest.total_parts || 0),
+    "X-Elapsed-Seconds": elapsed,
+    "X-Manifest": manifestBase64,
   });
   res.end(glbBuffer);
 }
@@ -382,21 +393,23 @@ function sendBinaryResult(res, glbBuffer, manifest, elapsed) {
  */
 async function handleAIPaint(req, res) {
   const startTime = Date.now();
-  let blenderStdout = '';
-  let blenderStderr = '';
+  let blenderStdout = "";
+  let blenderStderr = "";
 
   try {
     // 1. 读取 JSON body
     const body = await readJSONBody(req);
-    const prompt = body.prompt || '球体';
+    const prompt = body.prompt || "球体";
 
-    if (typeof prompt !== 'string' || prompt.length > 500) {
-      sendJSON(res, 400, { error: '提示词无效或过长（最多500字符）' });
+    if (typeof prompt !== "string" || prompt.length > 500) {
+      sendJSON(res, 400, { error: "提示词无效或过长（最多500字符）" });
       return;
     }
 
     const imageFeatures = body.imageFeatures || null;
-    console.log(`\n🎨 AI 绘画请求: "${prompt}"${imageFeatures ? ` + 图片特征(${imageFeatures.mood}色调, ${imageFeatures.dominantColors?.length || 0}主色)` : ''}`);
+    console.log(
+      `\n🎨 AI 绘画请求: "${prompt}"${imageFeatures ? ` + 图片特征(${imageFeatures.mood}色调, ${imageFeatures.dominantColors?.length || 0}主色)` : ""}`
+    );
 
     // 2. 临时文件路径
     const jobId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -407,7 +420,7 @@ async function handleAIPaint(req, res) {
     let imageFeaturesPath = null;
     if (imageFeatures) {
       imageFeaturesPath = path.join(UPLOAD_DIR, `ai-imgfeat-${jobId}.json`);
-      fs.writeFileSync(imageFeaturesPath, JSON.stringify(imageFeatures, null, 2), 'utf-8');
+      fs.writeFileSync(imageFeaturesPath, JSON.stringify(imageFeatures, null, 2), "utf-8");
       console.log(`  🖼️ 图片特征已写入: ${imageFeaturesPath}`);
     }
 
@@ -415,11 +428,11 @@ async function handleAIPaint(req, res) {
       // 3. 调用 Blender 生成模型
       try {
         const result = await runBlenderAIPaint(prompt, outputPath, manifestPath, imageFeaturesPath);
-        blenderStdout = result.stdout || '';
-        blenderStderr = result.stderr || '';
+        blenderStdout = result.stdout || "";
+        blenderStderr = result.stderr || "";
       } catch (berr) {
-        blenderStdout = berr.stdout || '';
-        blenderStderr = berr.stderr || berr.message || '';
+        blenderStdout = berr.stdout || "";
+        blenderStderr = berr.stderr || berr.message || "";
       }
 
       if (blenderStdout) console.log(`  📤 Blender stdout:\n${blenderStdout.slice(0, 3000)}`);
@@ -427,37 +440,41 @@ async function handleAIPaint(req, res) {
 
       // 4. 检查输出
       if (!fs.existsSync(outputPath)) {
-        const detail = (blenderStderr || blenderStdout || '').slice(0, 3000);
+        const detail = (blenderStderr || blenderStdout || "").slice(0, 3000);
         throw new Error(`Blender 未生成 GLB 文件。日志:\n${detail}`);
       }
       if (!fs.existsSync(manifestPath)) {
-        const detail = (blenderStderr || blenderStdout || '').slice(0, 3000);
+        const detail = (blenderStderr || blenderStdout || "").slice(0, 3000);
         throw new Error(`Blender 未生成 manifest。日志:\n${detail}`);
       }
 
       // 5. 读取结果
       const outputBuffer = fs.readFileSync(outputPath);
-      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-      console.log(`  ✅ AI 绘画完成: ${manifest.total_parts} 个部件 (${elapsed}s, ${(outputBuffer.length / 1024).toFixed(1)} KB)`);
+      console.log(
+        `  ✅ AI 绘画完成: ${manifest.total_parts} 个部件 (${elapsed}s, ${(outputBuffer.length / 1024).toFixed(1)} KB)`
+      );
 
       // 6. 返回二进制 GLB + manifest 头
       sendBinaryResult(res, outputBuffer, manifest, elapsed);
-
     } finally {
       // 清理临时文件
       [outputPath, manifestPath].forEach(f => {
-        try { fs.unlinkSync(f); } catch { /* ignore */ }
+        try {
+          fs.unlinkSync(f);
+        } catch {
+          /* ignore */
+        }
       });
     }
-
   } catch (err) {
     console.error(`  ❌ AI 绘画失败: ${err.message}`);
     sendJSON(res, 500, {
       success: false,
       error: err.message,
-      blender_output: blenderStdout || blenderStderr || '',
+      blender_output: blenderStdout || blenderStderr || "",
     });
   }
 }
@@ -471,27 +488,27 @@ function readJSONBody(req) {
     let totalReceived = 0;
     const MAX_JSON_SIZE = 10 * 1024; // 10 KB
 
-    req.on('data', (chunk) => {
+    req.on("data", chunk => {
       totalReceived += chunk.length;
       if (totalReceived > MAX_JSON_SIZE) {
-        reject(new Error('请求体太大'));
+        reject(new Error("请求体太大"));
         req.destroy();
         return;
       }
       chunks.push(chunk);
     });
 
-    req.on('end', () => {
+    req.on("end", () => {
       try {
         const buffer = Buffer.concat(chunks);
-        const json = JSON.parse(buffer.toString('utf-8'));
+        const json = JSON.parse(buffer.toString("utf-8"));
         resolve(json);
       } catch (err) {
-        reject(new Error('JSON 解析失败: ' + err.message));
+        reject(new Error("JSON 解析失败: " + err.message));
       }
     });
 
-    req.on('error', reject);
+    req.on("error", reject);
   });
 }
 
@@ -500,17 +517,17 @@ function readJSONBody(req) {
  */
 async function handleHealth(req, res) {
   try {
-    const { stdout } = await execFileAsync(BLENDER_PATH, ['--version'], { timeout: 10_000 });
-    const version = stdout.match(/Blender ([\d.]+)/)?.[1] || 'unknown';
+    const { stdout } = await execFileAsync(BLENDER_PATH, ["--version"], { timeout: 10_000 });
+    const version = stdout.match(/Blender ([\d.]+)/)?.[1] || "unknown";
     sendJSON(res, 200, {
-      status: 'ok',
+      status: "ok",
       blender: BLENDER_PATH,
       version: version,
       message: `Blender ${version} 可用`,
     });
   } catch (err) {
     sendJSON(res, 503, {
-      status: 'error',
+      status: "error",
       blender: BLENDER_PATH,
       message: `Blender 不可用: ${err.message}`,
     });
@@ -524,20 +541,20 @@ async function handleHealth(req, res) {
 async function handleSplit(req, res) {
   const startTime = Date.now();
   // 提到外层 try 之前，确保 catch 块可以访问
-  let blenderStdout = '';
-  let blenderStderr = '';
+  let blenderStdout = "";
+  let blenderStderr = "";
 
   try {
     // 1. 解析上传的文件
     const file = await parseMultipart(req);
     if (!file) {
-      sendJSON(res, 400, { error: '未收到文件' });
+      sendJSON(res, 400, { error: "未收到文件" });
       return;
     }
 
     const fileName = file.filename;
     const ext = path.extname(fileName).toLowerCase();
-    if (!['.glb', '.gltf', '.stl'].includes(ext)) {
+    if (![".glb", ".gltf", ".stl"].includes(ext)) {
       sendJSON(res, 400, { error: `不支持的格式: ${ext}，支持 .glb / .gltf / .stl` });
       return;
     }
@@ -558,12 +575,12 @@ async function handleSplit(req, res) {
       // 4. 调用 Blender
       try {
         const result = await runBlenderSplit(inputPath, outputPath, manifestPath, fileName);
-        blenderStdout = result.stdout || '';
-        blenderStderr = result.stderr || '';
+        blenderStdout = result.stdout || "";
+        blenderStderr = result.stderr || "";
       } catch (berr) {
         // Blender 进程本身出错（崩溃/超时）
-        blenderStdout = berr.stdout || '';
-        blenderStderr = berr.stderr || berr.message || '';
+        blenderStdout = berr.stdout || "";
+        blenderStderr = berr.stderr || berr.message || "";
       }
 
       // 打印 Blender 输出到服务器日志
@@ -572,37 +589,39 @@ async function handleSplit(req, res) {
 
       // 5. 检查输出
       if (!fs.existsSync(outputPath)) {
-        const detail = (blenderStderr || blenderStdout || '').slice(0, 3000);
+        const detail = (blenderStderr || blenderStdout || "").slice(0, 3000);
         throw new Error(`Blender 未生成输出文件。Blender 日志:\n${detail}`);
       }
       if (!fs.existsSync(manifestPath)) {
-        const detail = (blenderStderr || blenderStdout || '').slice(0, 3000);
+        const detail = (blenderStderr || blenderStdout || "").slice(0, 3000);
         throw new Error(`Blender 未生成清单文件。Blender 日志:\n${detail}`);
       }
 
       // 6. 读取结果
       const outputBuffer = fs.readFileSync(outputPath);
-      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
       console.log(`  ✅ 拆解完成: ${manifest.total_parts} 个部件 (${elapsed}s)`);
 
       // 7. 返回二进制 GLB + manifest 头（不再 base64 编码）
       sendBinaryResult(res, outputBuffer, manifest, elapsed);
-
     } finally {
       // 清理临时文件
       [inputPath, outputPath, manifestPath].forEach(f => {
-        try { fs.unlinkSync(f); } catch { /* ignore */ }
+        try {
+          fs.unlinkSync(f);
+        } catch {
+          /* ignore */
+        }
       });
     }
-
   } catch (err) {
     console.error(`  ❌ 拆解失败: ${err.message}`);
     sendJSON(res, 500, {
       success: false,
       error: err.message,
-      blender_output: blenderStdout || blenderStderr || '',
+      blender_output: blenderStdout || blenderStderr || "",
     });
   }
 }
@@ -611,12 +630,12 @@ async function handleSplit(req, res) {
 
 const server = http.createServer(async (req, res) => {
   // CORS 预检
-  if (req.method === 'OPTIONS') {
+  if (req.method === "OPTIONS") {
     res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Manifest',
-      'Access-Control-Expose-Headers': 'X-Manifest, X-Total-Parts, X-Elapsed-Seconds, X-Success',
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, X-Manifest",
+      "Access-Control-Expose-Headers": "X-Manifest, X-Total-Parts, X-Elapsed-Seconds, X-Success",
     });
     res.end();
     return;
@@ -624,75 +643,75 @@ const server = http.createServer(async (req, res) => {
 
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
-  if (req.method === 'GET' && url.pathname === '/api/health') {
+  if (req.method === "GET" && url.pathname === "/api/health") {
     await handleHealth(req, res);
-  } else if (req.method === 'POST' && url.pathname === '/api/split') {
+  } else if (req.method === "POST" && url.pathname === "/api/split") {
     await handleSplit(req, res);
-  } else if (req.method === 'POST' && url.pathname === '/api/ai-paint') {
+  } else if (req.method === "POST" && url.pathname === "/api/ai-paint") {
     await handleAIPaint(req, res);
-  } else if (req.method === 'GET') {
+  } else if (req.method === "GET") {
     serveStatic(req, res, url);
   } else {
-    sendJSON(res, 404, { error: 'Not Found', path: url.pathname });
+    sendJSON(res, 404, { error: "Not Found", path: url.pathname });
   }
 });
 
 // ── 静态文件服务 ──────────────────────────────────────
 
 const MIME_TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.glb': 'model/gltf-binary',
-  '.gltf': 'model/gltf+json',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.wasm': 'application/wasm',
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".glb": "model/gltf-binary",
+  ".gltf": "model/gltf+json",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".wasm": "application/wasm",
 };
 
 function serveStatic(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
-  
+
   // 安全：防止路径遍历
-  if (pathname.includes('..')) {
-    sendJSON(res, 403, { error: 'Forbidden' });
+  if (pathname.includes("..")) {
+    sendJSON(res, 403, { error: "Forbidden" });
     return;
   }
 
   // 默认 index.html
-  if (pathname === '/' || pathname === '') {
-    pathname = '/index.html';
+  if (pathname === "/" || pathname === "") {
+    pathname = "/index.html";
   }
 
   const filePath = path.join(__dirname, pathname);
 
   // 确保文件在 __dirname 下
   if (!filePath.startsWith(__dirname)) {
-    sendJSON(res, 403, { error: 'Forbidden' });
+    sendJSON(res, 403, { error: "Forbidden" });
     return;
   }
 
   fs.readFile(filePath, (err, data) => {
     if (err) {
-      sendJSON(res, 404, { error: 'Not Found', path: pathname });
+      sendJSON(res, 404, { error: "Not Found", path: pathname });
       return;
     }
 
     const ext = path.extname(filePath).toLowerCase();
-    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+    const contentType = MIME_TYPES[ext] || "application/octet-stream";
 
     res.writeHead(200, {
-      'Content-Type': contentType,
-      'Cache-Control': 'no-cache',
-      'Content-Length': data.length,
+      "Content-Type": contentType,
+      "Cache-Control": "no-cache",
+      "Content-Length": data.length,
     });
     res.end(data);
   });
@@ -701,24 +720,24 @@ function serveStatic(req, res, url) {
 // ── 启动 ──────────────────────────────────────────────
 
 server.listen(PORT, () => {
-  console.log('═'.repeat(50));
-  console.log('  🔧 GLB 拆解服务器（零依赖版 v2）');
+  console.log("═".repeat(50));
+  console.log("  🔧 GLB 拆解服务器（零依赖版 v2）");
   console.log(`  📡 http://localhost:${PORT}`);
   console.log(`  🎨 Blender: ${BLENDER_PATH}`);
-  console.log('═'.repeat(50));
-  console.log('\n  端点:');
-  console.log(`    GET  /              — 静态文件 (index.html)`);
-  console.log(`    GET  /api/health   — 健康检查`);
-  console.log(`    POST /api/split    — 拆解 GLB（二进制响应）`);
-  console.log(`    POST /api/ai-paint — AI 绘画（生成3D模型）\n`);
+  console.log("═".repeat(50));
+  console.log("\n  端点:");
+  console.log("    GET  /              — 静态文件 (index.html)");
+  console.log("    GET  /api/health   — 健康检查");
+  console.log("    POST /api/split    — 拆解 GLB（二进制响应）");
+  console.log("    POST /api/ai-paint — AI 绘画（生成3D模型）\n");
 
   // 启动时检测 Blender
-  execFileAsync(BLENDER_PATH, ['--version'], { timeout: 10_000 })
+  execFileAsync(BLENDER_PATH, ["--version"], { timeout: 10_000 })
     .then(({ stdout }) => {
-      const version = stdout.match(/Blender ([\d.]+)/)?.[1] || 'unknown';
+      const version = stdout.match(/Blender ([\d.]+)/)?.[1] || "unknown";
       console.log(`  ✅ Blender ${version} 已就绪\n`);
     })
     .catch(() => {
-      console.log(`  ⚠️  Blender 不可用，服务器仍会运行（前端将回退到 JS 拆解）\n`);
+      console.log("  ⚠️  Blender 不可用，服务器仍会运行（前端将回退到 JS 拆解）\n");
     });
 });

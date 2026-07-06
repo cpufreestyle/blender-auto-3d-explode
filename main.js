@@ -1,15 +1,15 @@
-import * as THREE from './vendor/three.module.js';
-import { OrbitControls } from './vendor/OrbitControls.js';
-import { RoundedBoxGeometry } from './vendor/RoundedBoxGeometry.js';
-import { quest3Specs, partInfo } from './src/quest3-data.js';
-import { defaultStepGroups } from './src/quest3-steps.js';
+import * as THREE from "./vendor/three.module.js";
+import { OrbitControls } from "./vendor/OrbitControls.js";
+import { RoundedBoxGeometry } from "./vendor/RoundedBoxGeometry.js";
+import { quest3Specs, partInfo } from "./src/quest3-data.js";
+import { defaultStepGroups } from "./src/quest3-steps.js";
 
 // 动态导入 GLTFLoader（本地化 + Import Map 支持）
 let GLTFLoader = null;
 async function loadGLTFLoader() {
   if (!GLTFLoader) {
     // 直接使用 import，依赖 import map 解析 'three'
-    const module = await import('./vendor/GLTFLoader.js');
+    const module = await import("./vendor/GLTFLoader.js");
     GLTFLoader = module.GLTFLoader;
   }
   return GLTFLoader;
@@ -19,7 +19,7 @@ async function loadGLTFLoader() {
 let STLLoader = null;
 async function loadSTLLoader() {
   if (!STLLoader) {
-    const module = await import('./vendor/STLLoader.js');
+    const module = await import("./vendor/STLLoader.js");
     STLLoader = module.STLLoader;
   }
   return STLLoader;
@@ -27,17 +27,20 @@ async function loadSTLLoader() {
 
 // ===== WebGL 支持检测 =====
 try {
-  const canvas = document.createElement('canvas');
-  const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-  if (!gl) throw new Error('浏览器不支持 WebGL');
+  const canvas = document.createElement("canvas");
+  const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+  if (!gl) throw new Error("浏览器不支持 WebGL");
 } catch (err) {
-  const el = document.getElementById('error');
-  if (el) { el.classList.remove('hidden'); el.textContent = err.message; }
+  const el = document.getElementById("error");
+  if (el) {
+    el.classList.remove("hidden");
+    el.textContent = err.message;
+  }
   throw err;
 }
 
 // ===== 场景初始化 =====
-const container = document.getElementById('canvas-container');
+const container = document.getElementById("canvas-container");
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0c12);
 scene.fog = new THREE.Fog(0x0a0c12, 10, 40);
@@ -54,11 +57,11 @@ const particlesGeometry = new THREE.BufferGeometry();
 const particlesCount = 500;
 const posArray = new Float32Array(particlesCount * 3);
 
-for(let i = 0; i < particlesCount * 3; i++) {
+for (let i = 0; i < particlesCount * 3; i++) {
   posArray[i] = (Math.random() - 0.5) * 30;
 }
 
-particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+particlesGeometry.setAttribute("position", new THREE.BufferAttribute(posArray, 3));
 const particlesMaterial = new THREE.PointsMaterial({
   size: 0.02,
   color: 0x4a9eff,
@@ -142,11 +145,11 @@ function fitCameraToModel(modelGroup, smooth = true) {
     controls.target.copy(targetPos);
   }
 
-  console.log('📐 相机适配:', {
+  console.log("📐 相机适配:", {
     center: `(${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`,
     size: `(${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`,
     maxDim: maxDim.toFixed(2),
-    cameraDistance: cameraDistance.toFixed(2)
+    cameraDistance: cameraDistance.toFixed(2),
   });
 }
 
@@ -194,13 +197,13 @@ function calculateSmartExplodeDist(modelGroup, explodeDir) {
   // 确保不会太小
   suggestedDist = Math.max(suggestedDist, 0.8);
 
-  console.log('🧮 智能爆炸距离计算:', {
+  console.log("🧮 智能爆炸距离计算:", {
     modelSize: maxDim.toFixed(2),
     distToCamera: distToCamera.toFixed(2),
     maxVisibleDist: maxVisibleDist.toFixed(2),
-    angleWithCamera: (angleWithCamera * 180 / Math.PI).toFixed(1) + '°',
+    angleWithCamera: ((angleWithCamera * 180) / Math.PI).toFixed(1) + "°",
     angleFactor: angleFactor.toFixed(2),
-    suggestedDist: suggestedDist.toFixed(2)
+    suggestedDist: suggestedDist.toFixed(2),
   });
 
   return suggestedDist;
@@ -305,7 +308,14 @@ scene.add(questGroup);
 
 const parts = []; // 存储所有可拆解部件
 
-function createPart({ mesh, homePos, explodePos, homeRot = [0, 0, 0], explodeRot = [0, 0, 0], name }) {
+function createPart({
+  mesh,
+  homePos,
+  explodePos,
+  homeRot = [0, 0, 0],
+  explodeRot = [0, 0, 0],
+  name,
+}) {
   mesh.position.set(...homePos);
   mesh.rotation.set(...homeRot);
   mesh.castShadow = true;
@@ -330,7 +340,7 @@ createPart({
   mesh: bodyMesh,
   homePos: [0, 0, 0],
   explodePos: [0, 0, 0],
-  name: '主机身',
+  name: "主机身",
 });
 
 // 2. 前面板（白色外壳）
@@ -340,7 +350,7 @@ createPart({
   mesh: frontMesh,
   homePos: [0, 0, 0.55],
   explodePos: [0, 0, 1.45],
-  name: '前面板',
+  name: "前面板",
 });
 
 // 3. 后面罩/泡沫垫
@@ -350,7 +360,7 @@ createPart({
   mesh: foamMesh,
   homePos: [0, 0, -0.55],
   explodePos: [0, 0, -1.35],
-  name: '面罩海绵',
+  name: "面罩海绵",
 });
 
 // 4. 左右透镜模组
@@ -361,7 +371,7 @@ createPart({
   mesh: leftBarrel,
   homePos: [-0.52, 0.05, -0.12],
   explodePos: [-0.52, 0.05, -0.7],
-  name: '左透镜模组',
+  name: "左透镜模组",
 });
 
 const rightBarrel = new THREE.Mesh(barrelGeo.clone(), materials.lensBarrel);
@@ -369,7 +379,7 @@ createPart({
   mesh: rightBarrel,
   homePos: [0.52, 0.05, -0.12],
   explodePos: [0.52, 0.05, -0.7],
-  name: '右透镜模组',
+  name: "右透镜模组",
 });
 
 // 5. 透镜玻璃片
@@ -380,7 +390,7 @@ createPart({
   mesh: leftGlass,
   homePos: [-0.52, 0.05, -0.34],
   explodePos: [-0.52, 0.05, -1.1],
-  name: '左透镜',
+  name: "左透镜",
 });
 
 const rightGlass = new THREE.Mesh(glassGeo.clone(), materials.lensGlass);
@@ -388,7 +398,7 @@ createPart({
   mesh: rightGlass,
   homePos: [0.52, 0.05, -0.34],
   explodePos: [0.52, 0.05, -1.1],
-  name: '右透镜',
+  name: "右透镜",
 });
 
 // 6. 显示屏/主板
@@ -398,7 +408,7 @@ createPart({
   mesh: pcbMesh,
   homePos: [0, 0.05, -0.05],
   explodePos: [0, 0.05, -0.95],
-  name: '主板/显示屏',
+  name: "主板/显示屏",
 });
 
 // 7. 前置摄像头（左右两颗 + 中间一颗）
@@ -410,7 +420,7 @@ createPart({
   mesh: leftCam,
   homePos: [-0.75, 0.18, 0.68],
   explodePos: [-0.95, 0.35, 1.8],
-  name: '左摄像头',
+  name: "左摄像头",
 });
 
 const rightCam = new THREE.Mesh(camGeo.clone(), materials.camera);
@@ -418,7 +428,7 @@ createPart({
   mesh: rightCam,
   homePos: [0.75, 0.18, 0.68],
   explodePos: [0.95, 0.35, 1.8],
-  name: '右摄像头',
+  name: "右摄像头",
 });
 
 const centerCam = new THREE.Mesh(camGeo.clone(), materials.camera);
@@ -426,7 +436,7 @@ createPart({
   mesh: centerCam,
   homePos: [0, 0.28, 0.68],
   explodePos: [0, 0.55, 1.9],
-  name: '中置摄像头',
+  name: "中置摄像头",
 });
 
 // 摄像头镜头小圆点
@@ -446,7 +456,7 @@ createPart({
   mesh: bottomCam,
   homePos: [0, -0.35, 0.6],
   explodePos: [0, -0.75, 1.7],
-  name: '下置追踪摄像头',
+  name: "下置追踪摄像头",
 });
 addCamLens(bottomCam, 0.045);
 
@@ -457,7 +467,7 @@ createPart({
   mesh: leftArm,
   homePos: [-1.25, 0, 0],
   explodePos: [-2.1, 0, 0],
-  name: '左头带臂',
+  name: "左头带臂",
 });
 
 const rightArm = new THREE.Mesh(armGeo.clone(), materials.strapArm);
@@ -465,7 +475,7 @@ createPart({
   mesh: rightArm,
   homePos: [1.25, 0, 0],
   explodePos: [2.1, 0, 0],
-  name: '右头带臂',
+  name: "右头带臂",
 });
 
 // 10. 头带（简化弧线）
@@ -482,7 +492,7 @@ createPart({
   mesh: strapMesh,
   homePos: [0, 0, 0],
   explodePos: [0, 0.9, -0.8],
-  name: '头带',
+  name: "头带",
 });
 
 // ===== 自定义模型处理 =====
@@ -507,7 +517,8 @@ class UnionFind {
     return x;
   }
   union(a, b) {
-    const ra = this.find(a), rb = this.find(b);
+    const ra = this.find(a),
+      rb = this.find(b);
     if (ra !== rb) this.parent[ra] = rb;
   }
 }
@@ -534,9 +545,9 @@ function extractFacesToGeometry(geometry, faceIndices) {
   }
 
   const newGeo = new THREE.BufferGeometry();
-  newGeo.setAttribute('position', new THREE.Float32BufferAttribute(newPositions, 3));
-  if (newNormals) newGeo.setAttribute('normal', new THREE.Float32BufferAttribute(newNormals, 3));
-  if (newUVs) newGeo.setAttribute('uv', new THREE.Float32BufferAttribute(newUVs, 2));
+  newGeo.setAttribute("position", new THREE.Float32BufferAttribute(newPositions, 3));
+  if (newNormals) newGeo.setAttribute("normal", new THREE.Float32BufferAttribute(newNormals, 3));
+  if (newUVs) newGeo.setAttribute("uv", new THREE.Float32BufferAttribute(newUVs, 2));
   return newGeo;
 }
 
@@ -628,11 +639,11 @@ function splitSpatially(geometry, material, targetParts) {
   const size = new THREE.Vector3();
   box.getSize(size);
 
-  const maxAxis = size.x >= size.y && size.x >= size.z ? 'x' : (size.y >= size.z ? 'y' : 'z');
+  const maxAxis = size.x >= size.y && size.x >= size.z ? "x" : size.y >= size.z ? "y" : "z";
   const axisSize = size[maxAxis];
   if (axisSize < 0.001) return [];
 
-  const getter = maxAxis === 'x' ? 'getX' : (maxAxis === 'y' ? 'getY' : 'getZ');
+  const getter = maxAxis === "x" ? "getX" : maxAxis === "y" ? "getY" : "getZ";
   const index = geometry.index;
   const faceCount = index ? index.count / 3 : pos.count / 3;
   const results = [];
@@ -665,18 +676,20 @@ function generatePartName(index, position, bbox) {
   const dy = position.y - center.y;
   const dz = position.z - center.z;
 
-  const absX = Math.abs(dx), absY = Math.abs(dy), absZ = Math.abs(dz);
+  const absX = Math.abs(dx),
+    absY = Math.abs(dy),
+    absZ = Math.abs(dz);
   const maxAbs = Math.max(absX, absY, absZ);
 
   let direction;
   if (maxAbs < bbox.getSize(new THREE.Vector3()).length() * 0.05) {
-    direction = '中心';
+    direction = "中心";
   } else if (absX === maxAbs) {
-    direction = dx > 0 ? '右侧' : '左侧';
+    direction = dx > 0 ? "右侧" : "左侧";
   } else if (absY === maxAbs) {
-    direction = dy > 0 ? '顶部' : '底部';
+    direction = dy > 0 ? "顶部" : "底部";
   } else {
-    direction = dz > 0 ? '前方' : '后方';
+    direction = dz > 0 ? "前方" : "后方";
   }
   return `部件${index + 1}·${direction}`;
 }
@@ -685,7 +698,7 @@ function generatePartName(index, position, bbox) {
 function autoSplitModel(model) {
   // 第一步：收集所有 mesh 及其世界变换
   const rawMeshes = [];
-  model.traverse((child) => {
+  model.traverse(child => {
     if (child.isMesh && child.geometry && child.geometry.attributes.position) {
       rawMeshes.push(child);
     }
@@ -709,10 +722,13 @@ function autoSplitModel(model) {
     const groupResults = splitByMaterialGroups(geometry);
     if (groupResults.length >= 2) {
       for (const gr of groupResults) {
-        const newMesh = new THREE.Mesh(gr.geometry, Array.isArray(material) ? (material[gr.materialIndex] || material[0]) : material);
+        const newMesh = new THREE.Mesh(
+          gr.geometry,
+          Array.isArray(material) ? material[gr.materialIndex] || material[0] : material
+        );
         newMesh.matrix.copy(mesh.matrixWorld);
         newMesh.matrixAutoUpdate = false;
-        splitParts.push({ mesh: newMesh, name: '', isOriginal: false });
+        splitParts.push({ mesh: newMesh, name: "", isOriginal: false });
       }
       continue;
     }
@@ -724,13 +740,13 @@ function autoSplitModel(model) {
         const newMesh = new THREE.Mesh(ccGeo, material);
         newMesh.matrix.copy(mesh.matrixWorld);
         newMesh.matrixAutoUpdate = false;
-        splitParts.push({ mesh: newMesh, name: '', isOriginal: false });
+        splitParts.push({ mesh: newMesh, name: "", isOriginal: false });
       }
       continue;
     }
 
     // 无法自然拆分，保留原始 mesh（不强制空间切分，保持准确）
-    splitParts.push({ mesh, name: mesh.name || '', isOriginal: true });
+    splitParts.push({ mesh, name: mesh.name || "", isOriginal: true });
   }
 
   // 计算整体包围盒用于命名
@@ -761,13 +777,13 @@ function generateCustomStepGroups(customParts, fileName) {
 
   // 步骤 0：欢迎
   groups.push({
-    name: '👋 模型概览',
+    name: "👋 模型概览",
     parts: [],
     tools: [],
     description: `已加载模型：<strong>${fileName}</strong><br><br>
 📦 检测到 <strong>${partCount}</strong> 个独立部件<br>
 🤖 已自动完成拆分分析<br><br>
-💡 点击"下一步"开始逐步拆解，或点击"爆炸视图"一键展开。`
+💡 点击"下一步"开始逐步拆解，或点击"爆炸视图"一键展开。`,
   });
 
   // 按距离中心排序（外层先拆）
@@ -785,17 +801,17 @@ function generateCustomStepGroups(customParts, fileName) {
     groups.push({
       name: `${g + 1}️⃣ 第 ${g + 1} 组部件`,
       parts: partNames,
-      tools: ['🖱️ 鼠标拖拽旋转', '🔍 滚轮缩放观察'],
+      tools: ["🖱️ 鼠标拖拽旋转", "🔍 滚轮缩放观察"],
       description: `正在拆解第 ${g + 1} 组（共 ${groupCount} 组）<br><br>
 📦 本组包含 ${groupParts.length} 个部件：<br>
-${partNames.map(n => `• ${n}`).join('<br>')}<br><br>
-💡 拖动旋转视角，仔细观察每个部件的细节。`
+${partNames.map(n => `• ${n}`).join("<br>")}<br><br>
+💡 拖动旋转视角，仔细观察每个部件的细节。`,
     });
   }
 
   // 最后一步：完成
   groups.push({
-    name: '🎉 拆解完成',
+    name: "🎉 拆解完成",
     parts: [],
     tools: [],
     description: `拆解完成！共展示 ${partCount} 个部件。<br><br>
@@ -803,7 +819,7 @@ ${partNames.map(n => `• ${n}`).join('<br>')}<br><br>
 • 点击"爆炸视图"重新展开<br>
 • 点击"重置"回到初始状态<br>
 • 拖动"爆炸深度"滑块控制展开程度<br>
-• 上传新的模型继续探索`
+• 上传新的模型继续探索`,
   });
 
   return groups;
@@ -815,25 +831,25 @@ ${partNames.map(n => `• ${n}`).join('<br>')}<br><br>
 // 模型包围盒: X[-1.25,1.25] Y[-0.575,1.6] Z[-0.64,0.72]
 // 中心=(0, 0.5125, 0.04) 半幅=(1.25, 1.0875, 0.68)
 let QUEST3_PART_TEMPLATES = [
-  { name: '主机身',           pos: [ 0.00, -0.47, -0.06] },
-  { name: '前面板',           pos: [ 0.00, -0.47,  0.75] },
-  { name: '面罩海绵',         pos: [ 0.00, -0.47, -0.87] },
-  { name: '左透镜模组',       pos: [-0.42, -0.43, -0.24] },
-  { name: '右透镜模组',       pos: [ 0.42, -0.43, -0.24] },
-  { name: '左透镜',           pos: [-0.42, -0.43, -0.56] },
-  { name: '右透镜',           pos: [ 0.42, -0.43, -0.56] },
-  { name: '主板',             pos: [ 0.00, -0.43, -0.13] },
-  { name: '左摄像头',         pos: [-0.60, -0.31,  0.94] },
-  { name: '右摄像头',         pos: [ 0.60, -0.31,  0.94] },
-  { name: '中置摄像头',       pos: [ 0.00, -0.21,  0.94] },
-  { name: '下置追踪摄像头',   pos: [ 0.00, -0.79,  0.82] },
-  { name: '左头带臂',         pos: [-1.00, -0.47, -0.06] },
-  { name: '右头带臂',         pos: [ 1.00, -0.47, -0.06] },
-  { name: '头带',             pos: [ 0.00,  0.45, -0.59] },
+  { name: "主机身", pos: [0.0, -0.47, -0.06] },
+  { name: "前面板", pos: [0.0, -0.47, 0.75] },
+  { name: "面罩海绵", pos: [0.0, -0.47, -0.87] },
+  { name: "左透镜模组", pos: [-0.42, -0.43, -0.24] },
+  { name: "右透镜模组", pos: [0.42, -0.43, -0.24] },
+  { name: "左透镜", pos: [-0.42, -0.43, -0.56] },
+  { name: "右透镜", pos: [0.42, -0.43, -0.56] },
+  { name: "主板", pos: [0.0, -0.43, -0.13] },
+  { name: "左摄像头", pos: [-0.6, -0.31, 0.94] },
+  { name: "右摄像头", pos: [0.6, -0.31, 0.94] },
+  { name: "中置摄像头", pos: [0.0, -0.21, 0.94] },
+  { name: "下置追踪摄像头", pos: [0.0, -0.79, 0.82] },
+  { name: "左头带臂", pos: [-1.0, -0.47, -0.06] },
+  { name: "右头带臂", pos: [1.0, -0.47, -0.06] },
+  { name: "头带", pos: [0.0, 0.45, -0.59] },
 ];
 
 // 异步加载共享配置文件，覆盖内置默认值
-fetch('quest3_config.json')
+fetch("quest3_config.json")
   .then(r => r.json())
   .then(cfg => {
     if (cfg.parts && cfg.parts.length > 0) {
@@ -842,7 +858,7 @@ fetch('quest3_config.json')
     }
   })
   .catch(() => {
-    console.log('📋 使用内置 Quest 3 配置（quest3_config.json 不可用）');
+    console.log("📋 使用内置 Quest 3 配置（quest3_config.json 不可用）");
   });
 
 /**
@@ -910,8 +926,12 @@ function assignQuest3PartNames(parts, modelBox) {
     }
   }
 
-  console.log('🏷️ Quest 3 部件名称匹配结果:',
-    parts.map((p, i) => ({ name: assignments[i], center: p.partCenter.toArray().map(v => v.toFixed(2)) }))
+  console.log(
+    "🏷️ Quest 3 部件名称匹配结果:",
+    parts.map((p, i) => ({
+      name: assignments[i],
+      center: p.partCenter.toArray().map(v => v.toFixed(2)),
+    }))
   );
 
   return assignments;
@@ -919,8 +939,8 @@ function assignQuest3PartNames(parts, modelBox) {
 
 /** 检查文件名是否包含 Quest 3（不区分大小写） */
 function isQuest3Model(fileName) {
-  const lower = (fileName || '').toLowerCase();
-  return lower.includes('quest 3') || lower.includes('quest3');
+  const lower = (fileName || "").toLowerCase();
+  return lower.includes("quest 3") || lower.includes("quest3");
 }
 
 /**
@@ -933,13 +953,11 @@ function mergeGeometries(geometries) {
   if (geometries.length === 1) return geometries[0].clone();
 
   // 统一转为非索引几何体
-  const nonIndexed = geometries.map(g => g.index ? g.toNonIndexed() : g);
+  const nonIndexed = geometries.map(g => (g.index ? g.toNonIndexed() : g));
 
   // 确定要合并的属性
-  const attrNames = ['position', 'normal', 'uv'];
-  const activeAttrs = attrNames.filter(name =>
-    nonIndexed.every(g => g.attributes[name])
-  );
+  const attrNames = ["position", "normal", "uv"];
+  const activeAttrs = attrNames.filter(name => nonIndexed.every(g => g.attributes[name]));
 
   // 计算总顶点数
   let totalVerts = 0;
@@ -992,14 +1010,18 @@ function mergePartsToQuest3(splitParts, modelBox) {
     const ny = center.y / halfExtents.y;
     const nz = center.z / halfExtents.z;
 
-    let bestT = 0, bestDist = Infinity;
+    let bestT = 0,
+      bestDist = Infinity;
     for (let t = 0; t < QUEST3_PART_TEMPLATES.length; t++) {
       const tpl = QUEST3_PART_TEMPLATES[t];
       const dx = nx - tpl.pos[0];
       const dy = ny - tpl.pos[1];
       const dz = nz - tpl.pos[2];
       const dist = Math.sqrt(dx * dx + dy * dy * 0.7 + dz * dz);
-      if (dist < bestDist) { bestDist = dist; bestT = t; }
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestT = t;
+      }
     }
 
     if (!groups[bestT]) groups[bestT] = [];
@@ -1032,7 +1054,9 @@ function mergePartsToQuest3(splitParts, modelBox) {
       const mergedGeo = mergeGeometries(geometries);
       // 使用第一个 mesh 的材质
       const firstMesh = meshes[0];
-      const material = Array.isArray(firstMesh.material) ? firstMesh.material[0] : firstMesh.material;
+      const material = Array.isArray(firstMesh.material)
+        ? firstMesh.material[0]
+        : firstMesh.material;
       const newMesh = new THREE.Mesh(mergedGeo, material);
       newMesh.position.set(0, 0, 0);
       newMesh.rotation.set(0, 0, 0);
@@ -1062,7 +1086,7 @@ function splitModelToQuest3Regions(model) {
   // 1. 收集所有 mesh，烘焙世界变换到几何体
   const allGeometries = [];
   const allMaterials = [];
-  model.traverse((child) => {
+  model.traverse(child => {
     if (child.isMesh && child.geometry && child.geometry.attributes.position) {
       child.updateMatrixWorld(true);
       const geo = child.geometry.clone();
@@ -1125,14 +1149,18 @@ function splitModelToQuest3Regions(model) {
       const nz = tmpCenter.z / halfExtents.z;
 
       // 找最近的 Quest 3 模板
-      let bestT = 0, bestDist = Infinity;
+      let bestT = 0,
+        bestDist = Infinity;
       for (let t = 0; t < QUEST3_PART_TEMPLATES.length; t++) {
         const tpl = QUEST3_PART_TEMPLATES[t];
         const dx = nx - tpl.pos[0];
         const dy = ny - tpl.pos[1];
         const dz = nz - tpl.pos[2];
         const dist = Math.sqrt(dx * dx + dy * dy * 0.7 + dz * dz);
-        if (dist < bestDist) { bestDist = dist; bestT = t; }
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestT = t;
+        }
       }
 
       templateFaces[bestT].faces.push({ geoIndex: gi, faceIndex: f, nx, ny, nz });
@@ -1151,7 +1179,8 @@ function splitModelToQuest3Regions(model) {
     const emptyPos = QUEST3_PART_TEMPLATES[t].pos;
 
     // 找到距离空模板最近的已占用模板
-    let bestSourceT = -1, bestSourceDist = Infinity;
+    let bestSourceT = -1,
+      bestSourceDist = Infinity;
     for (let s = 0; s < QUEST3_PART_TEMPLATES.length; s++) {
       if (s === t || templateFaces[s].faces.length === 0) continue;
       const sPos = QUEST3_PART_TEMPLATES[s].pos;
@@ -1159,7 +1188,10 @@ function splitModelToQuest3Regions(model) {
       const dy = emptyPos[1] - sPos[1];
       const dz = emptyPos[2] - sPos[2];
       const dist = Math.sqrt(dx * dx + dy * dy * 0.7 + dz * dz);
-      if (dist < bestSourceDist) { bestSourceDist = dist; bestSourceT = s; }
+      if (dist < bestSourceDist) {
+        bestSourceDist = dist;
+        bestSourceT = s;
+      }
     }
 
     if (bestSourceT === -1) continue;
@@ -1168,14 +1200,10 @@ function splitModelToQuest3Regions(model) {
     const sourceFaces = templateFaces[bestSourceT].faces;
     sourceFaces.sort((a, b) => {
       const da = Math.sqrt(
-        (a.nx - emptyPos[0]) ** 2 +
-        (a.ny - emptyPos[1]) ** 2 * 0.7 +
-        (a.nz - emptyPos[2]) ** 2
+        (a.nx - emptyPos[0]) ** 2 + (a.ny - emptyPos[1]) ** 2 * 0.7 + (a.nz - emptyPos[2]) ** 2
       );
       const db = Math.sqrt(
-        (b.nx - emptyPos[0]) ** 2 +
-        (b.ny - emptyPos[1]) ** 2 * 0.7 +
-        (b.nz - emptyPos[2]) ** 2
+        (b.nx - emptyPos[0]) ** 2 + (b.ny - emptyPos[1]) ** 2 * 0.7 + (b.nz - emptyPos[2]) ** 2
       );
       return da - db;
     });
@@ -1191,7 +1219,9 @@ function splitModelToQuest3Regions(model) {
       templateFaces[t].material = templateFaces[bestSourceT].material;
     }
 
-    console.log(`🔄 面重分配: "${QUEST3_PART_TEMPLATES[t].name}" 从 "${QUEST3_PART_TEMPLATES[bestSourceT].name}" 借取 ${stealCount} 个面`);
+    console.log(
+      `🔄 面重分配: "${QUEST3_PART_TEMPLATES[t].name}" 从 "${QUEST3_PART_TEMPLATES[bestSourceT].name}" 借取 ${stealCount} 个面`
+    );
   }
 
   // 5. 为每个模板创建 mesh
@@ -1244,7 +1274,7 @@ function splitModelToQuest3Regions(model) {
 // ===== STL 模型加载 =====
 async function loadSTLModel(arrayBuffer, fileName) {
   try {
-    showStatus('📦 正在解析 STL 模型...', 'info');
+    showStatus("📦 正在解析 STL 模型...", "info");
 
     const STLLoaderClass = await loadSTLLoader();
     const loader = new STLLoaderClass();
@@ -1327,8 +1357,11 @@ async function loadSTLModel(arrayBuffer, fileName) {
 
     // 更新 UI
     updateCustomModelUI(1, fileName);
-    if (typeof updateStepUI === 'function') updateStepUI();
-    showStatus('✅ STL 模型加载完成（单部件）\n💡 提示: 启动 Blender 后端可获得自动拆解', 'success');
+    if (typeof updateStepUI === "function") updateStepUI();
+    showStatus(
+      "✅ STL 模型加载完成（单部件）\n💡 提示: 启动 Blender 后端可获得自动拆解",
+      "success"
+    );
 
     // ========== 自动放大微小的模型 ==========
     const autoBox = new THREE.Box3().setFromObject(customModelGroup);
@@ -1353,51 +1386,61 @@ async function loadSTLModel(arrayBuffer, fileName) {
     // 默认合体状态（不自动爆炸）
     goToStep(0);
     isExploded = false;
-    if (typeof explodeBtn !== 'undefined') {
-      explodeBtn.classList.remove('exploded');
-      explodeBtn.textContent = '💥 爆炸';
+    if (typeof explodeBtn !== "undefined") {
+      explodeBtn.classList.remove("exploded");
+      explodeBtn.textContent = "💥 爆炸";
     }
 
     console.log(`✅ STL 模型加载完成：${fileName}`);
-
   } catch (err) {
-    console.error('STL 加载错误:', err);
-    showStatus(`❌ STL 加载失败: ${err.message}`, 'error');
+    console.error("STL 加载错误:", err);
+    showStatus(`❌ STL 加载失败: ${err.message}`, "error");
   }
 }
 
 // ===== URDF 模型加载 =====
 async function loadURDFModel(urdfText, fileName) {
   try {
-    showStatus('🔍 正在解析 URDF 结构...', 'info');
+    showStatus("🔍 正在解析 URDF 结构...", "info");
 
     // 解析 URDF XML
     const parser = new DOMParser();
-    const doc = parser.parseFromString(urdfText, 'text/xml');
-    const parseError = doc.querySelector('parsererror');
+    const doc = parser.parseFromString(urdfText, "text/xml");
+    const parseError = doc.querySelector("parsererror");
     if (parseError) {
-      throw new Error('URDF XML 解析错误');
+      throw new Error("URDF XML 解析错误");
     }
 
     // 提取所有 links
-    const linkEls = doc.querySelectorAll('link');
+    const linkEls = doc.querySelectorAll("link");
     if (linkEls.length === 0) {
-      throw new Error('URDF 中未找到任何 link');
+      throw new Error("URDF 中未找到任何 link");
     }
 
     // 提取所有 joints（建立父子关系）
-    const jointEls = doc.querySelectorAll('joint');
+    const jointEls = doc.querySelectorAll("joint");
     const jointMap = {}; // child_link_name -> joint info
     jointEls.forEach(joint => {
-      const jointType = joint.getAttribute('type') || 'fixed';
-      const parent = joint.querySelector('parent')?.getAttribute('link');
-      const child = joint.querySelector('child')?.getAttribute('link');
-      const origin = joint.querySelector('origin');
-      const originXYZ = origin?.getAttribute('xyz')?.trim().split(/\s+/).map(parseFloat) || [0, 0, 0];
-      const originRPY = origin?.getAttribute('rpy')?.trim().split(/\s+/).map(parseFloat) || [0, 0, 0];
-      const jointName = joint.getAttribute('name') || 'joint';
+      const jointType = joint.getAttribute("type") || "fixed";
+      const parent = joint.querySelector("parent")?.getAttribute("link");
+      const child = joint.querySelector("child")?.getAttribute("link");
+      const origin = joint.querySelector("origin");
+      const originXYZ = origin?.getAttribute("xyz")?.trim().split(/\s+/).map(parseFloat) || [
+        0, 0, 0,
+      ];
+      const originRPY = origin?.getAttribute("rpy")?.trim().split(/\s+/).map(parseFloat) || [
+        0, 0, 0,
+      ];
+      const jointName = joint.getAttribute("name") || "joint";
       if (child) {
-        jointMap[child] = { parent, child, type: jointType, xyz: originXYZ, rpy: originRPY, name: jointName };
+        jointMap[child] = {
+          parent,
+          child,
+          type: jointType,
+          xyz: originXYZ,
+          rpy: originRPY,
+          name: jointName,
+        };
       }
     });
 
@@ -1405,7 +1448,7 @@ async function loadURDFModel(urdfText, fileName) {
     function makeTransform(xyz, rpy) {
       const m = new THREE.Matrix4();
       const pos = new THREE.Vector3(xyz[0], xyz[1], xyz[2]);
-      const euler = new THREE.Euler(rpy[0], rpy[1], rpy[2], 'ZYX');
+      const euler = new THREE.Euler(rpy[0], rpy[1], rpy[2], "ZYX");
       const quat = new THREE.Quaternion().setFromEuler(euler);
       m.compose(pos, quat, new THREE.Vector3(1, 1, 1));
       return m;
@@ -1429,7 +1472,7 @@ async function loadURDFModel(urdfText, fileName) {
 
     // 预计算所有 link 的世界变换
     linkEls.forEach(linkEl => {
-      const name = linkEl.getAttribute('name');
+      const name = linkEl.getAttribute("name");
       if (name) computeLinkWorldMatrix(name);
     });
 
@@ -1446,36 +1489,42 @@ async function loadURDFModel(urdfText, fileName) {
     let partIndex = 0;
 
     linkEls.forEach(linkEl => {
-      const linkName = linkEl.getAttribute('name') || `link_${partIndex}`;
+      const linkName = linkEl.getAttribute("name") || `link_${partIndex}`;
 
       // 获取 visual geometry 信息
-      const visual = linkEl.querySelector('visual');
-      const geometryEl = visual?.querySelector('geometry');
-      const meshEl = geometryEl?.querySelector('mesh');
-      const meshFile = meshEl?.getAttribute('filename') || '';
+      const visual = linkEl.querySelector("visual");
+      const geometryEl = visual?.querySelector("geometry");
+      const meshEl = geometryEl?.querySelector("mesh");
+      const meshFile = meshEl?.getAttribute("filename") || "";
 
       // 获取 visual origin
-      const visOrigin = visual?.querySelector('origin');
-      const visXYZ = visOrigin?.getAttribute('xyz')?.trim().split(/\s+/).map(parseFloat) || [0, 0, 0];
-      const visRPY = visOrigin?.getAttribute('rpy')?.trim().split(/\s+/).map(parseFloat) || [0, 0, 0];
+      const visOrigin = visual?.querySelector("origin");
+      const visXYZ = visOrigin?.getAttribute("xyz")?.trim().split(/\s+/).map(parseFloat) || [
+        0, 0, 0,
+      ];
+      const visRPY = visOrigin?.getAttribute("rpy")?.trim().split(/\s+/).map(parseFloat) || [
+        0, 0, 0,
+      ];
 
       // 获取 box/cylinder/sphere 尺寸
-      const boxEl = geometryEl?.querySelector('box');
-      const cylEl = geometryEl?.querySelector('cylinder');
-      const sphereEl = geometryEl?.querySelector('sphere');
+      const boxEl = geometryEl?.querySelector("box");
+      const cylEl = geometryEl?.querySelector("cylinder");
+      const sphereEl = geometryEl?.querySelector("sphere");
 
       // 创建几何体
       let geometry;
       if (boxEl) {
-        const size = boxEl.getAttribute('size')?.trim().split(/\s+/).map(parseFloat) || [0.1, 0.1, 0.1];
+        const size = boxEl.getAttribute("size")?.trim().split(/\s+/).map(parseFloat) || [
+          0.1, 0.1, 0.1,
+        ];
         geometry = new THREE.BoxGeometry(size[0] || 0.1, size[1] || 0.1, size[2] || 0.1);
       } else if (cylEl) {
-        const radius = parseFloat(cylEl.getAttribute('radius')) || 0.05;
-        const length = parseFloat(cylEl.getAttribute('length')) || 0.1;
+        const radius = parseFloat(cylEl.getAttribute("radius")) || 0.05;
+        const length = parseFloat(cylEl.getAttribute("length")) || 0.1;
         geometry = new THREE.CylinderGeometry(radius, radius, length, 32);
         geometry.rotateX(Math.PI / 2); // URDF 圆柱沿 Z 轴
       } else if (sphereEl) {
-        const radius = parseFloat(sphereEl.getAttribute('radius')) || 0.05;
+        const radius = parseFloat(sphereEl.getAttribute("radius")) || 0.05;
         geometry = new THREE.SphereGeometry(radius, 32, 24);
       } else {
         geometry = new THREE.BoxGeometry(0.08, 0.08, 0.08);
@@ -1527,7 +1576,7 @@ async function loadURDFModel(urdfText, fileName) {
     // ========== Quest 3 模型：按 15 部位聚类合并 ==========
     const isQ3URDF = isQuest3Model(fileName);
     if (isQ3URDF && splitParts.length > 15) {
-      showStatus('🔧 Quest 3 模型：按 15 部位聚类合并...', 'info');
+      showStatus("🔧 Quest 3 模型：按 15 部位聚类合并...", "info");
       const merged = mergePartsToQuest3(splitParts, modelBox);
       splitParts.length = 0;
       splitParts.push(...merged);
@@ -1619,10 +1668,11 @@ async function loadURDFModel(urdfText, fileName) {
     updateCustomModelUI(partCount, fileName);
     updateStepUI();
 
-    const meshNote = partCount > 0 && splitParts[0]?.mesh?.userData?.meshFile
-      ? `\n⚠️ 注意: URDF 引用的 mesh 文件 (${splitParts[0].mesh.userData.meshFile}) 需单独上传\n当前使用占位几何体`
-      : '';
-    showStatus(`✅ URDF 解析完成：${partCount} 个 link（部件）${meshNote}`, 'success');
+    const meshNote =
+      partCount > 0 && splitParts[0]?.mesh?.userData?.meshFile
+        ? `\n⚠️ 注意: URDF 引用的 mesh 文件 (${splitParts[0].mesh.userData.meshFile}) 需单独上传\n当前使用占位几何体`
+        : "";
+    showStatus(`✅ URDF 解析完成：${partCount} 个 link（部件）${meshNote}`, "success");
 
     // ========== 自动放大微小的模型 ==========
     const autoBox = new THREE.Box3().setFromObject(customModelGroup);
@@ -1661,33 +1711,32 @@ async function loadURDFModel(urdfText, fileName) {
         const smartDist = calculateSmartExplodeDist(customModelGroup, explodeDir);
         part.explodePos.copy(explodeDir.multiplyScalar(smartDist / groupScale));
       }
-      console.log('✅ URDF 爆炸距离已智能调整');
+      console.log("✅ URDF 爆炸距离已智能调整");
     });
 
     // 默认合体状态（不自动爆炸）
     goToStep(0);
     isExploded = false;
-    explodeBtn.classList.remove('exploded');
-    explodeBtn.textContent = '💥 爆炸';
+    explodeBtn.classList.remove("exploded");
+    explodeBtn.textContent = "💥 爆炸";
 
     console.log(`✅ URDF 模型加载完成：${partCount} 个部件`);
-
   } catch (err) {
-    console.error('URDF 加载错误:', err);
-    showStatus(`❌ URDF 解析失败: ${err.message}`, 'error');
+    console.error("URDF 加载错误:", err);
+    showStatus(`❌ URDF 解析失败: ${err.message}`, "error");
   }
 }
 
 async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
   try {
-    const splitMethod = blenderManifest ? 'Blender CLI' : '前端 JS';
-    showStatus(`📦 正在解析模型（${splitMethod}）...`, 'info');
+    const splitMethod = blenderManifest ? "Blender CLI" : "前端 JS";
+    showStatus(`📦 正在解析模型（${splitMethod}）...`, "info");
 
     const LoaderClass = await loadGLTFLoader();
     const loader = new LoaderClass();
 
     const gltf = await new Promise((resolve, reject) => {
-      loader.parse(arrayBuffer, '', resolve, (err) => reject(new Error('解析失败：' + err.message)));
+      loader.parse(arrayBuffer, "", resolve, err => reject(new Error("解析失败：" + err.message)));
     });
 
     // 清除之前的自定义模型
@@ -1707,15 +1756,15 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
     let splitParts;
     if (isQ3 && !blenderManifest) {
       // Quest 3 模型且无 Blender 清单（Blender 不可用时回退）：前端按 15 区域切割
-      showStatus('🔍 Quest 3 模型：前端按 15 部位区域切割...', 'info');
+      showStatus("🔍 Quest 3 模型：前端按 15 部位区域切割...", "info");
       splitParts = splitModelToQuest3Regions(model);
     } else {
-      showStatus('🔍 正在分析模型结构并自动拆分...', 'info');
+      showStatus("🔍 正在分析模型结构并自动拆分...", "info");
       splitParts = autoSplitModel(model);
     }
 
     if (splitParts.length === 0) {
-      throw new Error('模型中未找到可渲染的网格');
+      throw new Error("模型中未找到可渲染的网格");
     }
 
     // ========== 烘焙世界矩阵到几何体（非前端 Quest 3 路径需要）==========
@@ -1774,7 +1823,7 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
         explodePos,
         homeRot: new THREE.Euler(0, 0, 0),
         explodeRot: new THREE.Euler(0, 0, 0),
-        name: '', // 稍后分配
+        name: "", // 稍后分配
         partCenter: partCenter.clone(),
         stepIndex: 1,
       });
@@ -1786,20 +1835,27 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
     // 如果有 Blender 清单，按清单顺序排列；否则按距离排序
     if (blenderManifest && blenderManifest.parts) {
       // 清单已按距离降序排列，直接使用清单顺序
-      const manifestOrder = blenderManifest.parts.map((p, idx) => ({ name: p.display_name || p.name, idx }));
+      const manifestOrder = blenderManifest.parts.map((p, idx) => ({
+        name: p.display_name || p.name,
+        idx,
+      }));
       // 按 manifest 顺序重排 customModelParts（根据 partCenter 匹配）
       const used = new Set();
       const reordered = [];
       for (const mp of manifestOrder) {
         // 用 center 匹配
         const targetCenter = blenderManifest.parts[mp.idx].center;
-        let bestIdx = -1, bestDist = Infinity;
+        let bestIdx = -1,
+          bestDist = Infinity;
         for (let i = 0; i < customModelParts.length; i++) {
           if (used.has(i)) continue;
           const d = customModelParts[i].partCenter.distanceTo(
             new THREE.Vector3(targetCenter[0], targetCenter[1], targetCenter[2])
           );
-          if (d < bestDist) { bestDist = d; bestIdx = i; }
+          if (d < bestDist) {
+            bestDist = d;
+            bestIdx = i;
+          }
         }
         if (bestIdx >= 0) {
           used.add(bestIdx);
@@ -1833,7 +1889,10 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
       customModelParts.forEach((part, i) => {
         part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
         if (blenderManifest.parts[i]) {
-          part.name = blenderManifest.parts[i].display_name || blenderManifest.parts[i].name || `部件${i + 1}`;
+          part.name =
+            blenderManifest.parts[i].display_name ||
+            blenderManifest.parts[i].name ||
+            `部件${i + 1}`;
         }
         part.mesh.userData = { name: part.name };
         part.mesh.name = part.name;
@@ -1852,10 +1911,13 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
       customModelParts.forEach((part, i) => {
         part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
         if (blenderManifest && blenderManifest.parts && blenderManifest.parts[i]) {
-          part.name = blenderManifest.parts[i].display_name || blenderManifest.parts[i].name || `部件${i + 1}`;
+          part.name =
+            blenderManifest.parts[i].display_name ||
+            blenderManifest.parts[i].name ||
+            `部件${i + 1}`;
         } else {
           const origName = splitParts.find(sp => sp.mesh === part.mesh)?.name;
-          if (origName && !origName.startsWith('部件')) {
+          if (origName && !origName.startsWith("部件")) {
             part.name = origName;
           } else {
             part.name = generatePartName(i, part.partCenter, centeredBox);
@@ -1883,7 +1945,7 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
     // 更新 UI
     updateCustomModelUI(partCount, fileName);
     updateStepUI();
-    showStatus(`✅ 成功加载：${fileName}\n自动拆分为 ${partCount} 个部件`, 'success');
+    showStatus(`✅ 成功加载：${fileName}\n自动拆分为 ${partCount} 个部件`, "success");
 
     // ========== 自动放大微小的模型 ==========
     const autoBox = new THREE.Box3().setFromObject(customModelGroup);
@@ -1924,37 +1986,39 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
         const smartDist = calculateSmartExplodeDist(customModelGroup, explodeDir);
         part.explodePos.copy(explodeDir.multiplyScalar(smartDist / groupScale));
       }
-      console.log('✅ 爆炸距离已智能调整');
+      console.log("✅ 爆炸距离已智能调整");
     });
 
     // 默认合体状态（不自动爆炸）
     goToStep(0);
     isExploded = false;
-    explodeBtn.classList.remove('exploded');
-    explodeBtn.textContent = '💥 爆炸';
+    explodeBtn.classList.remove("exploded");
+    explodeBtn.textContent = "💥 爆炸";
 
     console.log(`✅ 自定义模型加载完成：${partCount} 个部件（自动拆分，${groupCount} 个步骤组）`);
   } catch (err) {
-    console.error('加载模型失败：', err);
-    showStatus(`❌ 加载失败：${err.message}`, 'error');
+    console.error("加载模型失败：", err);
+    showStatus(`❌ 加载失败：${err.message}`, "error");
   }
 }
 
 function updateCustomModelUI(partCount, fileName) {
-  const countEl = document.getElementById('part-count');
+  const countEl = document.getElementById("part-count");
   if (countEl) countEl.textContent = partCount;
 
-  const uploadSection = document.querySelector('.upload-section');
+  const uploadSection = document.querySelector(".panel");
+  // 通用查找逻辑，适应新旧 HTML 结构
+  const uploadSectionAlt = document.querySelector("details.panel");
   if (uploadSection) {
-    const fileNameEl = document.getElementById('uploaded-file-name');
+    const fileNameEl = document.getElementById("uploaded-file-name");
     if (fileNameEl) fileNameEl.textContent = `当前模型：${fileName}`;
   }
 
-  const clearBtn = document.getElementById('clear-model-btn');
-  if (clearBtn) clearBtn.style.display = 'inline-block';
+  const clearBtn = document.getElementById("clear-model-btn");
+  if (clearBtn) clearBtn.style.display = "inline-block";
 
   // 更新时间轴总数
-  const timelineTotalEl = document.getElementById('timeline-total');
+  const timelineTotalEl = document.getElementById("timeline-total");
   if (timelineTotalEl) timelineTotalEl.textContent = totalSteps;
 
   // 更新时间轴滑块范围
@@ -1963,18 +2027,18 @@ function updateCustomModelUI(partCount, fileName) {
   }
 
   // ========== 动态生成部件清单 ==========
-  const partsGrid = document.querySelector('.parts-grid');
+  const partsGrid = document.querySelector(".parts-grid");
   if (partsGrid && customModelParts.length > 0) {
-    partsGrid.innerHTML = '';
+    partsGrid.innerHTML = "";
     customModelParts.forEach((part, i) => {
-      const item = document.createElement('div');
-      item.className = 'part-item';
+      const item = document.createElement("div");
+      item.className = "part-item";
       item.dataset.part = part.name;
       // 提取材质颜色作为圆点颜色
-      let dotColor = '#888';
+      let dotColor = "#888";
       if (part.mesh && part.mesh.material) {
         const mat = part.mesh.material;
-        if (mat.color) dotColor = '#' + mat.color.getHexString();
+        if (mat.color) dotColor = "#" + mat.color.getHexString();
       }
       item.innerHTML = `<span class="part-dot" style="background:${dotColor}"></span>${part.name}`;
       partsGrid.appendChild(item);
@@ -2002,11 +2066,11 @@ function clearCustomModel() {
   animatingStep = 0;
 
   // 恢复 UI
-  const countEl = document.getElementById('part-count');
-  if (countEl) countEl.textContent = '15';
+  const countEl = document.getElementById("part-count");
+  if (countEl) countEl.textContent = "15";
 
   // 恢复默认部件清单
-  const partsGrid = document.querySelector('.parts-grid');
+  const partsGrid = document.querySelector(".parts-grid");
   if (partsGrid) {
     partsGrid.innerHTML = `
       <div class="part-item" data-part="前面板"><span class="part-dot" style="background:#f2f2f2"></span>前面板</div>
@@ -2020,7 +2084,7 @@ function clearCustomModel() {
     `;
   }
 
-  const timelineTotalEl = document.getElementById('timeline-total');
+  const timelineTotalEl = document.getElementById("timeline-total");
   if (timelineTotalEl) timelineTotalEl.textContent = totalSteps;
 
   if (timelineSlider) {
@@ -2028,27 +2092,27 @@ function clearCustomModel() {
     timelineSlider.value = 0;
   }
 
-  const clearBtn = document.getElementById('clear-model-btn');
-  if (clearBtn) clearBtn.style.display = 'none';
+  const clearBtn = document.getElementById("clear-model-btn");
+  if (clearBtn) clearBtn.style.display = "none";
 
-  const status = document.getElementById('upload-status');
+  const status = document.getElementById("upload-status");
   if (status) {
-    status.classList.add('hidden');
-    status.textContent = '';
+    status.classList.add("hidden");
+    status.textContent = "";
   }
 
-  const fileNameEl = document.getElementById('uploaded-file-name');
-  if (fileNameEl) fileNameEl.textContent = '';
+  const fileNameEl = document.getElementById("uploaded-file-name");
+  if (fileNameEl) fileNameEl.textContent = "";
 
   // 重置爆炸状态
   isExploded = false;
   if (explodeBtn) {
-    explodeBtn.classList.remove('exploded');
-    explodeBtn.textContent = '💥 爆炸视图';
+    explodeBtn.classList.remove("exploded");
+    explodeBtn.textContent = "💥 爆炸视图";
   }
 
   // 重新分配 Quest 3 部件的步骤索引
-  parts.forEach((part) => {
+  parts.forEach(part => {
     const meshName = part.mesh.userData.name;
     let stepIndex = totalSteps;
     stepGroups.forEach((group, idx) => {
@@ -2063,8 +2127,8 @@ function clearCustomModel() {
   updateStepUI();
   fitCameraToModel(questGroup, false);
 
-  showStatus('已清除自定义模型，恢复默认', 'info');
-  console.log('✅ 已恢复默认 Quest 3 模型和步骤系统');
+  showStatus("已清除自定义模型，恢复默认", "info");
+  console.log("✅ 已恢复默认 Quest 3 模型和步骤系统");
 }
 
 // ===== 中心轴线（拆解时显示）=====
@@ -2093,9 +2157,7 @@ function updateToolsList(step) {
   if (tools.length === 0) {
     toolsListEl.innerHTML = '<div class="tools-none">✅ 本步骤无需工具</div>';
   } else {
-    toolsListEl.innerHTML = tools.map(tool =>
-      `<div class="tool-item">${tool}</div>`
-    ).join('');
+    toolsListEl.innerHTML = tools.map(tool => `<div class="tool-item">${tool}</div>`).join("");
   }
 }
 
@@ -2104,7 +2166,7 @@ let totalSteps = stepGroups.length;
 const partStepMap = new Map();
 
 // 给每个部件分配步骤序号（默认最后一步）
-parts.forEach((part) => {
+parts.forEach(part => {
   // 确保 mesh.userData.name 存在
   if (!part.mesh.userData.name) {
     part.mesh.userData.name = part.mesh.name || `part_${parts.indexOf(part)}`;
@@ -2123,43 +2185,46 @@ parts.forEach((part) => {
   part.stepIndex = stepIndex;
 });
 
-console.log('部件步骤分配：', parts.map(p => `${p.mesh.userData.name}->步骤${p.stepIndex}`));
+console.log(
+  "部件步骤分配：",
+  parts.map(p => `${p.mesh.userData.name}->步骤${p.stepIndex}`)
+);
 
 // ===== 步骤控制 UI =====
-let currentStep = 0;      // 实际显示步骤（动画中）
-let displayedStep = 0;    // 当前 UI 显示的步骤（已完成）
-let animatingStep = 0;    // 动画目标步骤
-let animationStart = 0;   // 动画开始时间
-let animationFrom = 0;    // 动画起始步骤
-let mouseFactor = 0;      // 鼠标控制炸开因子 (0-1)
+let currentStep = 0; // 实际显示步骤（动画中）
+let displayedStep = 0; // 当前 UI 显示的步骤（已完成）
+let animatingStep = 0; // 动画目标步骤
+let animationStart = 0; // 动画开始时间
+let animationFrom = 0; // 动画起始步骤
+let mouseFactor = 0; // 鼠标控制炸开因子 (0-1)
 let mouseControlEnabled = false; // 是否启用鼠标控制
 const stepDuration = 600; // 每步动画时长（毫秒）
 let isAnimating = false;
 
-const prevBtn = document.getElementById('prev-step');
-const nextBtn = document.getElementById('next-step');
-const resetBtn = document.getElementById('reset-step');
-const stepNumberEl = document.getElementById('step-number');
-const stepNameEl = document.getElementById('step-name');
-const stepDescEl = document.getElementById('step-desc');
-const progressFillEl = document.getElementById('progress-fill');
-const autoRotateCheck = document.getElementById('auto-rotate');
+const prevBtn = document.getElementById("prev-step");
+const nextBtn = document.getElementById("next-step");
+const resetBtn = document.getElementById("reset-step");
+const stepNumberEl = document.getElementById("step-number");
+const stepNameEl = document.getElementById("step-name");
+const stepDescEl = document.getElementById("step-desc");
+const progressFillEl = document.getElementById("progress-fill");
+const autoRotateCheck = document.getElementById("auto-rotate");
 
 // 新增 UI 元素
-const depthSlider = document.getElementById('explode-depth');
-const depthValueEl = document.getElementById('depth-value');
-const timelineSlider = document.getElementById('timeline-slider');
-const timelineStepEl = document.getElementById('timeline-step');
-const timelineTotalEl = document.getElementById('timeline-total');
-const timelinePlayBtn = document.getElementById('timeline-play');
-const timelineResetBtn = document.getElementById('timeline-reset');
-const timelineSpeedSelect = document.getElementById('timeline-speed');
-const toolsListEl = document.getElementById('tools-list');
-const partTooltip = document.getElementById('part-tooltip');
-const tooltipTitle = document.querySelector('.tooltip-title');
-const tooltipContent = document.querySelector('.tooltip-content');
+const depthSlider = document.getElementById("explode-depth");
+const depthValueEl = document.getElementById("depth-value");
+const timelineSlider = document.getElementById("timeline-slider");
+const timelineStepEl = document.getElementById("timeline-step");
+const timelineTotalEl = document.getElementById("timeline-total");
+const timelinePlayBtn = document.getElementById("timeline-play");
+const timelineResetBtn = document.getElementById("timeline-reset");
+const timelineSpeedSelect = document.getElementById("timeline-speed");
+const toolsListEl = document.getElementById("tools-list");
+const partTooltip = document.getElementById("part-tooltip");
+const tooltipTitle = document.querySelector(".tooltip-title");
+const tooltipContent = document.querySelector(".tooltip-content");
 
-console.log('UI elements:', {
+console.log("UI elements:", {
   prevBtn: !!prevBtn,
   nextBtn: !!nextBtn,
   resetBtn: !!resetBtn,
@@ -2177,7 +2242,7 @@ function easeOutCubic(t) {
 // 部件高亮相关
 const highlightEmissive = new THREE.Color(0x4a9eff);
 const highlightScale = 1.08;
-let highlightedPart = null;  // 当前高亮的部件
+let highlightedPart = null; // 当前高亮的部件
 
 function highlightPart(partName) {
   // 清除之前的高亮
@@ -2234,13 +2299,13 @@ function showTooltip(partName, x, y) {
   // 定位工具提示
   partTooltip.style.left = `${x + 15}px`;
   partTooltip.style.top = `${y + 15}px`;
-  partTooltip.classList.remove('hidden');
+  partTooltip.classList.remove("hidden");
 }
 
 // 隐藏工具提示
 function hideTooltip() {
   if (partTooltip) {
-    partTooltip.classList.add('hidden');
+    partTooltip.classList.add("hidden");
   }
 }
 
@@ -2254,7 +2319,7 @@ function updateStepUI() {
   const stepIndex = Math.min(displayStep, totalSteps - 1);
   const step = stepGroups[stepIndex];
   if (step && stepDescEl) {
-    stepDescEl.innerHTML = step.description || '';
+    stepDescEl.innerHTML = step.description || "";
   }
 
   // 更新工具清单
@@ -2304,7 +2369,7 @@ let isPlaying = false;
 let playInterval = null;
 
 if (timelineSlider) {
-  timelineSlider.addEventListener('input', (e) => {
+  timelineSlider.addEventListener("input", e => {
     const value = parseInt(e.target.value);
     const step = Math.round((value / 100) * totalSteps);
     goToStep(step);
@@ -2312,16 +2377,16 @@ if (timelineSlider) {
 }
 
 if (timelinePlayBtn) {
-  timelinePlayBtn.addEventListener('click', () => {
+  timelinePlayBtn.addEventListener("click", () => {
     if (isPlaying) {
       // 暂停
       clearInterval(playInterval);
       isPlaying = false;
-      timelinePlayBtn.textContent = '▶️ 播放';
+      timelinePlayBtn.textContent = "▶️ 播放";
     } else {
       // 播放
       isPlaying = true;
-      timelinePlayBtn.textContent = '⏸️ 暂停';
+      timelinePlayBtn.textContent = "⏸️ 暂停";
 
       const speed = parseFloat(timelineSpeedSelect?.value || 1);
       const interval = 700 / speed; // 每步时间
@@ -2330,7 +2395,7 @@ if (timelinePlayBtn) {
         if (displayedStep >= totalSteps) {
           clearInterval(playInterval);
           isPlaying = false;
-          timelinePlayBtn.textContent = '▶️ 播放';
+          timelinePlayBtn.textContent = "▶️ 播放";
           return;
         }
         goToStep(displayedStep + 1);
@@ -2340,11 +2405,11 @@ if (timelinePlayBtn) {
 }
 
 if (timelineResetBtn) {
-  timelineResetBtn.addEventListener('click', () => {
+  timelineResetBtn.addEventListener("click", () => {
     if (isPlaying) {
       clearInterval(playInterval);
       isPlaying = false;
-      timelinePlayBtn.textContent = '▶️ 播放';
+      timelinePlayBtn.textContent = "▶️ 播放";
     }
     goToStep(0);
   });
@@ -2355,7 +2420,7 @@ const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 if (isMobile) {
   // 移动端优化
-  document.body.classList.add('mobile-device');
+  document.body.classList.add("mobile-device");
 
   // 调整相机距离
   camera.position.set(3, 1.5, 4);
@@ -2369,12 +2434,12 @@ if (isMobile) {
   };
 }
 
-prevBtn.addEventListener('click', () => goToStep(displayedStep - 1));
-nextBtn.addEventListener('click', () => goToStep(displayedStep + 1));
-resetBtn.addEventListener('click', () => goToStep(0));
+prevBtn.addEventListener("click", () => goToStep(displayedStep - 1));
+nextBtn.addEventListener("click", () => goToStep(displayedStep + 1));
+resetBtn.addEventListener("click", () => goToStep(0));
 
 // 爆炸按钮：在完全合体和完全爆炸之间切换
-const explodeBtn = document.getElementById('explode-btn');
+const explodeBtn = document.getElementById("explode-btn");
 let isExploded = false;
 
 function toggleExplode() {
@@ -2383,8 +2448,8 @@ function toggleExplode() {
 
   if (isExploded) {
     // 进入爆炸模式，启用鼠标控制
-    explodeBtn.classList.add('exploded');
-    explodeBtn.textContent = '🖱️ 移动鼠标控制范围';
+    explodeBtn.classList.add("exploded");
+    explodeBtn.textContent = "🖱️ 移动鼠标控制范围";
     // 初始炸开因子为1（完全炸开）
     mouseFactor = 1;
     currentStep = totalSteps;
@@ -2392,17 +2457,17 @@ function toggleExplode() {
     updateStepUI();
   } else {
     // 退出爆炸模式，回到合体
-    explodeBtn.classList.remove('exploded');
-    explodeBtn.textContent = '💥 爆炸';
+    explodeBtn.classList.remove("exploded");
+    explodeBtn.textContent = "💥 爆炸";
     goToStep(0);
   }
 }
 
-explodeBtn.addEventListener('click', toggleExplode);
+explodeBtn.addEventListener("click", toggleExplode);
 
 // 爆炸深度滑块
 if (depthSlider && depthValueEl) {
-  depthSlider.addEventListener('input', (e) => {
+  depthSlider.addEventListener("input", e => {
     const depth = parseInt(e.target.value);
     depthValueEl.textContent = `${depth}%`;
 
@@ -2419,47 +2484,47 @@ if (depthSlider && depthValueEl) {
     // 更新爆炸状态
     if (depth > 0 && !isExploded) {
       isExploded = true;
-      explodeBtn.classList.add('exploded');
-      explodeBtn.textContent = '🔄 合体';
+      explodeBtn.classList.add("exploded");
+      explodeBtn.textContent = "🔄 合体";
     } else if (depth === 0 && isExploded) {
       isExploded = false;
-      explodeBtn.classList.remove('exploded');
-      explodeBtn.textContent = '💥 爆炸';
+      explodeBtn.classList.remove("exploded");
+      explodeBtn.textContent = "💥 爆炸";
     }
   });
 }
 
 // 键盘快捷键
-document.addEventListener('keydown', (e) => {
+document.addEventListener("keydown", e => {
   // 忽略在输入框中的按键
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
 
   switch (e.key) {
-    case 'ArrowRight':
+    case "ArrowRight":
       e.preventDefault();
       goToStep(displayedStep + 1);
       break;
-    case 'ArrowLeft':
+    case "ArrowLeft":
       e.preventDefault();
       goToStep(displayedStep - 1);
       break;
-    case ' ':
+    case " ":
       e.preventDefault();
       toggleExplode();
       break;
-    case 'r':
-    case 'R':
+    case "r":
+    case "R":
       e.preventDefault();
       goToStep(0);
       break;
-    case 'a':
-    case 'A':
+    case "a":
+    case "A":
       e.preventDefault();
       autoRotateCheck.checked = !autoRotateCheck.checked;
       controls.autoRotate = autoRotateCheck.checked;
       break;
-    case 'f':
-    case 'F':
+    case "f":
+    case "F":
       e.preventDefault();
       focusCurrentPart();
       break;
@@ -2507,7 +2572,7 @@ function focusCurrentPart() {
 }
 
 // 鼠标移动控制炸开范围
-renderer.domElement.addEventListener('mousemove', (e) => {
+renderer.domElement.addEventListener("mousemove", e => {
   if (!mouseControlEnabled) return;
 
   // 计算鼠标在屏幕上的相对位置（0-1）
@@ -2526,7 +2591,7 @@ renderer.domElement.addEventListener('mousemove', (e) => {
 });
 
 // 鼠标离开画布时，保持当前炸开程度
-renderer.domElement.addEventListener('mouseleave', () => {
+renderer.domElement.addEventListener("mouseleave", () => {
   if (mouseControlEnabled) {
     // 可选：鼠标离开时暂停控制
     // mouseControlEnabled = false;
@@ -2534,15 +2599,15 @@ renderer.domElement.addEventListener('mouseleave', () => {
 });
 
 // 双击恢复按钮控制
-explodeBtn.addEventListener('dblclick', () => {
+explodeBtn.addEventListener("dblclick", () => {
   if (isExploded) {
     mouseControlEnabled = false;
-    explodeBtn.textContent = '🔄 合体';
-    console.log('已切换回按钮控制模式');
+    explodeBtn.textContent = "🔄 合体";
+    console.log("已切换回按钮控制模式");
   }
 });
 
-autoRotateCheck.addEventListener('change', (e) => {
+autoRotateCheck.addEventListener("change", e => {
   controls.autoRotate = e.target.checked;
 });
 
@@ -2570,12 +2635,12 @@ function updateExplodedView(now) {
   }
 
   // 如果启用了鼠标控制，使用鼠标因子
-  const controlFactor = mouseControlEnabled ? mouseFactor : (currentStep / totalSteps);
-  const globalFactor = mouseControlEnabled ? mouseFactor : (currentStep / totalSteps);
+  const controlFactor = mouseControlEnabled ? mouseFactor : currentStep / totalSteps;
+  const globalFactor = mouseControlEnabled ? mouseFactor : currentStep / totalSteps;
   axisMat.opacity = globalFactor * 0.5;
 
   // Quest 3 默认部件
-  parts.forEach((part) => {
+  parts.forEach(part => {
     // 计算该部件的炸开因子
     let partFactor;
     if (mouseControlEnabled) {
@@ -2594,7 +2659,7 @@ function updateExplodedView(now) {
 
   // 自定义模型部件（渐进式拆解，每个部件有自己的 stepIndex）
   if (hasCustomModel && customModelParts.length > 0) {
-    customModelParts.forEach((part) => {
+    customModelParts.forEach(part => {
       let partFactor;
       if (mouseControlEnabled) {
         partFactor = smoothStep(part.stepIndex - 1, part.stepIndex, mouseFactor * totalSteps);
@@ -2611,7 +2676,7 @@ function updateExplodedView(now) {
 }
 
 // ===== 响应窗口大小 =====
-window.addEventListener('resize', () => {
+window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -2634,64 +2699,53 @@ function animate(now) {
 requestAnimationFrame(animate);
 
 // 隐藏加载提示
-const loadingEl = document.getElementById('loading');
-const uploadStatusEl = document.getElementById('upload-status');  // 全局上传状态元素
+const loadingEl = document.getElementById("loading");
+const uploadStatusEl = document.getElementById("upload-status"); // 全局上传状态元素
 setTimeout(() => {
-  if (loadingEl) loadingEl.classList.add('hidden');
+  if (loadingEl) loadingEl.classList.add("hidden");
 }, 100);
 
 // ===== 文件上传与自定义模型 =====
 // 全局显示状态消息（可在 loadCustomModel 和 clearCustomModel 中调用）
 // base64 → UTF-8 字符串（修复中文乱码：atob 只支持 Latin-1）
 function base64ToUtf8(base64Str) {
-const binaryStr = atob(base64Str);
-const bytes = new Uint8Array(binaryStr.length);
-for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-return new TextDecoder('utf-8').decode(bytes);
+  const binaryStr = atob(base64Str);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+  return new TextDecoder("utf-8").decode(bytes);
 }
 
-function showStatus(msg, type = 'info') {
-if (!uploadStatusEl) return;
-uploadStatusEl.textContent = msg;
-  uploadStatusEl.className = 'upload-status';
-  uploadStatusEl.classList.remove('hidden');
-  uploadStatusEl.style.background = type === 'success' ? 'rgba(76, 175, 80, 0.2)' :
-                             type === 'error' ? 'rgba(244, 67, 54, 0.2)' :
-                             'rgba(33, 150, 243, 0.2)';
-  uploadStatusEl.style.border = `1px solid ${type === 'success' ? '#4CAF50' :
-                                      type === 'error' ? '#f44336' :
-                                      '#2196F3'}`;
-  uploadStatusEl.style.padding = '10px 14px';
-  uploadStatusEl.style.borderRadius = '8px';
-  uploadStatusEl.style.marginTop = '10px';
-  uploadStatusEl.style.fontSize = '13px';
-  uploadStatusEl.style.lineHeight = '1.5';
+function showStatus(msg, type = "info") {
+  if (!uploadStatusEl) return;
+  uploadStatusEl.textContent = msg;
+  uploadStatusEl.className = "status-box " + type;
+  uploadStatusEl.classList.remove("hidden");
 }
 
 // 等待 DOM 完全加载后再初始化上传功能
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', setupUpload);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", setupUpload);
 } else {
   // DOM 已经加载完成
   setupUpload();
 }
 
 function setupUpload() {
-  const dropZone = document.getElementById('drop-zone');
-  const fileInput = document.getElementById('file-input');
-  const uploadBtn = document.getElementById('upload-btn');
-  const clearBtn = document.getElementById('clear-model-btn');
+  const dropZone = document.getElementById("drop-zone");
+  const fileInput = document.getElementById("file-input");
+  const uploadBtn = document.getElementById("upload-btn");
+  const clearBtn = document.getElementById("clear-model-btn");
 
-  console.log('Upload elements:', { dropZone, fileInput, uploadBtn, clearBtn });
+  console.log("Upload elements:", { dropZone, fileInput, uploadBtn, clearBtn });
 
   // 如果找不到上传相关元素，跳过上传功能
   if (!uploadBtn || !fileInput || !dropZone) {
-    console.warn('上传功能所需元素未找到，跳过上传功能初始化');
+    console.warn("上传功能所需元素未找到，跳过上传功能初始化");
     return;
   }
 
   // ── Blender 后端配置 ──
-  const BLENDER_SERVER = 'http://localhost:3001';
+  const BLENDER_SERVER = "http://localhost:3001";
 
   /**
    * 尝试调用 Blender 后端拆解 GLB
@@ -2700,89 +2754,95 @@ function setupUpload() {
    * @returns {Promise<{arrayBuffer: ArrayBuffer, manifest: object} | null>}
    */
   function tryBlenderSplit(file) {
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       const xhr = new XMLHttpRequest();
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append("file", file);
 
-      showStatus('🔧 正在通过 Blender 拆解模型... (上传中)', 'info');
+      showStatus("🔧 正在通过 Blender 拆解模型... (上传中)", "info");
 
       // 上传进度
-      xhr.upload.addEventListener('progress', (e) => {
+      xhr.upload.addEventListener("progress", e => {
         if (e.lengthComputable) {
           const pct = Math.round((e.loaded / e.total) * 100);
           if (pct < 100) {
-            showStatus(`📤 上传中... ${pct}% (${(e.loaded / 1024).toFixed(0)} / ${(e.total / 1024).toFixed(0)} KB)`, 'info');
+            showStatus(
+              `📤 上传中... ${pct}% (${(e.loaded / 1024).toFixed(0)} / ${(e.total / 1024).toFixed(0)} KB)`,
+              "info"
+            );
           } else {
-            showStatus('🔧 Blender 正在拆解模型... (已上传)', 'info');
+            showStatus("🔧 Blender 正在拆解模型... (已上传)", "info");
           }
         }
       });
 
-      xhr.addEventListener('load', () => {
+      xhr.addEventListener("load", () => {
         try {
           if (xhr.status !== 200) {
             // 错误响应是 JSON
-            const errData = JSON.parse(xhr.responseText || '{}');
+            const errData = JSON.parse(xhr.responseText || "{}");
             throw new Error(errData.error || `服务器错误 ${xhr.status}`);
           }
 
           // 检查是否是二进制响应（成功）
-          const successHeader = xhr.getResponseHeader('X-Success');
-          if (successHeader !== 'true') {
+          const successHeader = xhr.getResponseHeader("X-Success");
+          if (successHeader !== "true") {
             // 可能是旧的 JSON 格式，尝试解析
             const data = JSON.parse(xhr.responseText);
             if (!data.success) {
-              throw new Error(data.error || '拆解失败');
+              throw new Error(data.error || "拆解失败");
             }
             // 兼容旧格式（base64）
             const binaryStr = atob(data.glb_base64);
             const bytes = new Uint8Array(binaryStr.length);
             for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-            showStatus(`✅ Blender 拆解完成：${data.total_parts} 个部件 (${data.elapsed_seconds}s)`, 'success');
+            showStatus(
+              `✅ Blender 拆解完成：${data.total_parts} 个部件 (${data.elapsed_seconds}s)`,
+              "success"
+            );
             resolve({ arrayBuffer: bytes.buffer, manifest: data });
             return;
           }
 
           // 新格式：二进制 GLB body + manifest 在 header
-          const totalParts = parseInt(xhr.getResponseHeader('X-Total-Parts') || '0');
-          const elapsedSeconds = parseFloat(xhr.getResponseHeader('X-Elapsed-Seconds') || '0');
-const manifestBase64 = xhr.getResponseHeader('X-Manifest') || '';
+          const totalParts = parseInt(xhr.getResponseHeader("X-Total-Parts") || "0");
+          const elapsedSeconds = parseFloat(xhr.getResponseHeader("X-Elapsed-Seconds") || "0");
+          const manifestBase64 = xhr.getResponseHeader("X-Manifest") || "";
 
-// 解析 manifest（base64 → UTF-8 JSON，正确处理中文）
-let manifest = null;
-if (manifestBase64) {
-const manifestJson = base64ToUtf8(manifestBase64);
-manifest = JSON.parse(manifestJson);
-} else {
-throw new Error('响应中缺少 manifest 头');
-}
+          // 解析 manifest（base64 → UTF-8 JSON，正确处理中文）
+          let manifest = null;
+          if (manifestBase64) {
+            const manifestJson = base64ToUtf8(manifestBase64);
+            manifest = JSON.parse(manifestJson);
+          } else {
+            throw new Error("响应中缺少 manifest 头");
+          }
 
-          showStatus(`✅ Blender 拆解完成：${totalParts} 个部件 (${elapsedSeconds}s)`, 'success');
+          showStatus(`✅ Blender 拆解完成：${totalParts} 个部件 (${elapsedSeconds}s)`, "success");
 
           resolve({
             arrayBuffer: xhr.response,
             manifest,
           });
         } catch (err) {
-          console.warn('Blender 响应解析失败:', err.message);
+          console.warn("Blender 响应解析失败:", err.message);
           resolve(null);
         }
       });
 
-      xhr.addEventListener('error', () => {
-        console.warn('Blender 后端不可用，回退到 JS 拆解: 网络错误');
+      xhr.addEventListener("error", () => {
+        console.warn("Blender 后端不可用，回退到 JS 拆解: 网络错误");
         resolve(null);
       });
 
-      xhr.addEventListener('timeout', () => {
-        console.warn('Blender 后端超时，回退到 JS 拆解');
+      xhr.addEventListener("timeout", () => {
+        console.warn("Blender 后端超时，回退到 JS 拆解");
         resolve(null);
       });
 
-      xhr.responseType = 'arraybuffer';
+      xhr.responseType = "arraybuffer";
       xhr.timeout = 600000; // 10 分钟
-      xhr.open('POST', `${BLENDER_SERVER}/api/split`);
+      xhr.open("POST", `${BLENDER_SERVER}/api/split`);
       xhr.send(formData);
     });
   }
@@ -2790,31 +2850,31 @@ throw new Error('响应中缺少 manifest 头');
   async function handleFile(file) {
     if (!file) return;
 
-    const ext = file.name.split('.').pop().toLowerCase();
-    if (!['glb', 'gltf', 'stl', 'urdf'].includes(ext)) {
-      showStatus('❌ 不支持的文件格式\n请上传 .glb / .gltf / .stl / .urdf 文件', 'error');
+    const ext = file.name.split(".").pop().toLowerCase();
+    if (!["glb", "gltf", "stl", "urdf"].includes(ext)) {
+      showStatus("❌ 不支持的文件格式\n请上传 .glb / .gltf / .stl / .urdf 文件", "error");
       return;
     }
 
     if (file.size > 100 * 1024 * 1024) {
-      showStatus('❌ 文件太大\n请上传小于 100MB 的文件', 'error');
+      showStatus("❌ 文件太大\n请上传小于 100MB 的文件", "error");
       return;
     }
 
     // URDF 文件：前端解析 XML 结构
-    if (ext === 'urdf') {
-      showStatus('📦 正在解析 URDF 文件...', 'info');
+    if (ext === "urdf") {
+      showStatus("📦 正在解析 URDF 文件...", "info");
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = e => {
         loadURDFModel(e.target.result, file.name);
       };
-      reader.onerror = () => showStatus('❌ 读取文件失败', 'error');
+      reader.onerror = () => showStatus("❌ 读取文件失败", "error");
       reader.readAsText(file);
       return;
     }
 
     // STL 文件：前端 STLLoader 加载，或送 Blender 拆解
-    if (ext === 'stl') {
+    if (ext === "stl") {
       // 优先尝试 Blender 后端拆解
       const blenderResult = await tryBlenderSplit(file);
       if (blenderResult) {
@@ -2822,12 +2882,12 @@ throw new Error('响应中缺少 manifest 头');
         return;
       }
       // 回退：前端 STLLoader 直接加载（单部件）
-      showStatus('⏳ 正在用前端加载 STL 模型...', 'info');
+      showStatus("⏳ 正在用前端加载 STL 模型...", "info");
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = e => {
         loadSTLModel(e.target.result, file.name);
       };
-      reader.onerror = () => showStatus('❌ 读取文件失败', 'error');
+      reader.onerror = () => showStatus("❌ 读取文件失败", "error");
       reader.readAsArrayBuffer(file);
       return;
     }
@@ -2842,116 +2902,119 @@ throw new Error('响应中缺少 manifest 头');
     }
 
     // 回退：读取文件用 JS 拆解（包括 Quest 3 面级别切割）
-    showStatus('⏳ 正在用前端 JS 拆解模型...', 'info');
+    showStatus("⏳ 正在用前端 JS 拆解模型...", "info");
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = e => {
       loadCustomModel(e.target.result, file.name, null);
     };
-    reader.onerror = () => showStatus('❌ 读取文件失败', 'error');
+    reader.onerror = () => showStatus("❌ 读取文件失败", "error");
     reader.readAsArrayBuffer(file);
   }
 
   // 点击上传按钮
-  uploadBtn.addEventListener('click', () => fileInput.click());
+  uploadBtn.addEventListener("click", () => fileInput.click());
 
   // 文件选择
-  fileInput.addEventListener('change', (e) => {
+  fileInput.addEventListener("change", e => {
     handleFile(e.target.files[0]);
-    e.target.value = ''; // 重置 input
+    e.target.value = ""; // 重置 input
   });
 
   // 拖拽上传
-  dropZone.addEventListener('dragover', (e) => {
+  dropZone.addEventListener("dragover", e => {
     e.preventDefault();
-    dropZone.style.borderColor = '#4a9eff';
-    dropZone.style.background = 'rgba(74, 158, 255, 0.1)';
+    dropZone.style.borderColor = "#4a9eff";
+    dropZone.style.background = "rgba(74, 158, 255, 0.1)";
   });
 
-  dropZone.addEventListener('dragleave', (e) => {
+  dropZone.addEventListener("dragleave", e => {
     e.preventDefault();
-    dropZone.style.borderColor = '';
-    dropZone.style.background = '';
+    dropZone.style.borderColor = "";
+    dropZone.style.background = "";
   });
 
-  dropZone.addEventListener('drop', (e) => {
+  dropZone.addEventListener("drop", e => {
     e.preventDefault();
-    dropZone.style.borderColor = '';
-    dropZone.style.background = '';
+    dropZone.style.borderColor = "";
+    dropZone.style.background = "";
     const file = e.dataTransfer.files[0];
     handleFile(file);
   });
 
   // 清除自定义模型
   if (clearBtn) {
-    clearBtn.addEventListener('click', clearCustomModel);
+    clearBtn.addEventListener("click", clearCustomModel);
   }
 
-  console.log('文件上传功能已启用');
+  console.log("文件上传功能已启用");
 }
 
 // ===== AI 绘画功能 =====
-const BLENDER_SERVER_AI = 'http://localhost:3001';
+const BLENDER_SERVER_AI = "http://localhost:3001";
 let aiPaintGallery = []; // 存储已生成的模型 { id, prompt, arrayBuffer, manifest, icon, parts }
 
 function setupAIPaint() {
-  const promptInput = document.getElementById('ai-paint-prompt');
-  const paintBtn = document.getElementById('ai-paint-btn');
-  const presetBtns = document.querySelectorAll('.ai-preset-btn');
-  const statusEl = document.getElementById('ai-paint-status');
-  const galleryEl = document.getElementById('ai-paint-gallery');
+  const promptInput = document.getElementById("ai-paint-prompt");
+  const paintBtn = document.getElementById("ai-paint-btn");
+  const presetBtns = document.querySelectorAll(".chip");
+  const statusEl = document.getElementById("ai-paint-status");
+  const galleryEl = document.getElementById("ai-paint-gallery");
 
   // 图片上传相关元素
-  const dropzone = document.getElementById('ai-paint-dropzone');
-  const fileInput = document.getElementById('ai-paint-image');
-  const dropzoneText = document.getElementById('ai-paint-dropzone-text');
-  const imagePreview = document.getElementById('ai-paint-image-preview');
-  const previewImg = document.getElementById('ai-paint-preview-img');
-  const removeImgBtn = document.getElementById('ai-paint-remove-image');
+  const dropzone = document.getElementById("ai-paint-dropzone");
+  const fileInput = document.getElementById("ai-paint-image");
+  const dropzoneText = document.getElementById("ai-paint-dropzone-text");
+  const imagePreview = document.getElementById("ai-paint-image-preview");
+  const previewImg = document.getElementById("ai-paint-preview-img");
+  const removeImgBtn = document.getElementById("ai-paint-remove-image");
 
   // 当前上传的图片特征
   let uploadedImageFeatures = null;
 
   if (!promptInput || !paintBtn) {
-    console.warn('AI 绘画元素未找到，跳过初始化');
+    console.warn("AI 绘画元素未找到，跳过初始化");
     return;
   }
 
-  function showAIStatus(msg, type = 'info') {
+  function showAIStatus(msg, type = "info") {
     if (!statusEl) return;
     statusEl.innerHTML = msg;
-    statusEl.className = 'ai-paint-status ' + type;
-    statusEl.classList.remove('hidden');
+    statusEl.className = "status-box " + type;
+    statusEl.classList.remove("hidden");
   }
 
   function hideAIStatus() {
-    if (statusEl) statusEl.classList.add('hidden');
+    if (statusEl) statusEl.classList.add("hidden");
   }
 
   // 获取提示词对应的图标
   function getPromptIcon(prompt) {
     const p = prompt.toLowerCase();
-    if (p.includes('篮球') || p.includes('basketball')) return '🏀';
-    if (p.includes('quest') || p.includes('vr') || p.includes('头显')) return '🕶️';
-    if (p.includes('机器人') || p.includes('robot')) return '🤖';
-    if (p.includes('汽车') || p.includes('车') || p.includes('car')) return '🚗';
-    if (p.includes('房子') || p.includes('house')) return '🏠';
-    if (p.includes('人') || p.includes('角色') || p.includes('character')) return '🧑';
-    if (p.includes('火箭') || p.includes('rocket')) return '🚀';
-    if (p.includes('球') || p.includes('sphere') || p.includes('ball')) return '🔴';
-    return '🎨';
+    if (p.includes("篮球") || p.includes("basketball")) return "🏀";
+    if (p.includes("quest") || p.includes("vr") || p.includes("头显")) return "🕶️";
+    if (p.includes("机器人") || p.includes("robot")) return "🤖";
+    if (p.includes("汽车") || p.includes("车") || p.includes("car")) return "🚗";
+    if (p.includes("房子") || p.includes("house")) return "🏠";
+    if (p.includes("人") || p.includes("角色") || p.includes("character")) return "🧑";
+    if (p.includes("火箭") || p.includes("rocket")) return "🚀";
+    if (p.includes("球") || p.includes("sphere") || p.includes("ball")) return "🔴";
+    return "🎨";
   }
 
   // ========== 图片特征提取 ==========
   // 从图片中提取主色调、明暗、宽高比、圆度等特征
   function extractImageFeatures(imgElement) {
-    return new Promise((resolve) => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
+    return new Promise(resolve => {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
       const SAMPLE_SIZE = 100; // 缩小采样以加速
 
       // 计算缩放比例
-      const scale = Math.min(SAMPLE_SIZE / imgElement.naturalWidth, SAMPLE_SIZE / imgElement.naturalHeight);
+      const scale = Math.min(
+        SAMPLE_SIZE / imgElement.naturalWidth,
+        SAMPLE_SIZE / imgElement.naturalHeight
+      );
       const w = Math.max(1, Math.round(imgElement.naturalWidth * scale));
       const h = Math.max(1, Math.round(imgElement.naturalHeight * scale));
 
@@ -2964,7 +3027,9 @@ function setupAIPaint() {
 
       // 颜色量化与统计
       const colorMap = new Map();
-      let totalR = 0, totalG = 0, totalB = 0;
+      let totalR = 0,
+        totalG = 0,
+        totalB = 0;
       let pixelCount = 0;
       let brightPixels = 0;
       let darkPixels = 0;
@@ -3009,7 +3074,7 @@ function setupAIPaint() {
       // 提取前5个主色
       const sortedColors = [...colorMap.entries()].sort((a, b) => b[1] - a[1]);
       const dominantColors = sortedColors.slice(0, 5).map(([key, count]) => {
-        const [r, g, b] = key.split(',').map(Number);
+        const [r, g, b] = key.split(",").map(Number);
         return { r, g, b, ratio: count / pixelCount };
       });
 
@@ -3020,8 +3085,10 @@ function setupAIPaint() {
           const idxRight = (y * w + (x + 1)) * 4;
           const idxDown = ((y + 1) * w + x) * 4;
           const lumC = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-          const lumR = 0.299 * data[idxRight] + 0.587 * data[idxRight + 1] + 0.114 * data[idxRight + 2];
-          const lumD = 0.299 * data[idxDown] + 0.587 * data[idxDown + 1] + 0.114 * data[idxDown + 2];
+          const lumR =
+            0.299 * data[idxRight] + 0.587 * data[idxRight + 1] + 0.114 * data[idxRight + 2];
+          const lumD =
+            0.299 * data[idxDown] + 0.587 * data[idxDown + 1] + 0.114 * data[idxDown + 2];
           if (Math.abs(lumC - lumR) > 30 || Math.abs(lumC - lumD) > 30) {
             edgePixels++;
           }
@@ -3030,12 +3097,12 @@ function setupAIPaint() {
       const edgeRatio = edgePixels / (w * h);
 
       // 判断整体色调
-      let mood = 'neutral';
-      if (avgLum > 0.7) mood = 'bright';
-      else if (avgLum < 0.3) mood = 'dark';
-      if (avgR > avgG + 30 && avgR > avgB + 30) mood = 'warm';
-      if (avgB > avgR + 20 && avgB > avgG) mood = 'cool';
-      if (avgG > avgR + 20 && avgG > avgB + 10) mood = 'natural';
+      let mood = "neutral";
+      if (avgLum > 0.7) mood = "bright";
+      else if (avgLum < 0.3) mood = "dark";
+      if (avgR > avgG + 30 && avgR > avgB + 30) mood = "warm";
+      if (avgB > avgR + 20 && avgB > avgG) mood = "cool";
+      if (avgG > avgR + 20 && avgG > avgB + 10) mood = "natural";
 
       // 宽高比
       const aspectRatio = imgElement.naturalWidth / imgElement.naturalHeight;
@@ -3048,7 +3115,10 @@ function setupAIPaint() {
         for (let x = 0; x < halfW; x += 2) {
           const idxL = (y * w + x) * 4;
           const idxR = (y * w + (w - 1 - x)) * 4;
-          const diff = Math.abs(data[idxL] - data[idxR]) + Math.abs(data[idxL + 1] - data[idxR + 1]) + Math.abs(data[idxL + 2] - data[idxR + 2]);
+          const diff =
+            Math.abs(data[idxL] - data[idxR]) +
+            Math.abs(data[idxL + 1] - data[idxR + 1]) +
+            Math.abs(data[idxL + 2] - data[idxR + 2]);
           if (diff < 30) symScore++;
           symCount++;
         }
@@ -3056,7 +3126,12 @@ function setupAIPaint() {
       const symmetry = symCount > 0 ? symScore / symCount : 0;
 
       const features = {
-        dominantColors: dominantColors.map(c => ({ r: c.r, g: c.g, b: c.b, ratio: parseFloat(c.ratio.toFixed(3)) })),
+        dominantColors: dominantColors.map(c => ({
+          r: c.r,
+          g: c.g,
+          b: c.b,
+          ratio: parseFloat(c.ratio.toFixed(3)),
+        })),
         avgColor: { r: avgR, g: avgG, b: avgB },
         avgLuminance: parseFloat(avgLum.toFixed(3)),
         mood,
@@ -3069,28 +3144,28 @@ function setupAIPaint() {
         height: imgElement.naturalHeight,
       };
 
-      console.log('🎨 图片特征提取:', features);
+      console.log("🎨 图片特征提取:", features);
       resolve(features);
     });
   }
 
   // 处理图片文件
   async function handleImageFile(file) {
-    if (!file || !file.type.startsWith('image/')) {
-      showAIStatus('❌ 请上传图片文件', 'error');
+    if (!file || !file.type.startsWith("image/")) {
+      showAIStatus("❌ 请上传图片文件", "error");
       return;
     }
 
     if (file.size > 10 * 1024 * 1024) {
-      showAIStatus('❌ 图片不能超过 10MB', 'error');
+      showAIStatus("❌ 图片不能超过 10MB", "error");
       return;
     }
 
     const reader = new FileReader();
-    reader.onload = async (e) => {
+    reader.onload = async e => {
       const dataUrl = e.target.result;
       previewImg.src = dataUrl;
-      imagePreview.classList.remove('hidden');
+      imagePreview.classList.remove("hidden");
       dropzoneText.textContent = `已上传: ${file.name}`;
 
       // 创建 Image 对象提取特征
@@ -3098,10 +3173,16 @@ function setupAIPaint() {
       img.onload = async () => {
         uploadedImageFeatures = await extractImageFeatures(img);
         if (uploadedImageFeatures) {
-          const colorSwatches = uploadedImageFeatures.dominantColors.map(c =>
-            `<span class="ai-paint-color-swatch" style="background:rgb(${c.r},${c.g},${c.b})" title="rgb(${c.r},${c.g},${c.b}) ${(c.ratio * 100).toFixed(0)}%"></span>`
-          ).join('');
-          showAIStatus(`🖼️ 已提取图片特征: ${uploadedImageFeatures.mood}色调 · 对称度${(uploadedImageFeatures.symmetry * 100).toFixed(0)}% · 边缘密度${(uploadedImageFeatures.edgeDensity * 100).toFixed(0)}%<div class="ai-paint-color-swatches">${colorSwatches}</div>`, 'info');
+          const colorSwatches = uploadedImageFeatures.dominantColors
+            .map(
+              c =>
+                `<span class="ai-paint-color-swatch" style="background:rgb(${c.r},${c.g},${c.b})" title="rgb(${c.r},${c.g},${c.b}) ${(c.ratio * 100).toFixed(0)}%"></span>`
+            )
+            .join("");
+          showAIStatus(
+            `🖼️ 已提取图片特征: ${uploadedImageFeatures.mood}色调 · 对称度${(uploadedImageFeatures.symmetry * 100).toFixed(0)}% · 边缘密度${(uploadedImageFeatures.edgeDensity * 100).toFixed(0)}%<div class="ai-paint-color-swatches">${colorSwatches}</div>`,
+            "info"
+          );
         }
       };
       img.src = dataUrl;
@@ -3112,33 +3193,33 @@ function setupAIPaint() {
   // 清除已上传图片
   function clearUploadedImage() {
     uploadedImageFeatures = null;
-    previewImg.src = '';
-    imagePreview.classList.add('hidden');
-    dropzoneText.textContent = '上传参考图片（可选）— 提取颜色和形状特征';
-    if (fileInput) fileInput.value = '';
+    previewImg.src = "";
+    imagePreview.classList.add("hidden");
+    dropzoneText.textContent = "上传参考图片（可选）— 提取颜色和形状特征";
+    if (fileInput) fileInput.value = "";
   }
 
   // 绑定图片上传事件
   if (dropzone && fileInput) {
     // 点击上传
-    dropzone.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', (e) => {
+    dropzone.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", e => {
       if (e.target.files && e.target.files[0]) {
         handleImageFile(e.target.files[0]);
       }
     });
 
     // 拖拽上传
-    dropzone.addEventListener('dragover', (e) => {
+    dropzone.addEventListener("dragover", e => {
       e.preventDefault();
-      dropzone.classList.add('dragover');
+      dropzone.classList.add("dragover");
     });
-    dropzone.addEventListener('dragleave', () => {
-      dropzone.classList.remove('dragover');
+    dropzone.addEventListener("dragleave", () => {
+      dropzone.classList.remove("dragover");
     });
-    dropzone.addEventListener('drop', (e) => {
+    dropzone.addEventListener("drop", e => {
       e.preventDefault();
-      dropzone.classList.remove('dragover');
+      dropzone.classList.remove("dragover");
       if (e.dataTransfer.files && e.dataTransfer.files[0]) {
         handleImageFile(e.dataTransfer.files[0]);
       }
@@ -3147,7 +3228,7 @@ function setupAIPaint() {
 
   // 清除图片按钮
   if (removeImgBtn) {
-    removeImgBtn.addEventListener('click', (e) => {
+    removeImgBtn.addEventListener("click", e => {
       e.stopPropagation();
       clearUploadedImage();
     });
@@ -3156,50 +3237,55 @@ function setupAIPaint() {
   // 发送 AI 绘画请求
   async function generateModel(prompt) {
     if (!prompt || !prompt.trim()) {
-      showAIStatus('❌ 请输入提示词', 'error');
+      showAIStatus("❌ 请输入提示词", "error");
       return;
     }
 
     prompt = prompt.trim();
-    console.log(`🎨 AI 绘画: "${prompt}"${uploadedImageFeatures ? ' + 图片特征' : ''}`);
+    console.log(`🎨 AI 绘画: "${prompt}"${uploadedImageFeatures ? " + 图片特征" : ""}`);
 
     // 禁用按钮，显示进度
     paintBtn.disabled = true;
-    paintBtn.textContent = '⏳ 生成中...';
-    const imgHint = uploadedImageFeatures ? '（含图片特征）' : '';
-    showAIStatus(`<span class="ai-paint-spinner"></span>正在生成 "${prompt}" ${imgHint}...（Blender 处理中，约10-30秒）`, 'info');
+    paintBtn.textContent = "⏳ 生成中...";
+    const imgHint = uploadedImageFeatures ? "（含图片特征）" : "";
+    showAIStatus(
+      `<span class="ai-paint-spinner"></span>正在生成 "${prompt}" ${imgHint}...（Blender 处理中，约10-30秒）`,
+      "info"
+    );
 
     try {
       const xhr = new XMLHttpRequest();
-      xhr.responseType = 'arraybuffer';
+      xhr.responseType = "arraybuffer";
       xhr.timeout = 120000; // 2 分钟
 
       const result = await new Promise((resolve, reject) => {
-        xhr.addEventListener('load', () => {
+        xhr.addEventListener("load", () => {
           try {
             if (xhr.status !== 200) {
               const errText = new TextDecoder().decode(xhr.response);
               let errMsg = `服务器错误 ${xhr.status}`;
-              try { errMsg = JSON.parse(errText).error || errMsg; } catch {}
+              try {
+                errMsg = JSON.parse(errText).error || errMsg;
+              } catch {}
               reject(new Error(errMsg));
               return;
             }
 
-            const successHeader = xhr.getResponseHeader('X-Success');
-            if (successHeader !== 'true') {
-              reject(new Error('服务器返回异常'));
+            const successHeader = xhr.getResponseHeader("X-Success");
+            if (successHeader !== "true") {
+              reject(new Error("服务器返回异常"));
               return;
             }
 
-            const totalParts = parseInt(xhr.getResponseHeader('X-Total-Parts') || '0');
-            const elapsedSeconds = parseFloat(xhr.getResponseHeader('X-Elapsed-Seconds') || '0');
-const manifestBase64 = xhr.getResponseHeader('X-Manifest') || '';
+            const totalParts = parseInt(xhr.getResponseHeader("X-Total-Parts") || "0");
+            const elapsedSeconds = parseFloat(xhr.getResponseHeader("X-Elapsed-Seconds") || "0");
+            const manifestBase64 = xhr.getResponseHeader("X-Manifest") || "";
 
-let manifest = null;
-if (manifestBase64) {
-const manifestJson = base64ToUtf8(manifestBase64);
-manifest = JSON.parse(manifestJson);
-}
+            let manifest = null;
+            if (manifestBase64) {
+              const manifestJson = base64ToUtf8(manifestBase64);
+              manifest = JSON.parse(manifestJson);
+            }
 
             resolve({
               arrayBuffer: xhr.response,
@@ -3212,11 +3298,13 @@ manifest = JSON.parse(manifestJson);
           }
         });
 
-        xhr.addEventListener('error', () => reject(new Error('网络错误：无法连接到服务器（请确认 server.js 已启动）')));
-        xhr.addEventListener('timeout', () => reject(new Error('请求超时（2分钟）')));
+        xhr.addEventListener("error", () =>
+          reject(new Error("网络错误：无法连接到服务器（请确认 server.js 已启动）"))
+        );
+        xhr.addEventListener("timeout", () => reject(new Error("请求超时（2分钟）")));
 
-        xhr.open('POST', `${BLENDER_SERVER_AI}/api/ai-paint`);
-        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.open("POST", `${BLENDER_SERVER_AI}/api/ai-paint`);
+        xhr.setRequestHeader("Content-Type", "application/json");
         const payload = { prompt };
         if (uploadedImageFeatures) {
           payload.imageFeatures = uploadedImageFeatures;
@@ -3225,13 +3313,19 @@ manifest = JSON.parse(manifestJson);
       });
 
       // 成功！加载模型到场景
-      showAIStatus(`✅ 生成成功！${result.totalParts} 个部件 (${result.elapsedSeconds}s)\n正在加载到场景...`, 'success');
+      showAIStatus(
+        `✅ 生成成功！${result.totalParts} 个部件 (${result.elapsedSeconds}s)\n正在加载到场景...`,
+        "success"
+      );
 
       const fileName = `AI: ${prompt}`;
       await loadCustomModel(result.arrayBuffer, fileName, result.manifest);
 
       // 更新状态
-      showAIStatus(`✅ "${prompt}" 已加载\n${result.totalParts} 个部件 · 点击"💥 爆炸"可拆解`, 'success');
+      showAIStatus(
+        `✅ "${prompt}" 已加载\n${result.totalParts} 个部件 · 点击"💥 爆炸"可拆解`,
+        "success"
+      );
 
       // 添加到画廊
       const galleryItem = {
@@ -3246,55 +3340,57 @@ manifest = JSON.parse(manifestJson);
       renderGallery();
 
       // 同时更新上传区域的状态
-      showStatus(`✅ AI 绘画：${prompt}\n${result.totalParts} 个部件 · 点击爆炸按钮拆解`, 'success');
+      showStatus(
+        `✅ AI 绘画：${prompt}\n${result.totalParts} 个部件 · 点击爆炸按钮拆解`,
+        "success"
+      );
 
       console.log(`✅ AI 绘画完成: ${result.totalParts} 个部件`);
-
     } catch (err) {
-      console.error('AI 绘画失败:', err);
-      showAIStatus(`❌ 生成失败：${err.message}`, 'error');
+      console.error("AI 绘画失败:", err);
+      showAIStatus(`❌ 生成失败：${err.message}`, "error");
     } finally {
       paintBtn.disabled = false;
-      paintBtn.textContent = '✨ 生成';
+      paintBtn.textContent = "✨ 生成";
     }
   }
 
   // 渲染画廊
   function renderGallery() {
     if (!galleryEl) return;
-    galleryEl.innerHTML = '';
+    galleryEl.innerHTML = "";
 
     // 只显示最近 8 个
     const recent = aiPaintGallery.slice(-8);
     recent.forEach((item, idx) => {
       const actualIdx = aiPaintGallery.length - recent.length + idx;
-      const el = document.createElement('div');
-      el.className = 'ai-gallery-item';
+      const el = document.createElement("div");
+      el.className = "ai-gallery-item";
       el.innerHTML = `
         <span class="gallery-icon">${item.icon}</span>
         <span class="gallery-name">${item.prompt}</span>
         <span class="gallery-parts">${item.parts}件</span>
       `;
-      el.addEventListener('click', () => {
+      el.addEventListener("click", () => {
         // 重新加载这个模型
         loadCustomModel(item.arrayBuffer, `AI: ${item.prompt}`, item.manifest);
-        showAIStatus(`✅ 已切换到 "${item.prompt}"`, 'success');
+        showAIStatus(`✅ 已切换到 "${item.prompt}"`, "success");
         // 标记活跃
-        galleryEl.querySelectorAll('.ai-gallery-item').forEach(e => e.classList.remove('active'));
-        el.classList.add('active');
+        galleryEl.querySelectorAll(".ai-gallery-item").forEach(e => e.classList.remove("active"));
+        el.classList.add("active");
       });
       galleryEl.appendChild(el);
     });
   }
 
   // 生成按钮点击
-  paintBtn.addEventListener('click', () => {
+  paintBtn.addEventListener("click", () => {
     generateModel(promptInput.value);
   });
 
   // 回车键提交
-  promptInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+  promptInput.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
       e.preventDefault();
       generateModel(promptInput.value);
     }
@@ -3302,71 +3398,71 @@ manifest = JSON.parse(manifestJson);
 
   // 预设按钮
   presetBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener("click", () => {
       const preset = btn.dataset.prompt;
       promptInput.value = preset;
       generateModel(preset);
     });
   });
 
-  console.log('🎨 AI 绘画功能已启用');
+  console.log("🎨 AI 绘画功能已启用");
 }
 
 // 等待 DOM 完全加载后初始化 AI 绘画
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', setupAIPaint);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", setupAIPaint);
 } else {
   setupAIPaint();
 }
 
 // ===== 主题切换 =====
-const themeToggle = document.getElementById('theme-toggle');
-const uiOverlay = document.querySelector('.ui-overlay');
+const themeToggle = document.getElementById("theme-toggle");
+const uiOverlay = document.querySelector(".ui-overlay");
 
 if (themeToggle && uiOverlay) {
   // 检查本地存储的主题设置
-  const savedTheme = localStorage.getItem('quest3-theme');
-  if (savedTheme === 'light') {
-    uiOverlay.classList.add('light-theme');
-    themeToggle.textContent = '☀️';
+  const savedTheme = localStorage.getItem("quest3-theme");
+  if (savedTheme === "light") {
+    uiOverlay.classList.add("light-theme");
+    themeToggle.textContent = "☀️";
   }
 
-  themeToggle.addEventListener('click', () => {
-    uiOverlay.classList.toggle('light-theme');
-    const isLight = uiOverlay.classList.contains('light-theme');
+  themeToggle.addEventListener("click", () => {
+    uiOverlay.classList.toggle("light-theme");
+    const isLight = uiOverlay.classList.contains("light-theme");
 
     // 保存主题设置
-    localStorage.setItem('quest3-theme', isLight ? 'light' : 'dark');
+    localStorage.setItem("quest3-theme", isLight ? "light" : "dark");
 
     // 更新按钮图标
-    themeToggle.textContent = isLight ? '☀️' : '🌙';
+    themeToggle.textContent = isLight ? "☀️" : "🌙";
 
     // 添加切换动画
-    themeToggle.style.transform = 'rotate(360deg) scale(1.2)';
+    themeToggle.style.transform = "rotate(360deg) scale(1.2)";
     setTimeout(() => {
-      themeToggle.style.transform = '';
+      themeToggle.style.transform = "";
     }, 300);
   });
 }
 
 // ===== 步骤描述淡入动画 =====
-let lastStepDesc = '';
+let lastStepDesc = "";
 function updateStepDescAnimation() {
   if (!stepDescEl) return;
 
   const currentDesc = stepDescEl.textContent;
   if (currentDesc !== lastStepDesc) {
-    stepDescEl.style.animation = 'none';
+    stepDescEl.style.animation = "none";
     // 触发重排
     void stepDescEl.offsetHeight;
-    stepDescEl.style.animation = 'fadeInUp 0.5s ease-out';
+    stepDescEl.style.animation = "fadeInUp 0.5s ease-out";
     lastStepDesc = currentDesc;
   }
 }
 
 // 在 updateStepUI 的最后调用动画
 const originalUpdateStepUI = updateStepUI;
-updateStepUI = function() {
+updateStepUI = function () {
   originalUpdateStepUI();
   updateStepDescAnimation();
 };
@@ -3381,18 +3477,18 @@ let arEnding = false; // 防止 onAREnd 重入
 
 // 检测 WebXR AR 支持
 async function checkARSupport() {
-  if (!('xr' in navigator)) {
-    console.log('WebXR not supported');
+  if (!("xr" in navigator)) {
+    console.log("WebXR not supported");
     return false;
   }
 
   try {
-    const isSupported = await navigator.xr.isSessionSupported('immersive-ar');
+    const isSupported = await navigator.xr.isSessionSupported("immersive-ar");
     arSupported = isSupported;
-    console.log('WebXR AR supported:', isSupported);
+    console.log("WebXR AR supported:", isSupported);
     return isSupported;
   } catch (err) {
-    console.error('Error checking AR support:', err);
+    console.error("Error checking AR support:", err);
     return false;
   }
 }
@@ -3401,11 +3497,11 @@ async function checkARSupport() {
 function updateARButton() {
   if (arButton) {
     if (arSupported && !arSession) {
-      arButton.style.display = 'inline-block';
+      arButton.style.display = "inline-block";
       arButton.disabled = false;
-      arButton.title = '在 AR 中预览 Quest 3';
+      arButton.title = "在 AR 中预览 Quest 3";
     } else {
-      arButton.style.display = 'none';
+      arButton.style.display = "none";
     }
   }
 }
@@ -3413,44 +3509,46 @@ function updateARButton() {
 // 启动 AR 会话
 async function startAR() {
   if (!arSupported) {
-    alert('您的设备不支持 AR 功能\n\n支持的设备：\n- Android Chrome\n- iOS Safari 15+\n\n请确保使用 HTTPS 访问。');
+    alert(
+      "您的设备不支持 AR 功能\n\n支持的设备：\n- Android Chrome\n- iOS Safari 15+\n\n请确保使用 HTTPS 访问。"
+    );
     return;
   }
 
   try {
     // 请求 AR 会话
-    const session = await navigator.xr.requestSession('immersive-ar', {
-      requiredFeatures: ['hit-test', 'local-floor'],
-      optionalFeatures: ['dom-overlay', 'light-estimation'],
-      domOverlay: { root: document.body }
+    const session = await navigator.xr.requestSession("immersive-ar", {
+      requiredFeatures: ["hit-test", "local-floor"],
+      optionalFeatures: ["dom-overlay", "light-estimation"],
+      domOverlay: { root: document.body },
     });
 
     arSession = session;
 
     // 更新按钮状态
     if (arButton) {
-      arButton.textContent = '🚪 退出 AR';
-      arButton.classList.add('active');
+      arButton.textContent = "🚪 退出 AR";
+      arButton.classList.add("active");
     }
 
     // 隐藏 UI 面板
     if (uiOverlay) {
-      uiOverlay.style.display = 'none';
+      uiOverlay.style.display = "none";
     }
 
     // 设置 AR 渲染器
     const arRenderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
-      logarithmicDepthBuffer: true
+      logarithmicDepthBuffer: true,
     });
     arRenderer.setPixelRatio(window.devicePixelRatio);
     arRenderer.setSize(window.innerWidth, window.innerHeight);
     arRenderer.xr.enabled = true;
-    arRenderer.xr.setReferenceSpaceType('local-floor');
+    arRenderer.xr.setReferenceSpaceType("local-floor");
 
     // 替换画布：移除原有 canvas，添加 AR 渲染器的 canvas
-    container.innerHTML = '';
+    container.innerHTML = "";
     container.appendChild(arRenderer.domElement);
 
     // 创建 AR 场景
@@ -3471,29 +3569,34 @@ async function startAR() {
     arQuestGroup.scale.set(0.1, 0.1, 0.1);
 
     // 设置 AR 相机
-    const arCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+    const arCamera = new THREE.PerspectiveCamera(
+      70,
+      window.innerWidth / window.innerHeight,
+      0.01,
+      20
+    );
 
     // 启用 hit-test：先设置 session，再初始化 hit-test source
-    session.addEventListener('end', onAREnd);
+    session.addEventListener("end", onAREnd);
     await arRenderer.xr.setSession(session);
 
     // 初始化 hit-test source（之前缺失，导致 getHitTestResults 始终失败）
     try {
-      const viewerSpace = await session.requestReferenceSpace('viewer');
+      const viewerSpace = await session.requestReferenceSpace("viewer");
       arHitTestSource = await session.requestHitTestSource({ space: viewerSpace });
     } catch (err) {
-      console.warn('Hit-test source 初始化失败，模型将放置在默认位置:', err);
+      console.warn("Hit-test source 初始化失败，模型将放置在默认位置:", err);
     }
 
     // 从 AR 克隆中收集部件引用（避免修改原始场景的 mesh）
     const arParts = [];
     const cloneMeshMap = new Map();
-    arQuestGroup.traverse((child) => {
+    arQuestGroup.traverse(child => {
       if (child.isMesh && child.userData.name) {
         cloneMeshMap.set(child.userData.name, child);
       }
     });
-    parts.forEach((part) => {
+    parts.forEach(part => {
       const clonedMesh = cloneMeshMap.get(part.name);
       if (clonedMesh) {
         arParts.push({
@@ -3549,11 +3652,7 @@ async function startAR() {
               const delay = index * 0.05;
               const factor = Math.max(0, Math.min(1, (explodeFactor - delay) * 2));
 
-              part.mesh.position.lerpVectors(
-                part.homePos,
-                part.explodePos,
-                factor * 0.5
-              );
+              part.mesh.position.lerpVectors(part.homePos, part.explodePos, factor * 0.5);
             });
           }
 
@@ -3567,11 +3666,14 @@ async function startAR() {
       }
     });
 
-    console.log('AR session started');
-
+    console.log("AR session started");
   } catch (err) {
-    console.error('Failed to start AR:', err);
-    alert('启动 AR 失败：' + err.message + '\n\n请确保：\n1. 使用 HTTPS\n2. 设备支持 AR\n3. 授予相机权限');
+    console.error("Failed to start AR:", err);
+    alert(
+      "启动 AR 失败：" +
+        err.message +
+        "\n\n请确保：\n1. 使用 HTTPS\n2. 设备支持 AR\n3. 授予相机权限"
+    );
     onAREnd();
   }
 }
@@ -3593,7 +3695,7 @@ function onAREnd() {
     }
     arModelPlaced = false;
   } catch (err) {
-    console.error('结束 AR 会话时出错:', err);
+    console.error("结束 AR 会话时出错:", err);
   }
 
   // 恢复普通渲染器
@@ -3605,10 +3707,10 @@ async function initAR() {
   const supported = await checkARSupport();
 
   if (supported) {
-    arButton = document.getElementById('ar-btn');
+    arButton = document.getElementById("ar-btn");
     if (arButton) {
       // 绑定 AR 按钮事件（之前在模块顶层绑定，但此时 arButton 尚为 null，导致事件从未绑定）
-      arButton.addEventListener('click', () => {
+      arButton.addEventListener("click", () => {
         if (arSession) {
           onAREnd();
         } else {
@@ -3621,8 +3723,8 @@ async function initAR() {
 }
 
 // 页面加载后检测 AR
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initAR);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initAR);
 } else {
   initAR();
 }

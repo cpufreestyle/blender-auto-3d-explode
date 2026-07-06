@@ -1,14 +1,5 @@
 export default [
   {
-    languageOptions: {
-      ecmaVersion: 'latest',
-      sourceType: 'module',
-      env: {
-        browser: true,
-        es2022: true,
-        node: true
-      }
-    },
     ignores: [
       'node_modules/**',
       'dist/**',
@@ -17,10 +8,21 @@ export default [
     ]
   },
   {
-    files: ['**/*.js', '**/*.mjs'],
+    files: [
+      'main.js',
+      'src/**/*.js',
+      'tests/**/*.mjs',
+      'tests/**/*.js',
+      'utils/**/*.js'
+    ],
     languageOptions: {
-      parserOptions: {
-        sourceType: 'module'
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        document: 'readonly',
+        window: 'readonly',
+        THREE: 'readonly',
+        console: 'readonly'
       }
     },
     rules: {
@@ -44,6 +46,25 @@ export default [
       'operator-linebreak': ['error', 'after'],
       'newline-per-chained-call': ['error', { 'ignoreChainWithDepth': 3 }],
       'max-len': ['warn', { 'code': 120, 'ignoreComments': true }]
+    }
+  },
+  {
+    files: ['server.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        process: 'readonly',
+        Buffer: 'readonly',
+        console: 'readonly',
+        module: 'readonly',
+        require: 'readonly'
+      }
+    },
+    rules: {
+      'no-console': 'off',
+      'no-unused-vars': 'warn',
+      'no-undef': 'error'
     }
   }
 ];

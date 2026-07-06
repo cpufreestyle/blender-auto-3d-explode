@@ -3,9 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Blender 自动拆解三维模型并自动做拆解教学 - 预览</title>
+  <title>Blender 3D 拆解教学</title>
   <link rel="stylesheet" href="style.css" />
-  <link rel="stylesheet" href="upload-enhancement.css" />
 </head>
 <body>
   <div id="canvas-container">
@@ -20,15 +19,7 @@
 
   <script>
     window.addEventListener('error', (e) => {
-      console.error('=== Global Error ===');
-      console.error('Message:', e.message);
-      console.error('Filename:', e.filename);
-      console.error('Lineno:', e.lineno);
-      console.error('Colno:', e.colno);
-      console.error('Error:', e.error);
-      console.error('Target:', e.target);
-      console.error('==================');
-
+      console.error('=== Global Error ===', e);
       const errorBox = document.getElementById('error');
       if (errorBox) {
         errorBox.classList.remove('hidden');
@@ -41,204 +32,196 @@
       const loading = document.getElementById('loading');
       if (loading) loading.classList.add('hidden');
     });
-
     window.addEventListener('unhandledrejection', (e) => {
-      console.error('=== Unhandled Promise Rejection ===');
-      console.error('Reason:', e.reason);
-      console.error('Promise:', e.promise);
-      console.error('===================================');
-
+      console.error('=== Unhandled Promise Rejection ===', e);
       const errorBox = document.getElementById('error');
       if (errorBox) {
         errorBox.classList.remove('hidden');
-        const msg = e.reason?.message || e.reason || '未知 Promise 错误';
-        errorBox.textContent = '加载出错：' + msg;
+        errorBox.textContent = '加载出错：' + (e.reason?.message || e.reason || '未知错误');
         if (e.reason?.stack) errorBox.textContent += '\n' + e.reason.stack;
       }
       const loading = document.getElementById('loading');
       if (loading) loading.classList.add('hidden');
     });
-
-    window.addEventListener('load', () => {
-      console.log('Page loaded successfully');
-    });
   </script>
 
   <div class="ui-overlay">
+    <!-- ===== 紧凑头部 ===== -->
     <div class="ui-header">
-      <h1>🔧 Blender 自动拆解三维模型并自动做拆解教学</h1>
-      <p class="subtitle">3D 拆解教学预览</p>
-      <button id="theme-toggle" class="theme-toggle" title="切换主题">🌙</button>
+      <div class="header-row">
+        <h1>🔧 3D 拆解教学</h1>
+        <button id="theme-toggle" class="theme-toggle" title="切换主题">🌙</button>
+      </div>
     </div>
 
-    <!-- ===== AI 绘画面板 ===== -->
-    <div class="ai-paint-section">
-      <div class="ai-paint-header">
-        <span>🎨</span>
-        <span>AI 绘画 — 输入提示词生成3D模型</span>
-      </div>
-      <div class="ai-paint-input-row">
-        <input type="text" id="ai-paint-prompt" class="ai-paint-input" placeholder="例如：红色球体、篮球、机器人、汽车、火箭..." />
-        <button id="ai-paint-btn" class="step-btn ai-paint-btn">✨ 生成</button>
-      </div>
-      <div class="ai-paint-upload-row">
-        <div id="ai-paint-dropzone" class="ai-paint-dropzone">
-          <input type="file" id="ai-paint-image" accept="image/*" hidden />
-          <span class="dropzone-icon">🖼️</span>
-          <span class="dropzone-text" id="ai-paint-dropzone-text">上传参考图片（可选）— 提取颜色和形状特征</span>
+    <!-- ===== AI 绘画（可折叠）===== -->
+    <details class="panel collapsible" open>
+      <summary class="panel-header">
+        <span>🎨 AI 绘画</span>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="panel-body">
+        <div class="ai-input-row">
+          <input type="text" id="ai-paint-prompt" class="ai-input" placeholder="红色球体、机器人、超人..." />
+          <button id="ai-paint-btn" class="btn btn-primary">✨生成</button>
         </div>
-        <div id="ai-paint-image-preview" class="ai-paint-image-preview hidden">
-          <img id="ai-paint-preview-img" src="" alt="预览" />
-          <button id="ai-paint-remove-image" class="ai-paint-remove-img">✕</button>
+        <div class="ai-upload-row">
+          <div id="ai-paint-dropzone" class="mini-dropzone">
+            <input type="file" id="ai-paint-image" accept="image/*" hidden />
+            <span>🖼️</span>
+            <span class="dz-text" id="ai-paint-dropzone-text">参考图（可选）</span>
+          </div>
+          <div id="ai-paint-image-preview" class="img-preview hidden">
+            <img id="ai-paint-preview-img" src="" alt="预览" />
+            <button id="ai-paint-remove-image" class="img-remove">✕</button>
+          </div>
         </div>
+        <div class="ai-presets">
+          <button class="chip" data-prompt="红色球体">🔴球体</button>
+          <button class="chip" data-prompt="篮球">🏀篮球</button>
+          <button class="chip" data-prompt="Quest 3 VR头显">🕶️Quest3</button>
+          <button class="chip" data-prompt="机器人">🤖机器人</button>
+          <button class="chip" data-prompt="汽车">🚗汽车</button>
+          <button class="chip" data-prompt="房子">🏠房子</button>
+          <button class="chip" data-prompt="超人">🦸超人</button>
+          <button class="chip" data-prompt="蝙蝠侠">🦇蝙蝠侠</button>
+          <button class="chip" data-prompt="钢铁侠">🤖钢铁侠</button>
+          <button class="chip" data-prompt="火箭">🚀火箭</button>
+          <button class="chip" data-prompt="飞机">✈️飞机</button>
+        </div>
+        <div id="ai-paint-status" class="status-box hidden"></div>
+        <div id="ai-paint-gallery" class="gallery-row"></div>
       </div>
-      <div class="ai-paint-presets">
-        <button class="ai-preset-btn" data-prompt="红色球体">🔴 球体</button>
-        <button class="ai-preset-btn" data-prompt="篮球">🏀 篮球</button>
-        <button class="ai-preset-btn" data-prompt="Quest 3 VR头显">🕶️ Quest 3</button>
-        <button class="ai-preset-btn" data-prompt="机器人">🤖 机器人</button>
-        <button class="ai-preset-btn" data-prompt="汽车">🚗 汽车</button>
-        <button class="ai-preset-btn" data-prompt="房子">🏠 房子</button>
-        <button class="ai-preset-btn" data-prompt="人物角色">🧑 角色</button>
-        <button class="ai-preset-btn" data-prompt="超人">🦸 超人</button>
-        <button class="ai-preset-btn" data-prompt="蝙蝠侠">🦇 蝙蝠侠</button>
-        <button class="ai-preset-btn" data-prompt="钢铁侠">🤖 钢铁侠</button>
-        <button class="ai-preset-btn" data-prompt="火箭">🚀 火箭</button>
-        <button class="ai-preset-btn" data-prompt="飞机">✈️ 飞机</button>
-      </div>
-      <div id="ai-paint-status" class="ai-paint-status hidden"></div>
-      <div id="ai-paint-gallery" class="ai-paint-gallery"></div>
-    </div>
+    </details>
 
-    <!-- ===== 自定义模型上传 ===== -->
-    <div class="upload-section">
-      <div class="upload-header">
-        <span>📁</span>
-        <span>上传你自己的 3D 模型</span>
-      </div>
-      <div class="upload-formats">
-        支持 .glb / .gltf / .stl / .urdf（最多 100MB）
-      </div>
-      <div id="drop-zone" class="drop-zone">
-        <div class="drop-zone-text">
+    <!-- ===== 模型上传（可折叠）===== -->
+    <details class="panel collapsible">
+      <summary class="panel-header">
+        <span>📁 上传自定义模型</span>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="panel-body">
+        <div class="upload-hint">.glb / .gltf / .stl · 最大 100MB</div>
+        <div id="drop-zone" class="mini-dropzone full-width">
           <div class="drop-icon">📦</div>
-          <div>拖拽文件到这里，或点击选择</div>
+          <div>拖拽或点击选择文件</div>
+          <input type="file" id="file-input" accept=".glb,.gltf,.stl,.urdf" style="display:none" />
         </div>
-        <input type="file" id="file-input" accept=".glb,.gltf,.stl,.urdf" style="display:none" />
+        <div id="upload-status" class="status-box hidden"></div>
+        <div id="uploaded-file-name" class="file-name"></div>
+        <div class="upload-actions">
+          <button id="upload-btn" class="btn">📂 选择文件</button>
+          <button id="clear-model-btn" class="btn btn-danger" style="display:none">🗑️ 清除</button>
+        </div>
       </div>
-      <div id="upload-status" class="upload-status hidden"></div>
-      <div id="uploaded-file-name" class="uploaded-file-name"></div>
-      <div class="upload-actions">
-        <button id="upload-btn" class="step-btn upload-btn">📂 选择文件</button>
-        <button id="clear-model-btn" class="step-btn" style="display:none">🗑️ 清除模型</button>
-      </div>
-    </div>
+    </details>
 
-    <div class="welcome-banner">
-      <strong>👋 欢迎！这是你的第一次认识 Quest 3 吗？</strong><br>
-      跟随下面的步骤，我们一层层拆解这台 VR 设备，看看里面都有什么。
-    </div>
-
-    <div class="control-group">
-      <div class="step-info">
-        <span id="step-number">步骤 0 / 7</span>
+    <!-- ===== 步骤进度 ===== -->
+    <div class="section">
+      <div class="step-bar">
+        <span id="step-number">步骤 0/7</span>
         <strong id="step-name">👋 欢迎认识 Quest 3</strong>
       </div>
       <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
       <div id="step-desc" class="step-desc">
-        Meta Quest 3 是 Meta 推出的 VR 一体机（2023年10月发售）。<br><br>
-        点击"下一步"开始逐层拆解，了解它的内部结构。<br><br>
-        💡 提示：可以用鼠标左键旋转视角，滚轮缩放
+        Meta Quest 3 是 Meta 推出的 VR 一体机（2023年10月发售）。
+点击"下一步"开始逐层拆解。
+💡 鼠标左键旋转，滚轮缩放
       </div>
     </div>
 
-    <!-- 爆炸深度滑块 -->
-    <div class="control-group">
-      <label for="explode-depth" class="slider-label">
-        <span>💥 爆炸深度</span>
-        <span id="depth-value">0%</span>
-      </label>
-      <input id="explode-depth" type="range" min="0" max="100" value="0" step="1" />
-    </div>
-
-    <!-- 动画时间轴 -->
-    <div class="control-group timeline-control">
-      <div class="timeline-buttons">
-        <button id="timeline-play" class="timeline-btn">▶️ 播放</button>
-        <button id="timeline-reset" class="timeline-btn">⏮️ 重置</button>
-        <select id="timeline-speed" class="timeline-select">
-          <option value="0.5">0.5x</option>
-          <option value="1" selected>1x</option>
-          <option value="2">2x</option>
-        </select>
+    <!-- ===== 滑块 + 时间轴（合并）===== -->
+    <div class="section">
+      <div class="slider-row">
+        <label class="slider-label">
+          <span>💥 爆炸深度</span>
+          <span id="depth-value">0%</span>
+        </label>
+        <input id="explode-depth" type="range" min="0" max="100" value="0" step="1" />
       </div>
-      <div class="timeline-wrapper">
-        <span id="timeline-step">0</span>
-<input type="range" id="timeline-slider" min="0" max="8" value="0" />
-<span id="timeline-total">8</span>
+      <div class="timeline-row">
+        <div class="tl-controls">
+          <button id="timeline-play" class="btn-mini">▶️</button>
+          <button id="timeline-reset" class="btn-mini">⏮️</button>
+          <select id="timeline-speed" class="speed-select">
+            <option value="0.5">0.5x</option>
+            <option value="1" selected>1x</option>
+            <option value="2">2x</option>
+          </select>
+          <div class="tl-slider-wrap">
+            <span id="timeline-step">0</span>
+            <input type="range" id="timeline-slider" min="0" max="8" value="0" />
+            <span id="timeline-total">8</span>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div class="control-group step-buttons">
-      <button id="prev-step" class="step-btn" disabled>⏮️ 上一步</button>
-      <button id="next-step" class="step-btn primary">下一步 ⏭️</button>
-      <button id="reset-step" class="step-btn">🔄 重置</button>
-      <button id="explode-btn" class="step-btn explode-btn">💥 爆炸视图</button>
-      <button id="ar-btn" class="step-btn ar-btn" style="display: none;">📱 AR 预览</button>
-    </div>
-
-    <div class="control-group">
-      <label class="checkbox-label">
+    <!-- ===== 操作按钮 ===== -->
+    <div class="section btn-grid">
+      <button id="prev-step" class="btn" disabled>⏮️上一步</button>
+      <button id="next-step" class="btn btn-primary">下一步⏭️</button>
+      <button id="reset-step" class="btn">🔄重置</button>
+      <button id="explode-btn" class="btn btn-explode">💥爆炸视图</button>
+      <label class="checkbox-inline">
         <input id="auto-rotate" type="checkbox" checked />
-        <span>🔄 自动旋转</span>
+        <span>🔄自动旋转</span>
       </label>
+      <button id="ar-btn" class="btn btn-ar" style="display:none">📱 AR 预览</button>
     </div>
 
-    <!-- 工具清单 -->
-    <div class="tools-section">
-      <div class="tools-header">
-        <span>🛠️</span>
-        <span>本步骤所需工具</span>
+    <!-- ===== 工具 + 部件（合并折叠）===== -->
+    <details class="panel collapsible">
+      <summary class="panel-header">
+        <span>🛠️ 工具 & 📦 部件清单</span>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="panel-body">
+        <div id="tools-list" class="tools-list">
+          <div class="tools-none">✅ 本步骤无需工具</div>
+        </div>
+        <div class="parts-list">
+          <div class="parts-header">共 <span id="part-count">15</span> 个部件</div>
+          <div class="parts-grid">
+            <div class="part-item" data-part="前面板"><span class="part-dot" style="background:#f2f2f2"></span>前面板</div>
+            <div class="part-item" data-part="主机身"><span class="part-dot" style="background:#222225"></span>主机身</div>
+            <div class="part-item" data-part="左透镜模组"><span class="part-dot" style="background:#1e3a5f"></span>透镜x2</div>
+            <div class="part-item" data-part="左摄像头"><span class="part-dot" style="background:#0a0a0a"></span>摄像头x4</div>
+            <div class="part-item" data-part="左头带臂"><span class="part-dot" style="background:#3a3a3c"></span>头带臂x2</div>
+            <div class="part-item" data-part="面罩海绵"><span class="part-dot" style="background:#2c2c2e"></span>海绵</div>
+            <div class="part-item" data-part="主板/显示屏"><span class="part-dot" style="background:#0d4a22"></span>主板</div>
+            <div class="part-item" data-part="头带"><span class="part-dot" style="background:#3a3a3c"></span>头带</div>
+          </div>
+        </div>
       </div>
-      <div id="tools-list" class="tools-list">
-        <div class="tools-none">✅ 本步骤无需工具</div>
-      </div>
-    </div>
+    </details>
 
-    <!-- 部件信息卡片 -->
+    <!-- ===== 操作提示（折叠）===== -->
+    <details class="panel collapsible">
+      <summary class="panel-header">
+        <span>💡 操作提示</span>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="panel-body">
+        <ul class="tips-list">
+          <li>🖱️ <b>左键</b> 旋转</li>
+          <li>🔍 <b>滚轮</b> 缩放</li>
+          <li>👆 <b>右键</b> 平移</li>
+          <li>⏭️ <b>下一步</b> 逐步拆解</li>
+          <li>💥 <b>爆炸</b> 一键分离</li>
+        </ul>
+      </div>
+    </details>
+
+    <!-- ===== 部件信息浮窗 ===== -->
     <div id="part-tooltip" class="part-tooltip hidden">
       <div class="tooltip-title"></div>
       <div class="tooltip-content"></div>
     </div>
 
-    <div class="parts-list">
-      <div class="parts-header">📦 部件清单（共 <span id="part-count">15</span> 个）</div>
-      <div class="parts-grid">
-        <div class="part-item" data-part="前面板"><span class="part-dot" style="background:#f2f2f2"></span>前面板</div>
-        <div class="part-item" data-part="主机身"><span class="part-dot" style="background:#222225"></span>主机身</div>
-        <div class="part-item" data-part="左透镜模组"><span class="part-dot" style="background:#1e3a5f"></span>透镜 x2</div>
-        <div class="part-item" data-part="左摄像头"><span class="part-dot" style="background:#0a0a0a"></span>摄像头 x4</div>
-        <div class="part-item" data-part="左头带臂"><span class="part-dot" style="background:#3a3a3c"></span>头带臂 x2</div>
-        <div class="part-item" data-part="面罩海绵"><span class="part-dot" style="background:#2c2c2e"></span>海绵</div>
-        <div class="part-item" data-part="主板/显示屏"><span class="part-dot" style="background:#0d4a22"></span>主板</div>
-        <div class="part-item" data-part="头带"><span class="part-dot" style="background:#3a3a3c"></span>头带</div>
-      </div>
-    </div>
-
-    <div class="tips-box">
-      <div class="tips-title">💡 操作提示</div>
-      <ul class="tips-list">
-        <li>🖱️ <strong>左键拖动</strong>：旋转视角</li>
-        <li>🔍 <strong>滚轮</strong>：缩放画面</li>
-        <li>👆 <strong>右键拖动</strong>：平移视角</li>
-        <li>⏭️ <strong>下一步</strong>：逐步拆解（共 7 步）</li>
-        <li>💥 <strong>爆炸视图</strong>：一键全部分离</li>
-      </ul>
-    </div>
-
-    <p class="hint">🎓 专为 VR 新手设计 · 点击"下一步"开始学习</p>
+    <p class="hint">🎓 专为 VR 新手设计</p>
   </div>
 
-  <script type="module" src="main.js?v=2.2.0"></script>
+  <script type="module" src="main.js?v=3.0.0"></script>
 </body>
 </html>
