@@ -1296,7 +1296,9 @@ def create_male_character():
 
 
 def create_lego_style(prompt):
-    """乐高风格生成器 — 使用方块积木拼接风格创建模型"""
+    """乐高风格生成器 — 调用 Blender 实时生成积木模型"""
+    import hashlib
+    
     prompt_lower = prompt.lower()
     parts = []
 
@@ -1814,25 +1816,29 @@ def create_lego_style(prompt):
         # 使用提示词的哈希值来生成独特的模型结构
         import hashlib
         prompt_hash = hashlib.md5(prompt.encode()).hexdigest()
-        seed = int(prompt_hash[:8], 16)
         
-        # 根据提示词长度和哈希决定模型复杂度
-        complexity = 3 + (len(prompt) % 5)  # 3-7个积木块
+        # 根据提示词长度决定模型复杂度
+        complexity = 4 + (len(prompt) % 4)  # 4-7个积木块
         
-        log(f"  🎲 程序化生成: {complexity} 个积木块 (seed: {seed})")
+        log(f"  🎲 程序化生成: {complexity} 个积木块 (prompt: {prompt})")
         
-        # 生成独特的积木堆叠
-        positions = []
+        # 生成独特的积木堆叠 - 使用更分散的位置
         for i in range(complexity):
-            # 使用哈希值生成伪随机位置
-            x = ((seed >> (i * 4)) & 0xF) / 10.0 - 0.8
-            y = ((seed >> (i * 4 + 2)) & 0xF) / 10.0 - 0.8
-            z = 0.3 + i * 0.5
+            # 从哈希的不同部分提取值
+            hash_slice = prompt_hash[i*4:(i+1)*4]
+            val = int(hash_slice, 16)
             
-            # 大小也根据哈希变化
-            sx = 0.4 + ((seed >> (i * 2)) & 0x7) / 20.0
-            sy = 0.4 + ((seed >> (i * 2 + 1)) & 0x7) / 20.0
-            sz = 0.3 + ((seed >> (i * 2 + 2)) & 0x5) / 20.0
+            # 生成更分散的位置 (-1.5 到 1.5)
+            x = (val % 31) / 10.0 - 1.5  # -1.5 to 1.5
+            y = ((val >> 8) % 31) / 10.0 - 1.5
+            z = 0.3 + i * 0.6  # 垂直堆叠，每层0.6
+            
+            # 大小变化 (0.3 到 0.8)
+            sx = 0.3 + ((val >> 4) % 5) / 10.0
+            sy = 0.3 + ((val >> 12) % 5) / 10.0
+            sz = 0.3 + ((val >> 6) % 4) / 10.0
+            
+            log(f"     积木 {i+1}: pos=({x:.1f}, {y:.1f}, {z:.1f}), size=({sx:.1f}, {sy:.1f}, {sz:.1f})")
             
             # 创建积木
             bpy.ops.mesh.primitive_cube_add(size=1, location=(x, y, z))
@@ -1843,26 +1849,35 @@ def create_lego_style(prompt):
             parts.append(add_obj(brick, f'积木_{i+1}', mat_lego))
             
             # 添加凸点
-            stud_count_x = max(1, int(sx))
-            stud_count_y = max(1, int(sy))
+            stud_count_x = max(1, int(sx * 2))  # 根据大小决定凸点数量
+            stud_count_y = max(1, int(sy * 2))
             for sx_i in range(stud_count_x):
                 for sy_j in range(stud_count_y):
-                    sx_pos = x + (sx_i - (stud_count_x-1)/2) * 0.4
-                    sy_pos = y + (sy_j - (stud_count_y-1)/2) * 0.4
+                    sx_pos = x + (sx_i - (stud_count_x-1)/2) * 0.35
+                    sy_pos = y + (sy_j - (stud_count_y-1)/2) * 0.35
                     sz_pos = z + sz/2 + 0.075
                     
-                    bpy.ops.mesh.primitive_cylinder_add(radius=0.12, depth=0.15, location=(sx_pos, sy_pos, sz_pos))
+                    bpy.ops.mesh.primitive_cylinder_add(radius=0.1, depth=0.12, location=(sx_pos, sy_pos, sz_pos))
                     stud = bpy.context.active_object
                     apply_bevel_mod(stud, width=0.005, segments=1)
                     parts.append(add_obj(stud, f'凸点_{i}_{sx_i}_{sy_j}', mat_stud))
         
-        # 添加一些装饰元素（根据提示词特征）
-        if len(prompt) > 5:
-            # 添加一个特殊装饰块
-            bpy.ops.mesh.primitive_cylinder_add(radius=0.3, depth=0.4, location=(0, 0, 0.3 + complexity * 0.5))
-            top = bpy.context.active_object
-            apply_bevel_mod(top, width=0.02, segments=2)
-            parts.append(add_obj(top, '顶部装饰', mat_stud))    
+        # 添加顶部装饰（圆柱或圆锥）
+        top_val = int(prompt_hash[-4:], 16)
+        top_x = (top_val % 21) / 10.0 - 1.0
+        top_y = ((top_val >> 8) % 21) / 10.0 - 1.0
+        top_z = 0.3 + complexity * 0.6
+        
+        if top_val % 2 == 0:
+            # 圆柱装饰
+            bpy.ops.mesh.primitive_cylinder_add(radius=0.25, depth=0.5, location=(top_x, top_y, top_z))
+        else:
+            # 圆锥装饰
+            bpy.ops.mesh.primitive_cone_add(radius1=0.3, radius2=0.1, depth=0.5, location=(top_x, top_y, top_z))
+        
+        top = bpy.context.active_object
+        apply_bevel_mod(top, width=0.02, segments=2)
+        parts.append(add_obj(top, '顶部装饰', mat_stud))        
 
     return parts
 
@@ -2068,11 +2083,18 @@ def match_prompt(prompt):
 
     if best_match:
         log(f"  ✅ 匹配: {best_match['desc']} (关键词: '{matched_kw}', 得分: {best_score})")
-        # 使用匹配的生成器，但包装成乐高风格
+        # 使用匹配的生成器
         original_creator = best_match['creator']
-        if best_match['desc'] in ['篮球', '蝙蝠侠', '超人', '钢铁侠', '蜘蛛侠', '美队']:
-            # 这些有专门的乐高风格处理
+        
+        # 如果是乐高风格标记，返回乐高生成器
+        if original_creator == 'lego_style':
             return lambda: create_lego_style(prompt)
+        
+        # 如果是篮球或超级英雄，也使用乐高风格
+        if best_match['desc'] in ['篮球', '蝙蝠侠', '超人', '钢铁侠', '蜘蛛侠', '美队', '英雄']:
+            return lambda: create_lego_style(prompt)
+        
+        # 其他情况返回原始生成器
         return original_creator
     else:
         log(f"  📦 未匹配预设，使用乐高风格生成")
