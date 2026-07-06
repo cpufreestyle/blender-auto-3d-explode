@@ -50,12 +50,12 @@ git push origin v1.4.0
 
 1. **打开 GitHub 仓库**
    ```
-   https://github.com/cpufreestyle/quest3-exploded
+   https://github.com/cpufreestyle/blender-auto-3d-explode
    ```
 
 2. **进入 Releases 页面**
    - 点击右侧 **Releases** 标签
-   - 或访问：`https://github.com/cpufreestyle/quest3-exploded/releases`
+   - 或访问：`https://github.com/cpufreestyle/blender-auto-3d-explode/releases`
 
 3. **创建新 Release**
    - 点击 **Create a new release** 按钮
@@ -85,7 +85,7 @@ git push origin v1.4.0
 ```bash
 # 设置变量
 TOKEN="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-REPO="cpufreestyle/quest3-exploded"
+REPO="cpufreestyle/blender-auto-3d-explode"
 VERSION="v1.4.0"
 TITLE="Blender Python API 集成系统"
 NOTES=$(cat RELEASE_NOTES_v1.4.0.md)
@@ -109,7 +109,7 @@ curl -X POST \
 ### 4.1 打开 Release 页面
 
 ```
-https://github.com/cpufreestyle/quest3-exploded/releases/new?tag=v1.4.0
+https://github.com/cpufreestyle/blender-auto-3d-explode/releases/new?tag=v1.4.0
 ```
 
 ### 4.2 填写表单
@@ -168,8 +168,8 @@ https://github.com/cpufreestyle/quest3-exploded/releases/new?tag=v1.4.0
 
 ## 🔗 相关链接
 
-- **GitHub Releases**：https://github.com/cpufreestyle/quest3-exploded/releases
-- **创建 Release**：https://github.com/cpufreestyle/quest3-exploded/releases/new
+- **GitHub Releases**：https://github.com/cpufreestyle/blender-auto-3d-explode/releases
+- **创建 Release**：https://github.com/cpufreestyle/blender-auto-3d-explode/releases/new
 - **GitHub CLI**：https://cli.github.com/
 - **GitHub API**：https://docs.github.com/en/rest/releases
 
@@ -226,7 +226,7 @@ gh auth login
 ./create_release.sh v1.4.0 "Blender Python API 集成系统"
 
 # 3. 完成！
-# 🔗 https://github.com/cpufreestyle/quest3-exploded/releases/tag/v1.4.0
+# 🔗 https://github.com/cpufreestyle/blender-auto-3d-explode/releases/tag/v1.4.0
 ```
 
 ---

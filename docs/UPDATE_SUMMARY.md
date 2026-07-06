@@ -277,7 +277,7 @@ v1.2.0: ~4055 行（代码 + 文档）
 
 ### GitHub
 
-- **仓库**：https://github.com/cpufreestyle/quest3-exploded
+- **仓库**：https://github.com/cpufreestyle/blender-auto-3d-explode
 - **分支**：main
 - **最新提交**：`f86af4a 📝 Update README with latest features`
 - **Release**：
@@ -287,7 +287,7 @@ v1.2.0: ~4055 行（代码 + 文档）
 ### Vercel
 
 - **状态**：✅ 自动部署中
-- **主域名**：https://quest3-exploded.vercel.app
+- **主域名**：https://blender-auto-3d-explode.vercel.app
 - **自动部署**：每次 push 自动更新
 
 ### 本地服务器
@@ -368,7 +368,7 @@ e7548bb ✨ 完整实现 Quest 3 3D 爆炸图教学工具
 - ✅ Android Chrome
 - ✅ iOS Safari
 
-**访问**：https://quest3-exploded.vercel.app
+**访问**：https://blender-auto-3d-explode.vercel.app
 
 ### 主题切换 🌟🌟🌟🌟
 
@@ -396,7 +396,7 @@ e7548bb ✨ 完整实现 Quest 3 3D 爆炸图教学工具
 - 视觉对比表格
 - 性能影响分析
 
-**阅读**：https://github.com/cpufreestyle/quest3-exploded/blob/main/UI_UX_IMPROVEMENTS.md
+**阅读**：https://github.com/cpufreestyle/blender-auto-3d-explode/blob/main/UI_UX_IMPROVEMENTS.md
 
 ### 2. WEBXR_AR_IMPLEMENTATION.md
 
@@ -408,7 +408,7 @@ e7548bb ✨ 完整实现 Quest 3 3D 爆炸图教学工具
 - 测试方法
 - 已知问题
 
-**阅读**：https://github.com/cpufreestyle/quest3-exploded/blob/main/WEBXR_AR_IMPLEMENTATION.md
+**阅读**：https://github.com/cpufreestyle/blender-auto-3d-explode/blob/main/WEBXR_AR_IMPLEMENTATION.md
 
 ### 3. REAL_MODEL_AR_PLAN.md
 
@@ -418,7 +418,7 @@ e7548bb ✨ 完整实现 Quest 3 3D 爆炸图教学工具
 - 工作量评估
 - 备选方案
 
-**阅读**：https://github.com/cpufreestyle/quest3-exploded/blob/main/REAL_MODEL_AR_PLAN.md
+**阅读**：https://github.com/cpufreestyle/blender-auto-3d-explode/blob/main/REAL_MODEL_AR_PLAN.md
 
 ### 4. AR_FEATURE_COMPLETE.md
 
@@ -428,7 +428,7 @@ e7548bb ✨ 完整实现 Quest 3 3D 爆炸图教学工具
 - 测试方法
 - 下一步计划
 
-**阅读**：https://github.com/cpufreestyle/quest3-exploded/blob/main/AR_FEATURE_COMPLETE.md
+**阅读**：https://github.com/cpufreestyle/blender-auto-3d-explode/blob/main/AR_FEATURE_COMPLETE.md
 
 ### 5. RELEASE_NOTES_v1.2.0.md
 
@@ -438,7 +438,7 @@ e7548bb ✨ 完整实现 Quest 3 3D 爆炸图教学工具
 - 使用说明
 - 已知限制
 
-**阅读**：https://github.com/cpufreestyle/quest3-exploded/releases/tag/v1.2.0
+**阅读**：https://github.com/cpufreestyle/blender-auto-3d-explode/releases/tag/v1.2.0
 
 ---
 
@@ -563,9 +563,9 @@ v1.2.0:  18 项功能（+1 AR 预览）
 
 ## 📞 反馈和支持
 
-- **GitHub Issues**：https://github.com/cpufreestyle/quest3-exploded/issues
-- **在线演示**：https://quest3-exploded.vercel.app
-- **文档**：https://github.com/cpufreestyle/quest3-exploded
+- **GitHub Issues**：https://github.com/cpufreestyle/blender-auto-3d-explode/issues
+- **在线演示**：https://blender-auto-3d-explode.vercel.app
+- **文档**：https://github.com/cpufreestyle/blender-auto-3d-explode
 
 ---
 
@@ -579,7 +579,7 @@ v1.2.0:  18 项功能（+1 AR 预览）
 
 ## 🔗 快速链接
 
-- **在线演示**：https://quest3-exploded.vercel.app
-- **GitHub**：https://github.com/cpufreestyle/quest3-exploded
-- **v1.0.0 Release**：https://github.com/cpufreestyle/quest3-exploded/releases/tag/v1.0.0
-- **v1.2.0 Release**：https://github.com/cpufreestyle/quest3-exploded/releases/tag/v1.2.0
+- **在线演示**：https://blender-auto-3d-explode.vercel.app
+- **GitHub**：https://github.com/cpufreestyle/blender-auto-3d-explode
+- **v1.0.0 Release**：https://github.com/cpufreestyle/blender-auto-3d-explode/releases/tag/v1.0.0
+- **v1.2.0 Release**：https://github.com/cpufreestyle/blender-auto-3d-explode/releases/tag/v1.2.0

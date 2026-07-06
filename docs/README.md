@@ -180,7 +180,7 @@ npx vite
 
 2. 登录并部署：
    ```bash
-   cd quest3-exploded
+   cd blender-auto-3d-explode
    vercel
    ```
 

@@ -235,8 +235,8 @@ npm test
 
 ## 🔗 相关链接
 
-- **GitHub 仓库**：https://github.com/cpufreestyle/quest3-exploded
-- **问题反馈**：https://github.com/cpufreestyle/quest3-exploded/issues
+- **GitHub 仓库**：https://github.com/cpufreestyle/blender-auto-3d-explode
+- **问题反馈**：https://github.com/cpufreestyle/blender-auto-3d-explode/issues
 - **完整变更日志**：[CHANGELOG.md](CHANGELOG.md)
 
 ---

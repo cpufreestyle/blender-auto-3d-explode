@@ -31,7 +31,7 @@ http://192.168.1.109:8080/
 如果本地网络仍有问题，**直接使用 Vercel 在线版本**：
 
 ```
-https://quest3-exploded.vercel.app
+https://blender-auto-3d-explode.vercel.app
 ```
 
 **优势**：
@@ -47,7 +47,7 @@ https://quest3-exploded.vercel.app
 ### **方法 1：Vercel 在线（推荐）**
 
 1. **手机打开 Chrome**
-2. **访问**：https://quest3-exploded.vercel.app
+2. **访问**：https://blender-auto-3d-explode.vercel.app
 3. **点击**："📱 AR 预览"
 4. **授予权限**
 5. **扫描环境**
@@ -81,7 +81,7 @@ https://quest3-exploded.vercel.app
 
 **如果不想折腾，直接使用 Vercel**：
 ```
-https://quest3-exploded.vercel.app
+https://blender-auto-3d-explode.vercel.app
 ```
 
 **如果想用本地网络**：

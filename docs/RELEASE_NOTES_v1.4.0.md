@@ -447,8 +447,8 @@ python3 blender_watcher.py
 
 ## 🔗 相关链接
 
-- **GitHub 仓库**：https://github.com/cpufreestyle/quest3-exploded
-- **问题反馈**：https://github.com/cpufreestyle/quest3-exploded/issues
+- **GitHub 仓库**：https://github.com/cpufreestyle/blender-auto-3d-explode
+- **问题反馈**：https://github.com/cpufreestyle/blender-auto-3d-explode/issues
 - **Blender 下载**：https://www.blender.org/download/
 - **Blender Python API**：https://docs.blender.org/api/current/
 

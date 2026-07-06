@@ -272,7 +272,7 @@ gh auth login
 
 **方法 2：手动创建**
 
-1. 访问 https://github.com/cpufreestyle/quest3-exploded/releases/new
+1. 访问 https://github.com/cpufreestyle/blender-auto-3d-explode/releases/new
 2. 填写信息：
    - **Tag**：`v1.4.0`
    - **Title**：`Blender Python API 集成系统`
@@ -333,10 +333,10 @@ Bug 修复: 6 个 Blender API 兼容性
 
 ## 🔗 相关链接
 
-- **GitHub 仓库**：https://github.com/cpufreestyle/quest3-exploded
+- **GitHub 仓库**：https://github.com/cpufreestyle/blender-auto-3d-explode
 - **分支**：`fix/material-compatibility-transmission`
-- **Release 页面**：https://github.com/cpufreestyle/quest3-exploded/releases
-- **创建 Release**：https://github.com/cpufreestyle/quest3-exploded/releases/new
+- **Release 页面**：https://github.com/cpufreestyle/blender-auto-3d-explode/releases
+- **创建 Release**：https://github.com/cpufreestyle/blender-auto-3d-explode/releases/new
 
 ---
 

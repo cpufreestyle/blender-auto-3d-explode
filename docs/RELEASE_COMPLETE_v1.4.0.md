@@ -12,10 +12,10 @@
 ## 🔗 相关链接
 
 ### GitHub Release
-**地址**：https://github.com/cpufreestyle/quest3-exploded/releases/tag/v1.4.0
+**地址**：https://github.com/cpufreestyle/blender-auto-3d-explode/releases/tag/v1.4.0
 
 ### Pull Request
-**PR #1**：https://github.com/cpufreestyle/quest3-exploded/pull/1
+**PR #1**：https://github.com/cpufreestyle/blender-auto-3d-explode/pull/1
 
 ### 主要文档
 - [RELEASE_NOTES_v1.4.0.md](RELEASE_NOTES_v1.4.0.md) - 完整发布说明
@@ -152,9 +152,9 @@ b62779e 📋 Add v1.4.0 release summary
 
 ## 🔗 快速链接
 
-- **GitHub 仓库**：https://github.com/cpufreestyle/quest3-exploded
-- **Release 页面**：https://github.com/cpufreestyle/quest3-exploded/releases/tag/v1.4.0
-- **PR #1**：https://github.com/cpufreestyle/quest3-exploded/pull/1
+- **GitHub 仓库**：https://github.com/cpufreestyle/blender-auto-3d-explode
+- **Release 页面**：https://github.com/cpufreestyle/blender-auto-3d-explode/releases/tag/v1.4.0
+- **PR #1**：https://github.com/cpufreestyle/blender-auto-3d-explode/pull/1
 
 ---
 

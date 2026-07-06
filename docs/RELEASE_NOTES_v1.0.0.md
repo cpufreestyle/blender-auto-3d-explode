@@ -145,8 +145,8 @@ quest3-exploded/
 
 ### 本地运行
 ```bash
-git clone https://github.com/cpufreestyle/quest3-exploded.git
-cd quest3-exploded
+git clone https://github.com/cpufreestyle/blender-auto-3d-explode.git
+cd blender-auto-3d-explode
 python3 -m http.server 8080
 ```
 然后打开 http://localhost:8080
@@ -216,7 +216,7 @@ MIT License - 自由使用、修改和分发
 
 ---
 
-**下载地址**：https://github.com/cpufreestyle/quest3-exploded/releases/tag/v1.0.0
+**下载地址**：https://github.com/cpufreestyle/blender-auto-3d-explode/releases/tag/v1.0.0
 
 **在线预览**：https://cpufreestyle.github.io/quest3-exploded/
 

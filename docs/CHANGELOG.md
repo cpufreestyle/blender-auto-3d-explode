@@ -590,4 +590,4 @@ Bug 修复: 7 个
 **最后更新**：2026-07-04
 **维护者**：Claude Code
 **项目**：Quest 3 爆炸拆解 3D 视图
-**仓库**：https://github.com/cpufreestyle/quest3-exploded
+**仓库**：https://github.com/cpufreestyle/blender-auto-3d-explode

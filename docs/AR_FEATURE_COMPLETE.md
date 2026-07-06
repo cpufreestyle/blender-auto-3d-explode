@@ -178,7 +178,7 @@ arRenderer.setAnimationLoop((timestamp, frame) => {
 
 ### 在线测试
 
-**访问地址**：https://quest3-exploded.vercel.app
+**访问地址**：https://blender-auto-3d-explode.vercel.app
 
 **Android 测试**：
 1. 用 Chrome 打开网站
@@ -418,11 +418,11 @@ arRenderer.setAnimationLoop((timestamp, frame) => {
 
 **🎊 AR 功能已上线！在支持的移动设备上试试吧！**
 
-**在线地址**：https://quest3-exploded.vercel.app
+**在线地址**：https://blender-auto-3d-explode.vercel.app
 
 **注意**：必须使用 HTTPS（Vercel 自动支持）
 
-**GitHub**：https://github.com/cpufreestyle/quest3-exploded
+**GitHub**：https://github.com/cpufreestyle/blender-auto-3d-explode
 
 ---
 

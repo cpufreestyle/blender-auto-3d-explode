@@ -47,7 +47,7 @@ http://192.168.1.113:8080/webxr-diagnose.html
 
 直接访问（已自动 HTTPS）：
 ```
-https://quest3-exploded.vercel.app
+https://blender-auto-3d-explode.vercel.app
 ```
 
 **优势**：
@@ -170,13 +170,13 @@ http://192.168.1.113:8080/webxr-diagnose.html
 #### ✅ 如果诊断通过
 直接访问主程序：
 ```
-https://quest3-exploded.vercel.app
+https://blender-auto-3d-explode.vercel.app
 ```
 
 #### ❌ 如果是 HTTPS 问题
 使用 Vercel：
 ```
-https://quest3-exploded.vercel.app
+https://blender-auto-3d-explode.vercel.app
 ```
 
 #### ❌ 如果是 Chrome 版本问题
@@ -195,7 +195,7 @@ Google Play → Chrome → 更新
 最简单的方法，**无需配置**：
 
 1. **打开 Chrome**
-2. **访问**：https://quest3-exploded.vercel.app
+2. **访问**：https://blender-auto-3d-explode.vercel.app
 3. **点击**："📱 AR 预览"
 4. **授予权限**
 5. **扫描环境**
@@ -210,7 +210,7 @@ Google Play → Chrome → 更新
 ```
 1. 手机打开 Chrome
    ↓
-2. 访问 https://quest3-exploded.vercel.app
+2. 访问 https://blender-auto-3d-explode.vercel.app
    ↓
 3. 等待页面加载（约 3-5 秒）
    ↓
@@ -326,7 +326,7 @@ console.log('UA:', navigator.userAgent);
 **如果看完还是不知道怎么办，直接这么做**：
 
 1. **在手机上打开 Chrome**
-2. **访问**：https://quest3-exploded.vercel.app
+2. **访问**：https://blender-auto-3d-explode.vercel.app
 3. **点击 "📱 AR 预览"**
 4. **授予权限**
 5. **扫描环境**
@@ -339,4 +339,4 @@ console.log('UA:', navigator.userAgent);
 
 **诊断地址**：http://192.168.1.113:8080/webxr-diagnose.html
 
-**Vercel 地址**：https://quest3-exploded.vercel.app
+**Vercel 地址**：https://blender-auto-3d-explode.vercel.app

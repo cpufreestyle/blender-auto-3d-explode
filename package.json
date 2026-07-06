@@ -1,5 +1,5 @@
 {
-  "name": "quest3-exploded",
+  "name": "blender-auto-3d-explode",
   "version": "2.0.0",
   "description": "Blender 自动拆解三维模型并自动做拆解教学 - 预览。基于 Three.js 构建的交互式 3D 拆解教学工具，支持鼠标拖拽旋转、滚轮缩放、滑块控制拆解程度。",
   "main": "main.js",

@@ -163,7 +163,7 @@ except (AttributeError, TypeError):
 
 **分支**：`fix/material-compatibility-transmission`
 **提交**：`2ba8c31`
-**地址**：https://github.com/cpufreestyle/quest3-exploded
+**地址**：https://github.com/cpufreestyle/blender-auto-3d-explode
 
 ---
 
