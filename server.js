@@ -138,7 +138,7 @@ function findBlender() {
 /**
  * 调用 Blender CLI 进行 AI 绘画（生成模型）
  */
-async function runBlenderAIPaint(prompt, outputPath, manifestPath) {
+async function runBlenderAIPaint(prompt, outputPath, manifestPath, imageFeaturesPath) {
   const scriptPath = path.join(__dirname, 'blender_ai_paint.py');
   const args = [
     '--background',
@@ -148,6 +148,11 @@ async function runBlenderAIPaint(prompt, outputPath, manifestPath) {
     '--output', outputPath,
     '--manifest', manifestPath,
   ];
+
+  // 如果有图片特征文件，传递给 Blender
+  if (imageFeaturesPath) {
+    args.push('--image-features', imageFeaturesPath);
+  }
 
   console.log(`  🎨 AI 绘画: ${BLENDER_PATH} ${args.join(' ')}`);
 
@@ -372,7 +377,7 @@ function sendBinaryResult(res, glbBuffer, manifest, elapsed) {
 /**
  * AI 绘画 — 根据提示词生成3D模型
  * POST /api/ai-paint
- * Body: { "prompt": "红色球体" }
+ * Body: { "prompt": "红色球体", "imageFeatures": { ... } }
  * 返回：二进制 GLB + manifest 头（同 /api/split 格式）
  */
 async function handleAIPaint(req, res) {
@@ -390,17 +395,26 @@ async function handleAIPaint(req, res) {
       return;
     }
 
-    console.log(`\n🎨 AI 绘画请求: "${prompt}"`);
+    const imageFeatures = body.imageFeatures || null;
+    console.log(`\n🎨 AI 绘画请求: "${prompt}"${imageFeatures ? ` + 图片特征(${imageFeatures.mood}色调, ${imageFeatures.dominantColors?.length || 0}主色)` : ''}`);
 
     // 2. 临时文件路径
     const jobId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const outputPath = path.join(UPLOAD_DIR, `ai-output-${jobId}.glb`);
     const manifestPath = path.join(UPLOAD_DIR, `ai-manifest-${jobId}.json`);
 
+    // 如果有图片特征，写入临时 JSON 文件供 Blender 读取
+    let imageFeaturesPath = null;
+    if (imageFeatures) {
+      imageFeaturesPath = path.join(UPLOAD_DIR, `ai-imgfeat-${jobId}.json`);
+      fs.writeFileSync(imageFeaturesPath, JSON.stringify(imageFeatures, null, 2), 'utf-8');
+      console.log(`  🖼️ 图片特征已写入: ${imageFeaturesPath}`);
+    }
+
     try {
       // 3. 调用 Blender 生成模型
       try {
-        const result = await runBlenderAIPaint(prompt, outputPath, manifestPath);
+        const result = await runBlenderAIPaint(prompt, outputPath, manifestPath, imageFeaturesPath);
         blenderStdout = result.stdout || '';
         blenderStderr = result.stderr || '';
       } catch (berr) {

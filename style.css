@@ -1218,6 +1218,109 @@ html, body {
   cursor: not-allowed;
 }
 
+/* ===== AI 绘画图片上传 ===== */
+.ai-paint-upload-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  align-items: flex-start;
+}
+
+.ai-paint-dropzone {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 2px dashed rgba(99, 102, 241, 0.3);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-height: 44px;
+}
+
+.ai-paint-dropzone:hover {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.ai-paint-dropzone.dragover {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: #818cf8;
+  transform: scale(1.01);
+}
+
+.ai-paint-dropzone .dropzone-icon {
+  font-size: 20px;
+}
+
+.ai-paint-dropzone .dropzone-text {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-overlay.light-theme .ai-paint-dropzone {
+  background: rgba(99, 102, 241, 0.06);
+  border-color: rgba(99, 102, 241, 0.25);
+}
+
+.ui-overlay.light-theme .ai-paint-dropzone .dropzone-text {
+  color: rgba(26, 26, 26, 0.6);
+}
+
+.ai-paint-image-preview {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  flex-shrink: 0;
+}
+
+.ai-paint-image-preview img {
+  width: 60px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 2px solid rgba(129, 140, 248, 0.4);
+}
+
+.ai-paint-remove-img {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ef4444;
+  color: white;
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+}
+
+.ai-paint-color-swatches {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.ai-paint-color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  cursor: default;
+}
+
 .ai-paint-presets {
   display: flex;
   flex-wrap: wrap;

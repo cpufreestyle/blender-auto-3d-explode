@@ -81,6 +81,17 @@
         <input type="text" id="ai-paint-prompt" class="ai-paint-input" placeholder="例如：红色球体、篮球、机器人、汽车、火箭..." />
         <button id="ai-paint-btn" class="step-btn ai-paint-btn">✨ 生成</button>
       </div>
+      <div class="ai-paint-upload-row">
+        <div id="ai-paint-dropzone" class="ai-paint-dropzone">
+          <input type="file" id="ai-paint-image" accept="image/*" hidden />
+          <span class="dropzone-icon">🖼️</span>
+          <span class="dropzone-text" id="ai-paint-dropzone-text">上传参考图片（可选）— 提取颜色和形状特征</span>
+        </div>
+        <div id="ai-paint-image-preview" class="ai-paint-image-preview hidden">
+          <img id="ai-paint-preview-img" src="" alt="预览" />
+          <button id="ai-paint-remove-image" class="ai-paint-remove-img">✕</button>
+        </div>
+      </div>
       <div class="ai-paint-presets">
         <button class="ai-preset-btn" data-prompt="红色球体">🔴 球体</button>
         <button class="ai-preset-btn" data-prompt="篮球">🏀 篮球</button>

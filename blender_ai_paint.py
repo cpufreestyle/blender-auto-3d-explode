@@ -15,6 +15,9 @@ import math
 import traceback
 from mathutils import Vector
 
+# 全局图片特征（可选，由前端 Canvas 提取后传入）
+IMAGE_FEATURES = None
+
 # 确保输出立即刷新
 def log(msg):
     print(msg, flush=True)
@@ -1613,6 +1616,7 @@ def parse_args():
     prompt = '球体'
     output_path = '/tmp/ai_paint_output.glb'
     manifest_path = '/tmp/ai_paint_manifest.json'
+    image_features_path = None
 
     i = 0
     while i < len(script_args):
@@ -1626,18 +1630,137 @@ def parse_args():
         elif arg == '--manifest' and i + 1 < len(script_args):
             manifest_path = script_args[i + 1]
             i += 2
+        elif arg == '--image-features' and i + 1 < len(script_args):
+            image_features_path = script_args[i + 1]
+            i += 2
         else:
             i += 1
 
-    return prompt, output_path, manifest_path
+    return prompt, output_path, manifest_path, image_features_path
+
+
+def load_image_features(image_features_path):
+    """加载图片特征 JSON 文件"""
+    global IMAGE_FEATURES
+    if not image_features_path or not os.path.exists(image_features_path):
+        return
+    try:
+        with open(image_features_path, 'r', encoding='utf-8') as f:
+            IMAGE_FEATURES = json.load(f)
+        colors = IMAGE_FEATURES.get('dominantColors', [])
+        mood = IMAGE_FEATURES.get('mood', 'unknown')
+        log(f"  🖼️ 图片特征已加载: {mood}色调, {len(colors)}个主色, 对称度{IMAGE_FEATURES.get('symmetry', 0):.0%}")
+        for c in colors:
+            r, g, b = c['r'] / 255.0, c['g'] / 255.0, c['b'] / 255.0
+            log(f"     🎨 rgb({c['r']},{c['g']},{c['b']}) 占比{c['ratio']:.0%}")
+    except Exception as e:
+        log(f"  ⚠️ 图片特征加载失败: {e}")
+
+
+def apply_image_colors_to_scene():
+    """根据图片特征重新着色场景中的对象"""
+    if not IMAGE_FEATURES:
+        return
+
+    colors = IMAGE_FEATURES.get('dominantColors', [])
+    if not colors:
+        return
+
+    mood = IMAGE_FEATURES.get('mood', 'neutral')
+    avg_lum = IMAGE_FEATURES.get('avgLuminance', 0.5)
+
+    # 将主色转为 0-1 范围
+    palette = [(c['r'] / 255.0, c['g'] / 255.0, c['b'] / 255.0, c.get('ratio', 0.2)) for c in colors]
+
+    # 获取场景中所有有材质的网格对象
+    mesh_objs = [obj for obj in bpy.data.objects if obj.type == 'MESH' and obj.data.materials]
+    if not mesh_objs:
+        return
+
+    log(f"  🎨 应用图片配色到 {len(mesh_objs)} 个对象...")
+
+    for idx, obj in enumerate(mesh_objs):
+        # 按比例分配颜色：主要对象用主色，次要对象用辅色
+        color_idx = idx % len(palette)
+        r, g, b, ratio = palette[color_idx]
+
+        # 根据色调调整材质属性
+        if mood == 'bright':
+            roughness = 0.3
+            metallic = 0.1
+        elif mood == 'dark':
+            roughness = 0.6
+            metallic = 0.5
+        elif mood == 'warm':
+            roughness = 0.4
+            metallic = 0.2
+        elif mood == 'cool':
+            roughness = 0.35
+            metallic = 0.4
+        elif mood == 'natural':
+            roughness = 0.7
+            metallic = 0.1
+        else:
+            roughness = 0.5
+            metallic = 0.3
+
+        # 如果主色占比非常高（>60%），全部用主色
+        if palette[0][3] > 0.6:
+            r, g, b = palette[0][0], palette[0][1], palette[0][2]
+
+        # 创建新材质
+        mat_name = f'ImgColor_{obj.name}_{idx}'
+        # 对暗色物体增加金属感，亮色增加光泽
+        use_emission = avg_lum > 0.6 and idx == 0
+        emission_color = (r, g, b) if use_emission else None
+        emission_strength = 0.3 if use_emission else 0.0
+
+        new_mat = make_mat(mat_name, (r, g, b), roughness=roughness, metallic=metallic,
+                           emission=emission_color, emission_strength=emission_strength,
+                           clearcoat=0.3 if mood in ('bright', 'cool') else 0.0)
+
+        # 替换对象的材质
+        obj.data.materials.clear()
+        obj.data.materials.append(new_mat)
+
+    log(f"  ✅ 图片配色已应用 ({len(mesh_objs)} 个对象, {mood}色调)")
+
+
+def apply_image_shape_influence():
+    """根据图片特征微调形状（对称性、边缘密度影响细节）"""
+    if not IMAGE_FEATURES:
+        return
+
+    symmetry = IMAGE_FEATURES.get('symmetry', 0.5)
+    edge_density = IMAGE_FEATURES.get('edgeDensity', 0.1)
+
+    # 高边缘密度 = 增加细分级别（更多几何细节）
+    if edge_density > 0.15:
+        for obj in bpy.data.objects:
+            if obj.type == 'MESH':
+                # 添加细分修改器
+                if not any(m.type == 'SUBSURF' for m in obj.modifiers):
+                    subsurf = obj.modifiers.new(name='ImgSubsurf', type='SUBSURF')
+                    subsurf.levels = 1
+                    subsurf.render_levels = 2
+        log(f"  📐 边缘密度高({edge_density:.0%})，已添加细分")
+
+    # 高对称性 = 确保模型对称（不需要额外操作，生成器已对称）
+    log(f"  📐 图片对称度: {symmetry:.0%}, 边缘密度: {edge_density:.0%}")
 
 
 def main():
-    prompt, output_path, manifest_path = parse_args()
+    global IMAGE_FEATURES
+    prompt, output_path, manifest_path, image_features_path = parse_args()
+
+    # 加载图片特征
+    load_image_features(image_features_path)
 
     log("=" * 50)
     log(f"  🎨 AI 绘画 — Blender 模型生成器")
     log(f"  📝 提示词: {prompt}")
+    if IMAGE_FEATURES:
+        log(f"  🖼️ 图片参考: {IMAGE_FEATURES.get('mood', '?')}色调, {len(IMAGE_FEATURES.get('dominantColors', []))}个主色")
     log("=" * 50)
 
     try:
@@ -1654,6 +1777,11 @@ def main():
 
         # 2.5 后处理：曲线转网格、平滑着色
         post_process_scene()
+
+        # 2.6 如果有图片特征，应用图片配色和形状影响
+        if IMAGE_FEATURES:
+            apply_image_colors_to_scene()
+            apply_image_shape_influence()
 
         # 3. 导出 GLB
         export_glb(output_path)

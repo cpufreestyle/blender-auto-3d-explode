@@ -2901,6 +2901,17 @@ function setupAIPaint() {
   const statusEl = document.getElementById('ai-paint-status');
   const galleryEl = document.getElementById('ai-paint-gallery');
 
+  // 图片上传相关元素
+  const dropzone = document.getElementById('ai-paint-dropzone');
+  const fileInput = document.getElementById('ai-paint-image');
+  const dropzoneText = document.getElementById('ai-paint-dropzone-text');
+  const imagePreview = document.getElementById('ai-paint-image-preview');
+  const previewImg = document.getElementById('ai-paint-preview-img');
+  const removeImgBtn = document.getElementById('ai-paint-remove-image');
+
+  // 当前上传的图片特征
+  let uploadedImageFeatures = null;
+
   if (!promptInput || !paintBtn) {
     console.warn('AI 绘画元素未找到，跳过初始化');
     return;
@@ -2931,6 +2942,217 @@ function setupAIPaint() {
     return '🎨';
   }
 
+  // ========== 图片特征提取 ==========
+  // 从图片中提取主色调、明暗、宽高比、圆度等特征
+  function extractImageFeatures(imgElement) {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const SAMPLE_SIZE = 100; // 缩小采样以加速
+
+      // 计算缩放比例
+      const scale = Math.min(SAMPLE_SIZE / imgElement.naturalWidth, SAMPLE_SIZE / imgElement.naturalHeight);
+      const w = Math.max(1, Math.round(imgElement.naturalWidth * scale));
+      const h = Math.max(1, Math.round(imgElement.naturalHeight * scale));
+
+      canvas.width = w;
+      canvas.height = h;
+      ctx.drawImage(imgElement, 0, 0, w, h);
+
+      const imageData = ctx.getImageData(0, 0, w, h);
+      const data = imageData.data;
+
+      // 颜色量化与统计
+      const colorMap = new Map();
+      let totalR = 0, totalG = 0, totalB = 0;
+      let pixelCount = 0;
+      let brightPixels = 0;
+      let darkPixels = 0;
+      let edgePixels = 0;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const a = data[i + 3];
+        if (a < 128) continue; // 跳过透明像素
+
+        totalR += r;
+        totalG += g;
+        totalB += b;
+        pixelCount++;
+
+        // 亮度判断
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        if (lum > 180) brightPixels++;
+        if (lum < 60) darkPixels++;
+
+        // 量化颜色（每个通道分8档）
+        const qr = Math.round(r / 32) * 32;
+        const qg = Math.round(g / 32) * 32;
+        const qb = Math.round(b / 32) * 32;
+        const key = `${qr},${qg},${qb}`;
+        colorMap.set(key, (colorMap.get(key) || 0) + 1);
+      }
+
+      if (pixelCount === 0) {
+        resolve(null);
+        return;
+      }
+
+      // 平均色
+      const avgR = Math.round(totalR / pixelCount);
+      const avgG = Math.round(totalG / pixelCount);
+      const avgB = Math.round(totalB / pixelCount);
+      const avgLum = (0.299 * avgR + 0.587 * avgG + 0.114 * avgB) / 255;
+
+      // 提取前5个主色
+      const sortedColors = [...colorMap.entries()].sort((a, b) => b[1] - a[1]);
+      const dominantColors = sortedColors.slice(0, 5).map(([key, count]) => {
+        const [r, g, b] = key.split(',').map(Number);
+        return { r, g, b, ratio: count / pixelCount };
+      });
+
+      // 边缘检测（简单 Sobel）
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const idx = (y * w + x) * 4;
+          const idxRight = (y * w + (x + 1)) * 4;
+          const idxDown = ((y + 1) * w + x) * 4;
+          const lumC = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+          const lumR = 0.299 * data[idxRight] + 0.587 * data[idxRight + 1] + 0.114 * data[idxRight + 2];
+          const lumD = 0.299 * data[idxDown] + 0.587 * data[idxDown + 1] + 0.114 * data[idxDown + 2];
+          if (Math.abs(lumC - lumR) > 30 || Math.abs(lumC - lumD) > 30) {
+            edgePixels++;
+          }
+        }
+      }
+      const edgeRatio = edgePixels / (w * h);
+
+      // 判断整体色调
+      let mood = 'neutral';
+      if (avgLum > 0.7) mood = 'bright';
+      else if (avgLum < 0.3) mood = 'dark';
+      if (avgR > avgG + 30 && avgR > avgB + 30) mood = 'warm';
+      if (avgB > avgR + 20 && avgB > avgG) mood = 'cool';
+      if (avgG > avgR + 20 && avgG > avgB + 10) mood = 'natural';
+
+      // 宽高比
+      const aspectRatio = imgElement.naturalWidth / imgElement.naturalHeight;
+
+      // 是否对称（左右翻转差异大说明不对称）
+      let symScore = 0;
+      const halfW = Math.floor(w / 2);
+      let symCount = 0;
+      for (let y = 0; y < h; y += 2) {
+        for (let x = 0; x < halfW; x += 2) {
+          const idxL = (y * w + x) * 4;
+          const idxR = (y * w + (w - 1 - x)) * 4;
+          const diff = Math.abs(data[idxL] - data[idxR]) + Math.abs(data[idxL + 1] - data[idxR + 1]) + Math.abs(data[idxL + 2] - data[idxR + 2]);
+          if (diff < 30) symScore++;
+          symCount++;
+        }
+      }
+      const symmetry = symCount > 0 ? symScore / symCount : 0;
+
+      const features = {
+        dominantColors: dominantColors.map(c => ({ r: c.r, g: c.g, b: c.b, ratio: parseFloat(c.ratio.toFixed(3)) })),
+        avgColor: { r: avgR, g: avgG, b: avgB },
+        avgLuminance: parseFloat(avgLum.toFixed(3)),
+        mood,
+        aspectRatio: parseFloat(aspectRatio.toFixed(2)),
+        edgeDensity: parseFloat(edgeRatio.toFixed(3)),
+        symmetry: parseFloat(symmetry.toFixed(3)),
+        brightRatio: parseFloat((brightPixels / pixelCount).toFixed(3)),
+        darkRatio: parseFloat((darkPixels / pixelCount).toFixed(3)),
+        width: imgElement.naturalWidth,
+        height: imgElement.naturalHeight,
+      };
+
+      console.log('🎨 图片特征提取:', features);
+      resolve(features);
+    });
+  }
+
+  // 处理图片文件
+  async function handleImageFile(file) {
+    if (!file || !file.type.startsWith('image/')) {
+      showAIStatus('❌ 请上传图片文件', 'error');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      showAIStatus('❌ 图片不能超过 10MB', 'error');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const dataUrl = e.target.result;
+      previewImg.src = dataUrl;
+      imagePreview.classList.remove('hidden');
+      dropzoneText.textContent = `已上传: ${file.name}`;
+
+      // 创建 Image 对象提取特征
+      const img = new Image();
+      img.onload = async () => {
+        uploadedImageFeatures = await extractImageFeatures(img);
+        if (uploadedImageFeatures) {
+          const colorSwatches = uploadedImageFeatures.dominantColors.map(c =>
+            `<span class="ai-paint-color-swatch" style="background:rgb(${c.r},${c.g},${c.b})" title="rgb(${c.r},${c.g},${c.b}) ${(c.ratio * 100).toFixed(0)}%"></span>`
+          ).join('');
+          showAIStatus(`🖼️ 已提取图片特征: ${uploadedImageFeatures.mood}色调 · 对称度${(uploadedImageFeatures.symmetry * 100).toFixed(0)}% · 边缘密度${(uploadedImageFeatures.edgeDensity * 100).toFixed(0)}%<div class="ai-paint-color-swatches">${colorSwatches}</div>`, 'info');
+        }
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // 清除已上传图片
+  function clearUploadedImage() {
+    uploadedImageFeatures = null;
+    previewImg.src = '';
+    imagePreview.classList.add('hidden');
+    dropzoneText.textContent = '上传参考图片（可选）— 提取颜色和形状特征';
+    if (fileInput) fileInput.value = '';
+  }
+
+  // 绑定图片上传事件
+  if (dropzone && fileInput) {
+    // 点击上传
+    dropzone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        handleImageFile(e.target.files[0]);
+      }
+    });
+
+    // 拖拽上传
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('dragover');
+    });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleImageFile(e.dataTransfer.files[0]);
+      }
+    });
+  }
+
+  // 清除图片按钮
+  if (removeImgBtn) {
+    removeImgBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearUploadedImage();
+    });
+  }
+
   // 发送 AI 绘画请求
   async function generateModel(prompt) {
     if (!prompt || !prompt.trim()) {
@@ -2939,12 +3161,13 @@ function setupAIPaint() {
     }
 
     prompt = prompt.trim();
-    console.log(`🎨 AI 绘画: "${prompt}"`);
+    console.log(`🎨 AI 绘画: "${prompt}"${uploadedImageFeatures ? ' + 图片特征' : ''}`);
 
     // 禁用按钮，显示进度
     paintBtn.disabled = true;
     paintBtn.textContent = '⏳ 生成中...';
-    showAIStatus(`<span class="ai-paint-spinner"></span>正在生成 "${prompt}" ...（Blender 处理中，约10-30秒）`, 'info');
+    const imgHint = uploadedImageFeatures ? '（含图片特征）' : '';
+    showAIStatus(`<span class="ai-paint-spinner"></span>正在生成 "${prompt}" ${imgHint}...（Blender 处理中，约10-30秒）`, 'info');
 
     try {
       const xhr = new XMLHttpRequest();
@@ -2994,7 +3217,11 @@ manifest = JSON.parse(manifestJson);
 
         xhr.open('POST', `${BLENDER_SERVER_AI}/api/ai-paint`);
         xhr.setRequestHeader('Content-Type', 'application/json');
-        xhr.send(JSON.stringify({ prompt }));
+        const payload = { prompt };
+        if (uploadedImageFeatures) {
+          payload.imageFeatures = uploadedImageFeatures;
+        }
+        xhr.send(JSON.stringify(payload));
       });
 
       // 成功！加载模型到场景
