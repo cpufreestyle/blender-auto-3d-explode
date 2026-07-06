@@ -1867,13 +1867,11 @@ def match_prompt(prompt):
 
     if best_match:
         log(f"  ✅ 匹配: {best_match['desc']} (关键词: '{matched_kw}', 得分: {best_score})")
-        # 对于需要原始提示词的生成器，包装传递 prompt
-        if best_match['creator'] == 'lego_style':
-            return lambda: create_lego_style(prompt)
-        return best_match['creator']
+        # 所有模型都使用乐高风格生成
+        return lambda: create_lego_style(prompt)
     else:
-        log(f"  📦 未匹配预设，使用通用生成器")
-        return lambda: create_generic_model(prompt)
+        log(f"  📦 未匹配预设，使用乐高风格生成")
+        return lambda: create_lego_style(prompt)
 
 
 # ===== 高级渲染特效 =====
