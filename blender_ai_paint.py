@@ -1821,7 +1821,7 @@ PROMPT_TEMPLATES = [
     {
         'keywords': ['乐高', 'lego', '积木', 'brick', 'blocks', 'minifig'],
         'weight': 75,
-        'creator': lambda p=prompt: create_lego_style(p),
+        'creator': 'lego_style',  # 特殊标记，在 match_prompt 中处理
         'desc': '乐高风格模型',
     },
     # === 泛角色（低优先级兜底）===
@@ -1868,7 +1868,7 @@ def match_prompt(prompt):
     if best_match:
         log(f"  ✅ 匹配: {best_match['desc']} (关键词: '{matched_kw}', 得分: {best_score})")
         # 对于需要原始提示词的生成器，包装传递 prompt
-        if best_match['desc'] == '乐高风格模型':
+        if best_match['creator'] == 'lego_style':
             return lambda: create_lego_style(prompt)
         return best_match['creator']
     else:
