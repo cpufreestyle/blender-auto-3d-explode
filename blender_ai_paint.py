@@ -2083,22 +2083,11 @@ def match_prompt(prompt):
 
     if best_match:
         log(f"  ✅ 匹配: {best_match['desc']} (关键词: '{matched_kw}', 得分: {best_score})")
-        # 使用匹配的生成器
-        original_creator = best_match['creator']
-        
-        # 如果是乐高风格标记，返回乐高生成器
-        if original_creator == 'lego_style':
-            return lambda: create_lego_style(prompt)
-        
-        # 如果是篮球或超级英雄，也使用乐高风格
-        if best_match['desc'] in ['篮球', '蝙蝠侠', '超人', '钢铁侠', '蜘蛛侠', '美队', '英雄']:
-            return lambda: create_lego_style(prompt)
-        
-        # 其他情况返回原始生成器
-        return original_creator
+        # 所有模型都实时调用 Blender 生成乐高风格
+        return lambda: create_lego_style(prompt)
     else:
-        log(f"  📦 未匹配预设，使用默认 Quest 3 模型")
-        return create_quest3
+        log(f"  📦 未匹配预设，实时生成乐高模型")
+        return lambda: create_lego_style(prompt)
 
 
 # ===== 高级渲染特效 =====
