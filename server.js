@@ -480,6 +480,199 @@ async function handleAIPaint(req, res) {
 }
 
 /**
+ * AI 配置存储
+ */
+let AI_CONFIG = {
+  provider: 'openai',
+  openai: { key: '', model: 'gpt-3.5-turbo' },
+  anthropic: { key: '', model: 'claude-3-sonnet-20240229' },
+  ollama: { url: 'http://localhost:11434', model: 'codellama' },
+  lmstudio: { url: 'http://localhost:1234/v1', model: '' }
+};
+
+// 加载保存的配置
+const CONFIG_FILE = path.join(__dirname, 'ai-config.json');
+try {
+  if (fs.existsSync(CONFIG_FILE)) {
+    AI_CONFIG = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+    console.log('  ✅ AI 配置已加载');
+  }
+} catch (err) {
+  console.log('  ⚠️  无法加载 AI 配置:', err.message);
+}
+
+/**
+ * 获取 AI 配置
+ */
+function handleAIConfigGet(req, res) {
+  // 返回配置（隐藏 API Key）
+  const safeConfig = {
+    provider: AI_CONFIG.provider,
+    openai: { ...AI_CONFIG.openai, key: AI_CONFIG.openai.key ? '***' : '' },
+    anthropic: { ...AI_CONFIG.anthropic, key: AI_CONFIG.anthropic.key ? '***' : '' },
+    ollama: AI_CONFIG.ollama,
+    lmstudio: AI_CONFIG.lmstudio
+  };
+  sendJSON(res, 200, safeConfig);
+}
+
+/**
+ * 保存 AI 配置
+ */
+function handleAIConfigPost(req, res) {
+  readJSONBody(req)
+    .then(config => {
+      // 保留现有的 API Key（如果新值为空）
+      if (config.openai && !config.openai.key) {
+        config.openai.key = AI_CONFIG.openai.key;
+      }
+      if (config.anthropic && !config.anthropic.key) {
+        config.anthropic.key = AI_CONFIG.anthropic.key;
+      }
+      
+      AI_CONFIG = { ...AI_CONFIG, ...config };
+      
+      // 保存到文件
+      fs.writeFileSync(CONFIG_FILE, JSON.stringify(AI_CONFIG, null, 2));
+      
+      sendJSON(res, 200, { success: true, message: '配置已保存' });
+    })
+    .catch(err => {
+      sendJSON(res, 400, { success: false, error: err.message });
+    });
+}
+
+/**
+ * 测试 AI 连接
+ */
+async function handleAITest(req, res) {
+  try {
+    const body = await readJSONBody(req);
+    const prompt = body.prompt || 'Hello';
+    
+    // 根据配置调用相应的 AI
+    const result = await callAI(prompt);
+    
+    sendJSON(res, 200, { success: true, result });
+  } catch (err) {
+    sendJSON(res, 500, { success: false, error: err.message });
+  }
+}
+
+/**
+ * 调用 AI 模型
+ */
+async function callAI(prompt) {
+  const { provider } = AI_CONFIG;
+  
+  switch (provider) {
+    case 'openai':
+      return await callOpenAI(prompt);
+    case 'anthropic':
+      return await callAnthropic(prompt);
+    case 'ollama':
+      return await callOllama(prompt);
+    case 'lmstudio':
+      return await callLMStudio(prompt);
+    default:
+      throw new Error('未知的 AI 提供商: ' + provider);
+  }
+}
+
+/**
+ * 调用 OpenAI
+ */
+async function callOpenAI(prompt) {
+  const { key, model } = AI_CONFIG.openai;
+  if (!key) throw new Error('OpenAI API Key 未配置');
+  
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${key}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: model || 'gpt-3.5-turbo',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7
+    })
+  });
+  
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error?.message || 'OpenAI API 错误');
+  return data.choices[0].message.content;
+}
+
+/**
+ * 调用 Anthropic Claude
+ */
+async function callAnthropic(prompt) {
+  const { key, model } = AI_CONFIG.anthropic;
+  if (!key) throw new Error('Anthropic API Key 未配置');
+  
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: model || 'claude-3-sonnet-20240229',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+  
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error?.message || 'Anthropic API 错误');
+  return data.content[0].text;
+}
+
+/**
+ * 调用 Ollama
+ */
+async function callOllama(prompt) {
+  const { url, model } = AI_CONFIG.ollama;
+  
+  const response = await fetch(`${url}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: model || 'codellama',
+      prompt: prompt,
+      stream: false
+    })
+  });
+  
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Ollama 错误');
+  return data.response;
+}
+
+/**
+ * 调用 LM Studio
+ */
+async function callLMStudio(prompt) {
+  const { url, model } = AI_CONFIG.lmstudio;
+  
+  const response = await fetch(`${url}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: model || undefined,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7
+    })
+  });
+  
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error?.message || 'LM Studio 错误');
+  return data.choices[0].message.content;
+}
+
+/**
  * 读取 JSON 请求体
  */
 function readJSONBody(req) {
@@ -649,6 +842,12 @@ const server = http.createServer(async (req, res) => {
     await handleSplit(req, res);
   } else if (req.method === "POST" && url.pathname === "/api/ai-paint") {
     await handleAIPaint(req, res);
+  } else if (req.method === "GET" && url.pathname === "/api/ai-config") {
+    handleAIConfigGet(req, res);
+  } else if (req.method === "POST" && url.pathname === "/api/ai-config") {
+    handleAIConfigPost(req, res);
+  } else if (req.method === "POST" && url.pathname === "/api/ai-test") {
+    await handleAITest(req, res);
   } else if (req.method === "GET") {
     serveStatic(req, res, url);
   } else {
