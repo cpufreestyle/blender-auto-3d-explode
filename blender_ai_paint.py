@@ -1311,30 +1311,39 @@ def call_ai_for_structure(prompt):
     
     provider = config.get('provider', 'openai')
     
-    # 构建 AI 提示词
-    system_prompt = """你是一个 3D 模型生成专家。根据用户的描述，生成一个乐高风格的 3D 模型结构。
+    # 构建 AI 提示词 - 使用真正的乐高砖块
+    system_prompt = """你是一个乐高积木模型专家。根据用户的描述，用标准的乐高砖块拼接出模型。
 
-请返回 JSON 格式的模型结构，包含以下字段：
+乐高砖块标准尺寸（单位：乐高单位，1单位=0.8cm）：
+- 2x4 砖块：长4单位，宽2单位，高1单位（最常用）
+- 2x2 砖块：长2单位，宽2单位，高1单位
+- 1x2 砖块：长2单位，宽1单位，高1单位
+- 1x4 砖块：长4单位，宽1单位，高1单位
+- 2x3 砖块：长3单位，宽2单位，高1单位
+- 1x1 砖块：长1单位，宽1单位，高1单位（用于细节）
+
+请返回 JSON 格式的模型结构：
 {
   "description": "模型的简要描述",
-  "parts": [
+  "bricks": [
     {
-      "name": "部件名称",
-      "type": "cube|cylinder|sphere|cone",
+      "name": "砖块名称",
+      "type": "2x4|2x2|1x2|1x4|2x3|1x1",
       "position": [x, y, z],
-      "scale": [sx, sy, sz],
-      "rotation": [rx, ry, rz],
-      "color": "red|blue|green|yellow|white|black|orange|gray"
+      "rotation": 0|90|180|270,
+      "color": "red|blue|green|yellow|white|black|orange|gray|brown"
     }
   ]
 }
 
-注意：
-1. 位置坐标范围在 -2 到 2 之间
-2. 缩放比例在 0.1 到 2.0 之间
-3. 旋转角度以弧度为单位
-4. 根据描述生成合理的部件数量和形状
-5. 如果是文字（如"失"），生成对应的笔画结构
+重要规则：
+1. 使用标准乐高砖块拼接，就像真实的乐高积木一样
+2. 砖块之间要紧密连接，像真实的积木堆叠
+3. 位置坐标以乐高单位计算（1单位=0.8cm）
+4. 高度方向每块砖高1单位（1.2cm，包含凸点）
+5. 如果是文字（如"失"），用砖块拼出笔画形状
+6. 尽量使用2x4和2x2砖块，少用1x1
+7. 颜色要丰富，让模型看起来生动
 """
 
     user_prompt = f"请生成以下描述的乐高模型结构：{prompt}"
@@ -1532,14 +1541,39 @@ def parse_ai_response(content):
         raise Exception(f'无法解析 AI 响应: {content[:200]}')
 
 
-def create_part_from_ai(part_data, mat_lego, mat_stud, parts):
-    """根据 AI 返回的数据创建部件"""
-    part_type = part_data.get('type', 'cube')
-    name = part_data.get('name', '部件')
-    position = part_data.get('position', [0, 0, 0])
-    scale = part_data.get('scale', [1, 1, 1])
-    rotation = part_data.get('rotation', [0, 0, 0])
-    color_name = part_data.get('color', 'red')
+def create_lego_brick(brick_type, position, rotation, color_name, name, parts):
+    """创建真正的乐高砖块
+    
+    砖块类型:
+    - 2x4: 长4单位(3.2cm), 宽2单位(1.6cm), 高1.2cm
+    - 2x2: 长2单位(1.6cm), 宽2单位(1.6cm), 高1.2cm  
+    - 1x2: 长2单位(1.6cm), 宽1单位(0.8cm), 高1.2cm
+    - 1x4: 长4单位(3.2cm), 宽1单位(0.8cm), 高1.2cm
+    - 2x3: 长3单位(2.4cm), 宽2单位(1.6cm), 高1.2cm
+    - 1x1: 长1单位(0.8cm), 宽1单位(0.8cm), 高1.2cm
+    
+    1乐高单位 = 0.8cm
+    砖块高度 = 1.2cm (包含凸点)
+    """
+    # 砖块尺寸定义 (单位: cm)
+    brick_sizes = {
+        '2x4': (3.2, 1.6, 0.96),  # 长, 宽, 高(不含凸点)
+        '2x2': (1.6, 1.6, 0.96),
+        '1x2': (1.6, 0.8, 0.96),
+        '1x4': (3.2, 0.8, 0.96),
+        '2x3': (2.4, 1.6, 0.96),
+        '1x1': (0.8, 0.8, 0.96),
+    }
+    
+    # 凸点数量
+    stud_counts = {
+        '2x4': (4, 2),
+        '2x2': (2, 2),
+        '1x2': (2, 1),
+        '1x4': (4, 1),
+        '2x3': (3, 2),
+        '1x1': (1, 1),
+    }
     
     # 颜色映射
     color_map = {
@@ -1549,57 +1583,102 @@ def create_part_from_ai(part_data, mat_lego, mat_stud, parts):
         'gray': (0.5, 0.5, 0.5), 'brown': (0.5, 0.3, 0.15),
     }
     
+    # 获取尺寸
+    size = brick_sizes.get(brick_type, (1.6, 0.8, 0.96))
+    stud_count = stud_counts.get(brick_type, (2, 1))
     color = color_map.get(color_name.lower(), (0.8, 0.1, 0.1))
-    mat = make_mat(f'Mat_{name}', color, roughness=0.3)
     
+    length, width, height = size
     x, y, z = position
-    sx, sy, sz = scale
-    rx, ry, rz = rotation
+    rot_deg = rotation  # 0, 90, 180, 270
     
-    if part_type == 'cube':
-        bpy.ops.mesh.primitive_cube_add(size=1, location=(x, y, z))
-        obj = bpy.context.active_object
-        obj.scale = (sx, sy, sz)
-    elif part_type == 'cylinder':
-        bpy.ops.mesh.primitive_cylinder_add(radius=sx/2, depth=sz, location=(x, y, z))
-        obj = bpy.context.active_object
-    elif part_type == 'sphere':
-        bpy.ops.mesh.primitive_uv_sphere_add(radius=sx/2, location=(x, y, z))
-        obj = bpy.context.active_object
-    elif part_type == 'cone':
-        bpy.ops.mesh.primitive_cone_add(radius1=sx/2, radius2=0, depth=sz, location=(x, y, z))
-        obj = bpy.context.active_object
-    else:
-        bpy.ops.mesh.primitive_cube_add(size=1, location=(x, y, z))
-        obj = bpy.context.active_object
-        obj.scale = (sx, sy, sz)
+    # 创建材质
+    mat = make_mat(f'Lego_{color_name}_{name}', color, roughness=0.3)
+    mat_stud = make_mat(f'LegoStud_{color_name}_{name}', (color[0]*0.9, color[1]*0.9, color[2]*0.9), roughness=0.3)
     
-    # 应用变换
+    # 根据旋转调整尺寸
+    if rot_deg in [90, 270]:
+        length, width = width, length
+        stud_count = (stud_count[1], stud_count[0])
+    
+    # 创建砖块主体
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(x, y, z))
+    brick = bpy.context.active_object
+    brick.scale = (length, width, height)
     bpy.ops.object.transform_apply(scale=True)
     
-    # 设置旋转
-    obj.rotation_euler = (rx, ry, rz)
+    # 应用旋转
+    brick.rotation_euler = (0, 0, math.radians(rot_deg))
     bpy.ops.object.transform_apply(rotation=True)
     
-    # 添加倒角
-    apply_bevel_mod(obj, width=0.02, segments=2)
+    # 添加倒角模拟乐高圆角
+    apply_bevel_mod(brick, width=0.015, segments=2)
     
-    parts.append(add_obj(obj, name, mat))
+    parts.append(add_obj(brick, name, mat))
     
-    # 添加凸点（如果是 cube 或 cylinder）
-    if part_type in ['cube', 'cylinder']:
-        stud_count_x = max(1, int(sx))
-        stud_count_y = max(1, int(sy))
-        for i in range(stud_count_x):
-            for j in range(stud_count_y):
-                sx_pos = x + (i - (stud_count_x-1)/2) * 0.4
-                sy_pos = y + (j - (stud_count_y-1)/2) * 0.4
-                sz_pos = z + sz/2 + 0.075
-                
-                bpy.ops.mesh.primitive_cylinder_add(radius=0.1, depth=0.12, location=(sx_pos, sy_pos, sz_pos))
-                stud = bpy.context.active_object
-                apply_bevel_mod(stud, width=0.005, segments=1)
-                parts.append(add_obj(stud, f'{name}_凸点_{i}_{j}', mat_stud))
+    # 添加凸点 (studs)
+    stud_radius = 0.24  # 凸点半径
+    stud_height = 0.18  # 凸点高度
+    stud_spacing = 0.8  # 凸点间距
+    
+    studs_x, studs_y = stud_count
+    
+    for i in range(studs_x):
+        for j in range(studs_y):
+            # 计算凸点位置
+            offset_x = (i - (studs_x - 1) / 2) * stud_spacing
+            offset_y = (j - (studs_y - 1) / 2) * stud_spacing
+            
+            # 应用旋转到偏移
+            if rot_deg == 90:
+                offset_x, offset_y = -offset_y, offset_x
+            elif rot_deg == 180:
+                offset_x, offset_y = -offset_x, -offset_y
+            elif rot_deg == 270:
+                offset_x, offset_y = offset_y, -offset_x
+            
+            stud_x = x + offset_x
+            stud_y = y + offset_y
+            stud_z = z + height / 2 + stud_height / 2
+            
+            bpy.ops.mesh.primitive_cylinder_add(
+                radius=stud_radius, 
+                depth=stud_height, 
+                location=(stud_x, stud_y, stud_z)
+            )
+            stud = bpy.context.active_object
+            apply_bevel_mod(stud, width=0.005, segments=1)
+            parts.append(add_obj(stud, f'{name}_凸点_{i}_{j}', mat_stud))
+
+
+def create_part_from_ai(part_data, mat_lego, mat_stud, parts):
+    """根据 AI 返回的数据创建乐高砖块（兼容旧格式）"""
+    # 检查是否是新的 bricks 格式
+    if 'bricks' in part_data:
+        for brick in part_data['bricks']:
+            create_lego_brick(
+                brick_type=brick.get('type', '2x4'),
+                position=brick.get('position', [0, 0, 0]),
+                rotation=brick.get('rotation', 0),
+                color_name=brick.get('color', 'red'),
+                name=brick.get('name', '砖块'),
+                parts=parts
+            )
+        return
+    
+    # 旧格式兼容 - 转换为砖块
+    brick_type = part_data.get('type', '2x4')
+    if brick_type not in ['2x4', '2x2', '1x2', '1x4', '2x3', '1x1']:
+        brick_type = '2x4'  # 默认使用 2x4
+    
+    position = part_data.get('position', [0, 0, 0])
+    rotation = part_data.get('rotation', 0)
+    if isinstance(rotation, list):
+        rotation = 0  # 如果是欧拉角，默认0度
+    color_name = part_data.get('color', 'red')
+    name = part_data.get('name', '砖块')
+    
+    create_lego_brick(brick_type, position, rotation, color_name, name, parts)
 
 
 def create_lego_style(prompt):
@@ -1632,11 +1711,26 @@ def create_lego_style(prompt):
     # 尝试调用 AI 理解提示词
     try:
         ai_structure = call_ai_for_structure(prompt)
-        if ai_structure and 'parts' in ai_structure:
-            log(f"  🤖 AI 生成模型结构: {len(ai_structure['parts'])} 个部件")
-            for part in ai_structure['parts']:
-                create_part_from_ai(part, mat_lego, mat_stud, parts)
-            return parts
+        if ai_structure:
+            # 新的 bricks 格式
+            if 'bricks' in ai_structure:
+                log(f"  🤖 AI 生成乐高模型: {len(ai_structure['bricks'])} 块砖")
+                for brick in ai_structure['bricks']:
+                    create_lego_brick(
+                        brick_type=brick.get('type', '2x4'),
+                        position=brick.get('position', [0, 0, 0]),
+                        rotation=brick.get('rotation', 0),
+                        color_name=brick.get('color', 'red'),
+                        name=brick.get('name', '砖块'),
+                        parts=parts
+                    )
+                return parts
+            # 旧的 parts 格式（兼容）
+            elif 'parts' in ai_structure:
+                log(f"  🤖 AI 生成模型结构: {len(ai_structure['parts'])} 个部件")
+                for part in ai_structure['parts']:
+                    create_part_from_ai(part, mat_lego, mat_stud, parts)
+                return parts
     except Exception as e:
         log(f"  ⚠️ AI 调用失败，使用默认生成: {e}")
 
