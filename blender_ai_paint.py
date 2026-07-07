@@ -1303,13 +1303,17 @@ def call_ai_for_structure(prompt):
     
     # 读取 AI 配置
     config_file = os.path.join(os.path.dirname(__file__), 'ai-config.json')
+    log(f"  📂 读取 AI 配置: {config_file}")
+    
     if not os.path.exists(config_file):
+        log(f"  ❌ AI 配置文件不存在")
         raise Exception('AI 配置不存在')
     
     with open(config_file, 'r') as f:
         config = json.load(f)
     
     provider = config.get('provider', 'openai')
+    log(f"  🤖 使用 AI 提供商: {provider}")
     
     # 构建 AI 提示词 - 使用真正的乐高砖块
     system_prompt = """你是一个乐高积木模型专家。根据用户的描述，用标准的乐高砖块拼接出模型。
@@ -1349,18 +1353,26 @@ def call_ai_for_structure(prompt):
     user_prompt = f"请生成以下描述的乐高模型结构：{prompt}"
     
     # 根据提供商调用不同的 API
-    if provider == 'openai':
-        return call_openai_api(config['openai'], system_prompt, user_prompt)
-    elif provider == 'anthropic':
-        return call_anthropic_api(config['anthropic'], system_prompt, user_prompt)
-    elif provider == 'stepfun':
-        return call_stepfun_api(config['stepfun'], system_prompt, user_prompt)
-    elif provider == 'ollama':
-        return call_ollama_api(config['ollama'], system_prompt, user_prompt)
-    elif provider == 'lmstudio':
-        return call_lmstudio_api(config['lmstudio'], system_prompt, user_prompt)
-    else:
-        raise Exception(f'未知的 AI 提供商: {provider}')
+    log(f"  📡 调用 {provider} API...")
+    try:
+        if provider == 'openai':
+            result = call_openai_api(config['openai'], system_prompt, user_prompt)
+        elif provider == 'anthropic':
+            result = call_anthropic_api(config['anthropic'], system_prompt, user_prompt)
+        elif provider == 'stepfun':
+            result = call_stepfun_api(config['stepfun'], system_prompt, user_prompt)
+        elif provider == 'ollama':
+            result = call_ollama_api(config['ollama'], system_prompt, user_prompt)
+        elif provider == 'lmstudio':
+            result = call_lmstudio_api(config['lmstudio'], system_prompt, user_prompt)
+        else:
+            raise Exception(f'未知的 AI 提供商: {provider}')
+        
+        log(f"  ✅ AI 调用成功，返回 {len(str(result))} 字符")
+        return result
+    except Exception as e:
+        log(f"  ❌ AI API 调用失败: {e}")
+        raise
 
 
 def call_openai_api(config, system_prompt, user_prompt):
@@ -1709,28 +1721,37 @@ def create_lego_style(prompt):
     mat_stud = make_mat('LegoStudMat', (base_color[0]*0.9, base_color[1]*0.9, base_color[2]*0.9), roughness=0.3)
     
     # 尝试调用 AI 理解提示词
+    log(f"  🎯 开始调用 AI 分析提示词: '{prompt}'")
     try:
         ai_structure = call_ai_for_structure(prompt)
+        log(f"  📊 AI 返回结构: {type(ai_structure)}")
+        
         if ai_structure:
             # 新的 bricks 格式
             if 'bricks' in ai_structure:
-                log(f"  🤖 AI 生成乐高模型: {len(ai_structure['bricks'])} 块砖")
-                for brick in ai_structure['bricks']:
+                bricks = ai_structure['bricks']
+                log(f"  ✅ AI 生成乐高模型: {len(bricks)} 块砖")
+                for i, brick in enumerate(bricks):
+                    log(f"     砖块 {i+1}: {brick.get('name')} ({brick.get('type')})")
                     create_lego_brick(
                         brick_type=brick.get('type', '2x4'),
                         position=brick.get('position', [0, 0, 0]),
                         rotation=brick.get('rotation', 0),
                         color_name=brick.get('color', 'red'),
-                        name=brick.get('name', '砖块'),
+                        name=brick.get('name', f'砖块_{i}'),
                         parts=parts
                     )
                 return parts
             # 旧的 parts 格式（兼容）
             elif 'parts' in ai_structure:
-                log(f"  🤖 AI 生成模型结构: {len(ai_structure['parts'])} 个部件")
+                log(f"  ✅ AI 生成模型结构: {len(ai_structure['parts'])} 个部件")
                 for part in ai_structure['parts']:
                     create_part_from_ai(part, mat_lego, mat_stud, parts)
                 return parts
+            else:
+                log(f"  ⚠️ AI 返回结构中没有 'bricks' 或 'parts': {list(ai_structure.keys())}")
+        else:
+            log(f"  ⚠️ AI 返回空结构")
     except Exception as e:
         log(f"  ⚠️ AI 调用失败，使用默认生成: {e}")
 
