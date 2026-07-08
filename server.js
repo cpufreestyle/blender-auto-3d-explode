@@ -488,7 +488,8 @@ let AI_CONFIG = {
   anthropic: { key: '', model: 'claude-3-sonnet-20240229' },
   ollama: { url: 'http://localhost:11434', model: 'codellama' },
   lmstudio: { url: 'http://localhost:1234/v1', model: '' },
-  stepfun: { key: '', model: 'step-1-8k' }
+  stepfun: { key: '', model: 'step-3.5-flash' },
+  nvidia: { key: '', model: 'z-ai/glm-5.2', base_url: 'https://integrate.api.nvidia.com/v1' }
 };
 
 // 加载保存的配置
@@ -513,7 +514,8 @@ function handleAIConfigGet(req, res) {
     anthropic: { ...AI_CONFIG.anthropic, key: AI_CONFIG.anthropic.key ? '***' : '' },
     ollama: AI_CONFIG.ollama,
     lmstudio: AI_CONFIG.lmstudio,
-    stepfun: { ...AI_CONFIG.stepfun, key: AI_CONFIG.stepfun.key ? '***' : '' }
+    stepfun: { ...AI_CONFIG.stepfun, key: AI_CONFIG.stepfun.key ? '***' : '' },
+    nvidia: { ...AI_CONFIG.nvidia, key: AI_CONFIG.nvidia.key ? '***' : '' }
   };
   sendJSON(res, 200, safeConfig);
 }
@@ -533,6 +535,9 @@ function handleAIConfigPost(req, res) {
       }
       if (config.stepfun && !config.stepfun.key) {
         config.stepfun.key = AI_CONFIG.stepfun.key;
+      }
+      if (config.nvidia && !config.nvidia.key) {
+        config.nvidia.key = AI_CONFIG.nvidia.key;
       }
       
       AI_CONFIG = { ...AI_CONFIG, ...config };
@@ -581,6 +586,8 @@ async function callAI(prompt) {
       return await callLMStudio(prompt);
     case 'stepfun':
       return await callStepFun(prompt);
+    case 'nvidia':
+      return await callNVIDIA(prompt);
     default:
       throw new Error('未知的 AI 提供商: ' + provider);
   }
@@ -676,6 +683,35 @@ async function callLMStudio(prompt) {
   
   const data = await response.json();
   if (!response.ok) throw new Error(data.error?.message || 'LM Studio 错误');
+  return data.choices[0].message.content;
+}
+
+/**
+ * 调用 NVIDIA
+ */
+async function callNVIDIA(prompt) {
+  const { key, model, base_url } = AI_CONFIG.nvidia;
+  if (!key) throw new Error('NVIDIA API Key 未配置');
+  
+  const response = await fetch(`${base_url || 'https://integrate.api.nvidia.com/v1'}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${key}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: model || 'z-ai/glm-5.2',
+      messages: [
+        { role: 'system', content: '你是一个乐高积木模型专家。根据用户的描述，用标准的乐高砖块拼接出模型。返回 JSON 格式：{ "bricks": [{ "name": "名称", "type": "2x4|2x2|1x2", "position": [x,y,z], "rotation": 0|90|180|270, "color": "red|blue|green" }] }' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.7,
+      max_tokens: 4096
+    })
+  });
+  
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error?.message || 'NVIDIA API 错误');
   return data.choices[0].message.content;
 }
 

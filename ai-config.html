@@ -265,6 +265,14 @@
                         <div class="provider-desc">阶跃星辰</div>
                     </label>
                 </div>
+                
+                <div class="radio-item">
+                    <input type="radio" name="provider" id="provider-nvidia" value="nvidia">
+                    <label for="provider-nvidia">
+                        <div class="provider-name">NVIDIA</div>
+                        <div class="provider-desc">GLM-5.2</div>
+                    </label>
+                </div>
             </div>
         </div>
         
@@ -376,6 +384,30 @@
             </div>
         </div>
         
+        <!-- NVIDIA 配置 -->
+        <div id="config-nvidia" class="card config-section hidden">
+            <div class="card-title">
+                <div class="icon">🎮</div>
+                NVIDIA 配置
+            </div>
+            
+            <div class="form-group">
+                <label>Base URL</label>
+                <input type="url" id="nvidia-base_url" value="https://integrate.api.nvidia.com/v1">
+            </div>
+            
+            <div class="form-group">
+                <label>API Key</label>
+                <input type="password" id="nvidia-key" placeholder="nvapi-...">
+                <p class="help-text">从 <a href="https://build.nvidia.com/" target="_blank">NVIDIA Build</a> 获取</p>
+            </div>
+            
+            <div class="form-group">
+                <label>模型</label>
+                <input type="text" id="nvidia-model" value="z-ai/glm-5.2" placeholder="z-ai/glm-5.2">
+            </div>
+        </div>
+        
         <div class="card">
             <div class="card-title">
                 <div class="icon">🧪</div>
@@ -433,7 +465,12 @@
                     }
                     if (config.stepfun) {
                         document.getElementById('stepfun-key').value = config.stepfun.key || '';
-                        document.getElementById('stepfun-model').value = config.stepfun.model || 'step-1-8k';
+                        document.getElementById('stepfun-model').value = config.stepfun.model || 'step-3.5-flash';
+                    }
+                    if (config.nvidia) {
+                        document.getElementById('nvidia-base_url').value = config.nvidia.base_url || 'https://integrate.api.nvidia.com/v1';
+                        document.getElementById('nvidia-key').value = config.nvidia.key || '';
+                        document.getElementById('nvidia-model').value = config.nvidia.model || 'z-ai/glm-5.2';
                     }
                 }
             } catch (err) {
@@ -466,6 +503,11 @@
                 stepfun: {
                     key: document.getElementById('stepfun-key').value,
                     model: document.getElementById('stepfun-model').value
+                },
+                nvidia: {
+                    base_url: document.getElementById('nvidia-base_url').value,
+                    key: document.getElementById('nvidia-key').value,
+                    model: document.getElementById('nvidia-model').value
                 }
             };
             
