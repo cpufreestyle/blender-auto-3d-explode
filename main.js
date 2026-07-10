@@ -1,8 +1,16 @@
 import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 import { RoundedBoxGeometry } from "./vendor/RoundedBoxGeometry.js";
-import { quest3Specs, partInfo } from "./src/quest3-data.js";
+import { partInfo } from "./src/quest3-data.js";
 import { defaultStepGroups } from "./src/quest3-steps.js";
+import {
+  UnionFind,
+  easeOutCubic,
+  smoothStep,
+  isQuest3Model,
+  base64ToUtf8,
+  generatePartName as _generatePartName,
+} from "./src/utils.js";
 
 // 动态导入 GLTFLoader（本地化 + Import Map 支持）
 let GLTFLoader = null;
@@ -598,26 +606,7 @@ function calculateExplodePos(partCenter, index, totalParts) {
 }
 
 // ===== 模型自动拆分系统 =====
-
-// Union-Find 数据结构（用于连通分量分析）
-class UnionFind {
-  constructor(size) {
-    this.parent = new Int32Array(size);
-    for (let i = 0; i < size; i++) this.parent[i] = i;
-  }
-  find(x) {
-    while (this.parent[x] !== x) {
-      this.parent[x] = this.parent[this.parent[x]];
-      x = this.parent[x];
-    }
-    return x;
-  }
-  union(a, b) {
-    const ra = this.find(a),
-      rb = this.find(b);
-    if (ra !== rb) this.parent[ra] = rb;
-  }
-}
+// UnionFind 已从 src/utils.js 导入（统一使用已测试版本）
 
 // 从几何体中提取指定面，创建新的非索引几何体
 function extractFacesToGeometry(geometry, faceIndices) {
@@ -765,29 +754,11 @@ function splitSpatially(geometry, material, targetParts) {
   return results;
 }
 
-// 根据位置生成部件名称
+// generatePartName 适配层：将 THREE.Box3 转换为 utils.js 需要的 {center, size} 格式
 function generatePartName(index, position, bbox) {
   const center = bbox.getCenter(new THREE.Vector3());
-  const dx = position.x - center.x;
-  const dy = position.y - center.y;
-  const dz = position.z - center.z;
-
-  const absX = Math.abs(dx),
-    absY = Math.abs(dy),
-    absZ = Math.abs(dz);
-  const maxAbs = Math.max(absX, absY, absZ);
-
-  let direction;
-  if (maxAbs < bbox.getSize(new THREE.Vector3()).length() * 0.05) {
-    direction = "中心";
-  } else if (absX === maxAbs) {
-    direction = dx > 0 ? "右侧" : "左侧";
-  } else if (absY === maxAbs) {
-    direction = dy > 0 ? "顶部" : "底部";
-  } else {
-    direction = dz > 0 ? "前方" : "后方";
-  }
-  return `部件${index + 1}·${direction}`;
+  const size = bbox.getSize(new THREE.Vector3());
+  return _generatePartName(index, position, { center, size });
 }
 
 // 自动拆分编排器：收集 mesh，按材质和连通分量准确拆分
@@ -1033,11 +1004,7 @@ function assignQuest3PartNames(parts, modelBox) {
   return assignments;
 }
 
-/** 检查文件名是否包含 Quest 3（不区分大小写） */
-function isQuest3Model(fileName) {
-  const lower = (fileName || "").toLowerCase();
-  return lower.includes("quest 3") || lower.includes("quest3");
-}
+// isQuest3Model 已从 src/utils.js 导入
 
 /**
  * 合并多个 BufferGeometry 为一个（手动拼接 position/normal/uv 属性）
@@ -2216,9 +2183,7 @@ console.log("UI elements:", {
   autoRotateCheck: !!autoRotateCheck,
 });
 
-function easeOutCubic(t) {
-  return 1 - Math.pow(1 - t, 3);
-}
+// easeOutCubic 已从 src/utils.js 导入
 
 // 部件高亮相关
 const highlightEmissive = new THREE.Color(0x4a9eff);
@@ -2625,11 +2590,7 @@ autoRotateCheck.addEventListener("change", e => {
 updateStepUI();
 
 // ===== 部件动画插值 =====
-function smoothStep(edge0, edge1, x) {
-  if (edge1 === edge0) return x >= edge0 ? 1 : 0;
-  const t = THREE.MathUtils.clamp((x - edge0) / (edge1 - edge0), 0, 1);
-  return t * t * (3 - 2 * t);
-}
+// smoothStep 已从 src/utils.js 导入
 
 // 优化：脏标记，避免每帧都重新计算部件位置
 let needsExplodeUpdate = true;
@@ -2712,14 +2673,7 @@ setTimeout(() => {
 }, 100);
 
 // ===== 文件上传与自定义模型 =====
-// 全局显示状态消息（可在 loadCustomModel 和 clearCustomModel 中调用）
-// base64 → UTF-8 字符串（修复中文乱码：atob 只支持 Latin-1）
-function base64ToUtf8(base64Str) {
-  const binaryStr = atob(base64Str);
-  const bytes = new Uint8Array(binaryStr.length);
-  for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-  return new TextDecoder("utf-8").decode(bytes);
-}
+// base64ToUtf8 已从 src/utils.js 导入（支持浏览器和 Node.js 双环境）
 
 function showStatus(msg, type = "info") {
   if (!uploadStatusEl) return;

@@ -22,7 +22,17 @@ import http from "http";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
-import { getCORSHeaders } from "./src/server-utils.js";
+import {
+  getCORSHeaders,
+  sanitizeFilename,
+  parseMultipartBuffer,
+  cleanupOldTempFiles,
+  MAX_FILE_SIZE,
+  MAX_PARTS,
+  MAX_BOUNDARY_LENGTH,
+  MAX_HEADER_SIZE,
+  TEMP_FILE_TTL_MS,
+} from "./src/server-utils.js";
 import path from "path";
 import os from "os";
 import { fileURLToPath } from "url";
@@ -34,52 +44,13 @@ const PORT = process.env.PORT || 3001;
 
 // ── 配置 ──────────────────────────────────────────────
 const BLENDER_PATH = process.env.BLENDER_PATH || findBlender();
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
-const MAX_PARTS = 10; // multipart 最大 part 数量
-const MAX_BOUNDARY_LENGTH = 200; // boundary 最大长度
-const MAX_HEADER_SIZE = 8192; // 单个 multipart part header 最大大小
-const TEMP_FILE_TTL_MS = 60 * 60 * 1000; // 临时文件存活时间：1 小时
 const UPLOAD_DIR = path.join(os.tmpdir(), "blender-split-uploads");
 
 // 确保上传目录存在
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-// ── 临时文件清理 ──────────────────────────────────────
-
-/**
- * 清理上传目录中超过 TTL 的残留临时文件
- * 在服务器启动时调用
- */
-function cleanupOldTempFiles() {
-  try {
-    const files = fs.readdirSync(UPLOAD_DIR);
-    const now = Date.now();
-    let cleaned = 0;
-
-    for (const file of files) {
-      const filePath = path.join(UPLOAD_DIR, file);
-      try {
-        const stats = fs.statSync(filePath);
-        const ageMs = now - stats.mtimeMs;
-        if (ageMs > TEMP_FILE_TTL_MS) {
-          fs.unlinkSync(filePath);
-          cleaned++;
-        }
-      } catch {
-        // 文件可能已被删除，忽略
-      }
-    }
-
-    if (cleaned > 0) {
-      console.log(`  🧹 清理 ${cleaned} 个残留临时文件`);
-    }
-  } catch (err) {
-    console.warn(`  ⚠️ 临时文件清理失败: ${err.message}`);
-  }
-}
-
-// 启动时清理
-cleanupOldTempFiles();
+// 启动时清理残留临时文件
+cleanupOldTempFiles(UPLOAD_DIR, fs, path);
 
 // ── 工具函数 ──────────────────────────────────────────
 
@@ -204,16 +175,6 @@ async function runBlenderSplit(inputPath, outputPath, manifestPath, originalFile
 // ── 安全的 multipart 解析器 ────────────────────────────
 
 /**
- * 消毒文件名：移除路径分隔符、控制字符等危险字符
- */
-function sanitizeFilename(name) {
-  // 移除路径分隔符和 ..
-  const cleaned = name.replace(/[/\\]/g, "").replace(/\.\./g, "");
-  // 移除控制字符
-  return cleaned.replace(/[\x00-\x1f\x7f]/g, "");
-}
-
-/**
  * 解析 multipart/form-data 请求体
  * 提取上传的文件内容（增加输入校验）
  * @param {http.IncomingMessage} req
@@ -267,81 +228,6 @@ function parseMultipart(req) {
 
     req.on("error", reject);
   });
-}
-
-/**
- * 从 Buffer 中解析 multipart 数据（增加安全校验）
- */
-function parseMultipartBuffer(buffer, boundary) {
-  const boundaryBuf = Buffer.from(boundary);
-  const parts = [];
-  let start = 0;
-  let partCount = 0;
-
-  while (true) {
-    const bStart = buffer.indexOf(boundaryBuf, start);
-    if (bStart === -1) break;
-
-    // 跳过 boundary 行
-    const afterBoundary = bStart + boundaryBuf.length;
-    // 检查是否结束
-    if (buffer.slice(afterBoundary, afterBoundary + 2).toString() === "--") break;
-
-    // 找下一个 boundary
-    const nextBoundary = buffer.indexOf(boundaryBuf, afterBoundary);
-    if (nextBoundary === -1) break;
-
-    // 限制 part 数量，防止 DoS
-    partCount++;
-    if (partCount > MAX_PARTS) {
-      throw new Error(`multipart part 数量超过限制 (${MAX_PARTS})`);
-    }
-
-    // 关键修复：先更新 start，避免 continue 跳过导致死循环
-    start = nextBoundary;
-
-    // 提取 part 数据
-    const partData = buffer.slice(afterBoundary, nextBoundary);
-
-    // 校验 part header 大小
-    if (partData.length > MAX_HEADER_SIZE && partData.indexOf(Buffer.from("\r\n\r\n")) === -1) {
-      throw new Error("multipart part header 过大");
-    }
-
-    // 去掉前后的 \r\n
-    const partStr = partData.toString("latin1");
-
-    // 解析 headers
-    const headerEnd = partStr.indexOf("\r\n\r\n");
-    if (headerEnd === -1) continue;
-
-    const headerStr = partStr.substring(0, headerEnd);
-    const bodyStart = afterBoundary + headerEnd + 4;
-    const bodyEnd = nextBoundary - 2; // 去掉 \r\n
-
-    // 提取文件名
-    const nameMatch = headerStr.match(/name="([^"]+)"/);
-    const filenameMatch = headerStr.match(/filename="([^"]*)"/);
-    const contentTypeMatch = headerStr.match(/Content-Type:\s*(.+)/i);
-
-    if (filenameMatch) {
-      const rawFilename = filenameMatch[1];
-      // 跳过空文件名
-      if (!rawFilename) continue;
-
-      const safeFilename = sanitizeFilename(rawFilename);
-      if (!safeFilename) continue;
-
-      parts.push({
-        fieldname: nameMatch ? nameMatch[1] : "file",
-        filename: safeFilename,
-        contentType: contentTypeMatch ? contentTypeMatch[1].trim() : "application/octet-stream",
-        data: buffer.slice(bodyStart, bodyEnd),
-      });
-    }
-  }
-
-  return parts.length > 0 ? parts[0] : null;
 }
 
 // ── 响应工具 ──────────────────────────────────────────
@@ -566,174 +452,103 @@ async function handleAITest(req, res) {
 }
 
 /**
- * 调用 AI 模型
+ * 调用 AI 模型 — 统一路由
  */
 async function callAI(prompt) {
   const { provider } = AI_CONFIG;
-  
+
+  // OpenAI 兼容的提供商（共享 /chat/completions 接口）
+  const OPENAI_COMPATIBLE = {
+    openai: { cfg: AI_CONFIG.openai, url: 'https://api.openai.com/v1', label: 'OpenAI' },
+    lmstudio: { cfg: AI_CONFIG.lmstudio, url: AI_CONFIG.lmstudio.url, label: 'LM Studio' },
+    stepfun: { cfg: AI_CONFIG.stepfun, url: 'https://api.stepfun.com/v1', label: 'StepFun' },
+    nvidia: {
+      cfg: AI_CONFIG.nvidia,
+      url: AI_CONFIG.nvidia.base_url || 'https://integrate.api.nvidia.com/v1',
+      label: 'NVIDIA',
+      systemPrompt: '你是一个乐高积木模型专家。根据用户的描述，用标准的乐高砖块拼接出模型。返回 JSON 格式：{ "bricks": [{ "name": "名称", "type": "2x4|2x2|1x2", "position": [x,y,z], "rotation": 0|90|180|270, "color": "red|blue|green" }] }',
+    },
+  };
+
+  const compat = OPENAI_COMPATIBLE[provider];
+  if (compat) return await callOpenAICompatible(prompt, compat);
+
   switch (provider) {
-    case 'openai':
-      return await callOpenAI(prompt);
     case 'anthropic':
       return await callAnthropic(prompt);
     case 'ollama':
       return await callOllama(prompt);
-    case 'lmstudio':
-      return await callLMStudio(prompt);
-    case 'stepfun':
-      return await callStepFun(prompt);
-    case 'nvidia':
-      return await callNVIDIA(prompt);
     default:
       throw new Error('未知的 AI 提供商: ' + provider);
   }
 }
 
 /**
- * 调用 OpenAI
+ * 调用 OpenAI 兼容接口（OpenAI / LM Studio / StepFun / NVIDIA 共用）
  */
-async function callOpenAI(prompt) {
-  const { key, model } = AI_CONFIG.openai;
-  if (!key) throw new Error('OpenAI API Key 未配置');
-  
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+async function callOpenAICompatible(prompt, { cfg, url, label, systemPrompt }) {
+  const { key, model } = cfg;
+  if (key === '' && label !== 'LM Studio') throw new Error(`${label} API Key 未配置`);
+
+  const messages = systemPrompt
+    ? [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }]
+    : [{ role: 'user', content: prompt }];
+
+  const response = await fetch(`${url}/chat/completions`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${key}`,
-      'Content-Type': 'application/json'
+      ...(key ? { Authorization: `Bearer ${key}` } : {}),
+      'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: model || 'gpt-3.5-turbo',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7
-    })
+    body: JSON.stringify({ model: model || undefined, messages, temperature: 0.7, max_tokens: 4096 }),
   });
-  
+
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error?.message || 'OpenAI API 错误');
+  if (!response.ok) throw new Error(data.error?.message || `${label} API 错误`);
   return data.choices[0].message.content;
 }
 
 /**
- * 调用 Anthropic Claude
+ * 调用 Anthropic Claude（独立接口格式）
  */
 async function callAnthropic(prompt) {
   const { key, model } = AI_CONFIG.anthropic;
   if (!key) throw new Error('Anthropic API Key 未配置');
-  
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'x-api-key': key,
       'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       model: model || 'claude-3-sonnet-20240229',
       max_tokens: 1024,
-      messages: [{ role: 'user', content: prompt }]
-    })
+      messages: [{ role: 'user', content: prompt }],
+    }),
   });
-  
+
   const data = await response.json();
   if (!response.ok) throw new Error(data.error?.message || 'Anthropic API 错误');
   return data.content[0].text;
 }
 
 /**
- * 调用 Ollama
+ * 调用 Ollama（本地推理，独立接口格式）
  */
 async function callOllama(prompt) {
   const { url, model } = AI_CONFIG.ollama;
-  
+
   const response = await fetch(`${url}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: model || 'codellama',
-      prompt: prompt,
-      stream: false
-    })
+    body: JSON.stringify({ model: model || 'codellama', prompt, stream: false }),
   });
-  
+
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Ollama 错误');
   return data.response;
-}
-
-/**
- * 调用 LM Studio
- */
-async function callLMStudio(prompt) {
-  const { url, model } = AI_CONFIG.lmstudio;
-  
-  const response = await fetch(`${url}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: model || undefined,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7
-    })
-  });
-  
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error?.message || 'LM Studio 错误');
-  return data.choices[0].message.content;
-}
-
-/**
- * 调用 NVIDIA
- */
-async function callNVIDIA(prompt) {
-  const { key, model, base_url } = AI_CONFIG.nvidia;
-  if (!key) throw new Error('NVIDIA API Key 未配置');
-  
-  const response = await fetch(`${base_url || 'https://integrate.api.nvidia.com/v1'}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${key}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: model || 'z-ai/glm-5.2',
-      messages: [
-        { role: 'system', content: '你是一个乐高积木模型专家。根据用户的描述，用标准的乐高砖块拼接出模型。返回 JSON 格式：{ "bricks": [{ "name": "名称", "type": "2x4|2x2|1x2", "position": [x,y,z], "rotation": 0|90|180|270, "color": "red|blue|green" }] }' },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.7,
-      max_tokens: 4096
-    })
-  });
-  
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error?.message || 'NVIDIA API 错误');
-  return data.choices[0].message.content;
-}
-
-/**
- * 调用 StepFun
- */
-async function callStepFun(prompt) {
-  const { key, model } = AI_CONFIG.stepfun;
-  if (!key) throw new Error('StepFun API Key 未配置');
-  
-  const response = await fetch('https://api.stepfun.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${key}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: model || 'step-1-8k',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7
-    })
-  });
-  
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error?.message || 'StepFun API 错误');
-  return data.choices[0].message.content;
 }
 
 /**
