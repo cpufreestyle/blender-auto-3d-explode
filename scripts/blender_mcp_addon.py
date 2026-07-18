@@ -22,11 +22,11 @@ from contextlib import redirect_stdout, suppress
 
 bl_info = {
     "name": "Blender MCP",
-    "author": "BlenderMCP",
-    "version": (1, 2),
+    "author": "BlenderMCP + glonorce/Blender_mcp fusion",
+    "version": (1, 3),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar > BlenderMCP",
-    "description": "Connect Blender to Claude via MCP",
+    "description": "Connect Blender to MCP: image-to-3D (Hunyuan3D/Rodin), assembly intelligence, scene graph, multi-view capture",
     "category": "Interface",
 }
 
@@ -272,7 +272,7 @@ class BlenderMCPServer:
         if cmd_type == "get_polyhaven_status":
             return {"status": "success", "result": self.get_polyhaven_status()}
 
-        # Base handlers that are always available
+        # Base handlers that are always available (no external API required)
         handlers = {
             "get_scene_info": self.get_scene_info,
             "get_object_info": self.get_object_info,
@@ -283,6 +283,13 @@ class BlenderMCPServer:
             "get_hyper3d_status": self.get_hyper3d_status,
             "get_sketchfab_status": self.get_sketchfab_status,
             "get_hunyuan3d_status": self.get_hunyuan3d_status,
+            # --- glonorce/Blender_mcp fusion: always-on core capabilities ---
+            "get_scene_graph": self.get_scene_graph,
+            "get_viewport_screenshots": self.get_viewport_screenshots,
+            "analyze_assembly": self.analyze_assembly,
+            "get_assembly_sequence": self.get_assembly_sequence,
+            "get_blender_info": self.get_blender_info,
+            "get_addon_status": self.get_addon_status,
         }
 
         # Add Polyhaven handlers only if enabled
@@ -506,6 +513,497 @@ class BlenderMCPServer:
             raise Exception(f"Code execution error: {str(e)}")
 
 
+
+    # ------------------------------------------------------------------
+    # glonorce/Blender_mcp fusion: always-on core capabilities
+    # (scene understanding, multi-view capture, assembly intelligence)
+    # These require only Blender itself, no external service / API key.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _world_aabb(obj, depsgraph=None):
+        """World-space AABB (min, max) for a mesh object, accounting for
+        modifiers / deformations via the evaluated mesh. Returns None for
+        non-mesh or empty objects."""
+        if obj is None or obj.type != 'MESH':
+            return None
+        if depsgraph is None:
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+        ev = obj.evaluated_get(depsgraph)
+        data = getattr(ev, "data", None)
+        if data is None or not getattr(data, "vertices", None):
+            return None
+        coords = [ev.matrix_world @ v.co for v in data.vertices]
+        xs = [c.x for c in coords]
+        ys = [c.y for c in coords]
+        zs = [c.z for c in coords]
+        return (mathutils.Vector((min(xs), min(ys), min(zs))),
+                mathutils.Vector((max(xs), max(ys), max(zs))))
+
+    @staticmethod
+    def _aabb_gap(a_min, a_max, b_min, b_max):
+        """Shortest distance between two AABBs (0.0 if they overlap)."""
+        dx = max(0.0, b_min.x - a_max.x, a_min.x - b_max.x)
+        dy = max(0.0, b_min.y - a_max.y, a_min.y - b_max.y)
+        dz = max(0.0, b_min.z - a_max.z, a_min.z - b_max.z)
+        return mathutils.Vector((dx, dy, dz)).length
+
+    def get_blender_info(self):
+        """Blender / addon environment info."""
+        version = bpy.app.version
+        return {
+            "blender_version": ".".join(str(v) for v in version),
+            "blender_version_tuple": list(version),
+            "addon_version": ".".join(str(v) for v in bl_info["version"]),
+            "scene_name": bpy.context.scene.name,
+            "object_count": len(bpy.context.scene.objects),
+            "units": {
+                "system": bpy.context.scene.unit_settings.system,
+                "scale": bpy.context.scene.unit_settings.scale_length,
+            },
+        }
+
+    def get_scene_graph(self, max_depth=20, include_hidden=False, include_materials=True):
+        """
+        Build a hierarchical scene graph (parent -> children) with world
+        transforms, world AABB, geometry stats and material names.
+
+        Params:
+        - max_depth: limit recursion depth (0 = root objects only)
+        - include_hidden: include objects with hide_viewport / hide_render
+        - include_materials: include per-object material slot names
+        """
+        try:
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            objects = bpy.context.scene.objects
+
+            def node_for(obj, depth):
+                if depth > max_depth:
+                    return None
+                if not include_hidden and (obj.hide_viewport or obj.hide_render):
+                    return None
+                child_nodes = []
+                for child in obj.children:
+                    cn = node_for(child, depth + 1)
+                    if cn is not None:
+                        child_nodes.append(cn)
+                aabb = self._world_aabb(obj, depsgraph)
+                mats = []
+                if include_materials and getattr(obj, "material_slots", None):
+                    mats = [s.material.name for s in obj.material_slots if s.material]
+                verts = polys = 0
+                if obj.type == 'MESH' and getattr(obj.data, "vertices", None):
+                    verts = len(obj.data.vertices)
+                    polys = len(obj.data.polygons)
+                loc = obj.matrix_world.translation
+                return {
+                    "name": obj.name,
+                    "type": obj.type,
+                    "depth": depth,
+                    "world_location": [round(float(loc.x), 4),
+                                       round(float(loc.y), 4),
+                                       round(float(loc.z), 4)],
+                    "world_rotation_euler": [round(float(r), 4) for r in obj.matrix_world.to_euler()],
+                    "scale": [round(float(s), 4) for s in obj.scale],
+                    "visible": (not obj.hide_viewport) and (not obj.hide_render),
+                    "vertex_count": verts,
+                    "polygon_count": polys,
+                    "aabb": (
+                        {"min": [round(float(aabb[0].x), 4), round(float(aabb[0].y), 4), round(float(aabb[0].z), 4)],
+                         "max": [round(float(aabb[1].x), 4), round(float(aabb[1].y), 4), round(float(aabb[1].z), 4)]}
+                        if aabb else None
+                    ),
+                    "materials": mats,
+                    "children": child_nodes,
+                }
+
+            roots = [node_for(o, 0) for o in objects if o.parent is None]
+            roots = [r for r in roots if r is not None]
+
+            # Flat index for quick lookup by name
+            flat = []
+
+            def flatten(n):
+                flat.append({"name": n["name"], "type": n["type"], "depth": n["depth"]})
+                for c in n["children"]:
+                    flatten(c)
+
+            for r in roots:
+                flatten(r)
+
+            return {
+                "root_count": len(roots),
+                "object_count": len(flat),
+                "graph": roots,
+                "flat_index": flat,
+            }
+        except Exception as e:
+            traceback.print_exc()
+            return {"error": str(e)}
+
+    def get_viewport_screenshots(self, views=None, max_size=512, return_base64=False,
+                                 filepath_prefix=None):
+        """
+        Render the scene from multiple standard viewpoints (off-screen, via a
+        temporary camera) and save PNG files. Unlike get_viewport_screenshot
+        (which copies the editor region), this produces clean product renders.
+
+        Params:
+        - views: list of view names, any of
+                 front/back/left/right/top/bottom/perspective
+                 (default: all six).
+        - max_size: longest-edge resolution cap (keeps files small).
+        - return_base64: also embed base64 PNG data in the response.
+        - filepath_prefix: output path prefix; defaults to a temp file.
+        """
+        try:
+            scene = bpy.context.scene
+            if views is None:
+                views = ["front", "back", "left", "right", "top", "bottom", "perspective"]
+            if isinstance(views, str):
+                views = [views]
+
+            # Scene bounds -> camera framing
+            meshes = [o for o in scene.objects if o.type == 'MESH']
+            if not meshes:
+                return {"error": "No mesh objects to render"}
+
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            all_min = mathutils.Vector((float('inf'),) * 3)
+            all_max = mathutils.Vector((float('-inf'),) * 3)
+            for o in meshes:
+                aabb = self._world_aabb(o, depsgraph)
+                if aabb is None:
+                    continue
+                all_min = mathutils.Vector((min(all_min[i], aabb[0][i]) for i in range(3)))
+                all_max = mathutils.Vector((max(all_max[i], aabb[1][i]) for i in range(3)))
+            center = (all_min + all_max) / 2.0
+            size = (all_max - all_min).length
+            distance = max(size * 1.6, 0.5)
+
+            directions = {
+                "front": mathutils.Vector((0, -1, 0)),
+                "back": mathutils.Vector((0, 1, 0)),
+                "left": mathutils.Vector((-1, 0, 0)),
+                "right": mathutils.Vector((1, 0, 0)),
+                "top": mathutils.Vector((0, 0, 1)),
+                "bottom": mathutils.Vector((0, 0, -1)),
+                "perspective": mathutils.Vector((1, -1, 1)),
+            }
+
+            # Pick a render engine that exists in this Blender build
+            valid_engines = [it.identifier for it in
+                             bpy.types.RenderSettings.bl_rna.properties['engine'].enum_items]
+            engine = next((e for e in
+                           ('BLENDER_EEVEE_NEXT', 'BLENDER_EEVEE', 'BLENDER_WORKBENCH')
+                           if e in valid_engines), 'CYCLES')
+
+            # Save state to restore afterwards
+            prev_engine = scene.render.engine
+            prev_camera = scene.camera
+            prev_filepath = scene.render.filepath
+            prev_film = scene.render.film_transparent
+            prev_res_x = scene.render.resolution_x
+            prev_res_y = scene.render.resolution_y
+            prev_percent = scene.render.resolution_percentage
+
+            cam = bpy.data.cameras.new("__mcp_capture_cam__")
+            cam_obj = bpy.data.objects.new("__mcp_capture_cam__", cam)
+            scene.collection.objects.link(cam_obj)
+            scene.camera = cam_obj
+
+            try:
+                scene.render.engine = engine
+                scene.render.film_transparent = True
+                # Square-ish render, capped to max_size
+                res = int(min(max(max_size, 64), 2048))
+                scene.render.resolution_x = res
+                scene.render.resolution_y = res
+                scene.render.resolution_percentage = 100
+
+                if filepath_prefix is None:
+                    tmp = tempfile.mkdtemp(prefix="mcp_shots_")
+                    filepath_prefix = os.path.join(tmp, "view")
+
+                results = []
+                for view in views:
+                    if view not in directions:
+                        results.append({"view": view, "error": f"unknown view '{view}'"})
+                        continue
+                    loc = center + directions[view].normalized() * distance
+                    cam_obj.location = loc
+                    # Look-at: camera looks down -Z, up = +Y
+                    quat = (center - loc).normalized().to_track_quat('-Z', 'Y')
+                    cam_obj.rotation_euler = quat.to_euler()
+                    cam.lens = 35.0
+
+                    out_path = f"{filepath_prefix}_{view}.png"
+                    scene.render.filepath = out_path
+                    try:
+                        bpy.ops.render.opengl(write_still=True)
+                    except Exception as re:
+                        results.append({"view": view, "error": f"render failed: {str(re)}"})
+                        continue
+
+                    entry = {"view": view, "filepath": out_path, "engine": engine}
+                    if return_base64:
+                        try:
+                            with open(out_path, "rb") as fh:
+                                import base64 as _b64
+                                entry["base64"] = _b64.b64encode(fh.read()).decode("ascii")
+                        except Exception:
+                            pass
+                    results.append(entry)
+                return {"success": True, "engine": engine, "views": results}
+            finally:
+                scene.render.engine = prev_engine
+                scene.render.filepath = prev_filepath
+                scene.render.film_transparent = prev_film
+                scene.render.resolution_x = prev_res_x
+                scene.render.resolution_y = prev_res_y
+                scene.render.resolution_percentage = prev_percent
+                scene.camera = prev_camera
+                bpy.data.objects.remove(cam_obj, do_unlink=True)
+                bpy.data.cameras.remove(cam)
+        except Exception as e:
+            traceback.print_exc()
+            return {"error": str(e)}
+
+    def analyze_assembly(self, tolerance=0.001):
+        """
+        Assembly intelligence: geometry stats per part, pairwise interface
+        analysis (gap + real mesh interference via BVH), and a 0-100
+        "production readiness" score with a breakdown and recommendations.
+
+        Params:
+        - tolerance: max AABB gap (world units) still considered "touching".
+
+        Note: the production readiness score is a heuristic (Medium confidence)
+        derived from part count, complexity, tight tolerances and interference.
+        """
+        try:
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            meshes = [o for o in bpy.context.scene.objects if o.type == 'MESH']
+            if not meshes:
+                return {"part_count": 0,
+                        "production_readiness": {"score": 100, "level": "N/A",
+                                                 "breakdown": {}, "recommendations": []},
+                        "summary": "No mesh objects in scene"}
+
+            # Lazy import BVH (not available at module import time in some builds)
+            try:
+                from mathutils import bvhtree
+            except Exception:
+                bvhtree = None
+
+            parts = []
+            for o in meshes:
+                aabb = self._world_aabb(o, depsgraph)
+                if aabb is None:
+                    continue
+                ev = o.evaluated_get(depsgraph)
+                verts = len(ev.data.vertices)
+                polys = len(ev.data.polygons)
+                dims = aabb[1] - aabb[0]
+                parts.append({
+                    "name": o.name,
+                    "vertex_count": verts,
+                    "polygon_count": polys,
+                    "aabb_min": [round(float(aabb[0].x), 4), round(float(aabb[0].y), 4), round(float(aabb[0].z), 4)],
+                    "aabb_max": [round(float(aabb[1].x), 4), round(float(aabb[1].y), 4), round(float(aabb[1].z), 4)],
+                    "size": [round(float(dims.x), 4), round(float(dims.y), 4), round(float(dims.z), 4)],
+                    "non_manifold": self._count_non_manifold(ev),
+                })
+
+            # Pairwise interface analysis
+            interfaces = []
+            for i in range(len(parts)):
+                for j in range(i + 1, len(parts)):
+                    a = parts[i]
+                    b = parts[j]
+                    gap = self._aabb_gap(
+                        mathutils.Vector(a["aabb_min"]), mathutils.Vector(a["aabb_max"]),
+                        mathutils.Vector(b["aabb_min"]), mathutils.Vector(b["aabb_max"]),
+                    )
+                    if gap <= tolerance:
+                        interference = False
+                        if bvhtree is not None:
+                            try:
+                                ta = bvhtree.BVHTree.FromObject(
+                                    bpy.context.scene.objects[a["name"]], depsgraph, deform=True)
+                                tb = bvhtree.BVHTree.FromObject(
+                                    bpy.context.scene.objects[b["name"]], depsgraph, deform=True)
+                                interference = len(ta.overlap(tb)) > 0
+                            except Exception:
+                                interference = None  # unknown
+                        interfaces.append({
+                            "a": a["name"], "b": b["name"],
+                            "gap": round(float(gap), 5),
+                            "interference": interference,
+                        })
+
+            # ---- Production readiness heuristic (0-100) ----
+            score = 100
+            breakdown = {}
+            recs = []
+
+            n = len(parts)
+            if n > 40:
+                penalty = 20
+            elif n > 20:
+                penalty = 12
+            elif n > 10:
+                penalty = 6
+            else:
+                penalty = 0
+            if penalty:
+                score -= penalty
+                breakdown["part_count"] = -penalty
+                recs.append(f"部件数量较多（{n}）会增加装配工序，考虑模块化分组。")
+
+            total_verts = sum(p["vertex_count"] for p in parts)
+            if total_verts > 2_000_000:
+                penalty = 15
+            elif total_verts > 500_000:
+                penalty = 8
+            else:
+                penalty = 0
+            if penalty:
+                score -= penalty
+                breakdown["mesh_complexity"] = -penalty
+                recs.append("网格总体复杂度偏高，制造/打印耗时增加，可考虑减面。")
+
+            non_manifold = sum(1 for p in parts if p["non_manifold"] > 0)
+            if non_manifold:
+                penalty = min(20, 4 * non_manifold)
+                score -= penalty
+                breakdown["non_manifold_geometry"] = -penalty
+                recs.append(f"{non_manifold} 个部件存在非流形/破面，可能影响水密性与制造。")
+
+            tight = [it for it in interfaces if it["gap"] <= tolerance and (it["interference"] in (False, None))]
+            if tight:
+                penalty = min(15, 3 * len(tight))
+                score -= penalty
+                breakdown["tight_tolerances"] = -penalty
+                recs.append(f"{len(tight)} 处配合间隙极小，装配精度要求高，建议标注公差。")
+
+            interferences = [it for it in interfaces if it["interference"] is True]
+            if interferences:
+                penalty = min(25, 6 * len(interferences))
+                score -= penalty
+                breakdown["interferences"] = -penalty
+                recs.append(f"{len(interferences)} 处检测到网格实际干涉（穿模），请检查装配关系。")
+
+            score = max(0, min(100, score))
+            level = "高" if score >= 80 else ("中" if score >= 55 else "低")
+
+            return {
+                "part_count": n,
+                "total_vertices": total_verts,
+                "parts": parts,
+                "interfaces": interfaces,
+                "interface_count": len(interfaces),
+                "interference_count": len(interferences),
+                "production_readiness": {
+                    "score": score,
+                    "level": level,
+                    "breakdown": breakdown,
+                    "recommendations": recs,
+                },
+            }
+        except Exception as e:
+            traceback.print_exc()
+            return {"error": str(e)}
+
+    @staticmethod
+    def _count_non_manifold(obj):
+        """Count boundary edges (edges with a single linked face) as a cheap
+        non-manifold / non-watertight indicator."""
+        data = getattr(obj, "data", None)
+        if data is None or not getattr(data, "edges", None):
+            return 0
+        return sum(1 for e in data.edges if len(e.link_faces) == 1)
+
+    def get_assembly_sequence(self, method='distance'):
+        """
+        Suggest a disassembly order for the scene's mesh parts.
+
+        Params:
+        - method: 'distance' (inner parts last, by distance from scene center),
+                  'size' (smallest first), or 'hierarchy' (deepest nesting last).
+
+        Returns an ordered list of part names (first = remove first).
+        """
+        try:
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            meshes = [o for o in bpy.context.scene.objects if o.type == 'MESH' and self._world_aabb(o, depsgraph)]
+            if not meshes:
+                return {"order": [], "method": method, "count": 0}
+
+            infos = []
+            for o in meshes:
+                aabb = self._world_aabb(o, depsgraph)
+                center = (aabb[0] + aabb[1]) / 2.0
+                size = (aabb[1] - aabb[0]).length
+                infos.append({
+                    "obj": o,
+                    "name": o.name,
+                    "center": center,
+                    "size": size,
+                    "depth": len(o.parent_recursive),
+                })
+
+            # Scene center for distance method
+            all_min = mathutils.Vector((float('inf'),) * 3)
+            all_max = mathutils.Vector((float('-inf'),) * 3)
+            for o in meshes:
+                a = self._world_aabb(o, depsgraph)
+                all_min = mathutils.Vector((min(all_min[i], a[0][i]) for i in range(3)))
+                all_max = mathutils.Vector((max(all_max[i], a[1][i]) for i in range(3)))
+            scene_center = (all_min + all_max) / 2.0
+
+            if method == 'size':
+                infos.sort(key=lambda d: d["size"])
+            elif method == 'hierarchy':
+                infos.sort(key=lambda d: d["depth"], reverse=True)
+            else:  # distance (default): outer parts removed first, inner last
+                infos.sort(key=lambda d: (d["center"] - scene_center).length, reverse=True)
+
+            order = [d["name"] for d in infos]
+            return {"order": order, "method": method, "count": len(order)}
+        except Exception as e:
+            traceback.print_exc()
+            return {"error": str(e)}
+
+    def get_addon_status(self):
+        """Aggregate capability + external-service status for diagnostics."""
+        status = {
+            "addon_version": ".".join(str(v) for v in bl_info["version"]),
+            "blender_version": ".".join(str(v) for v in bpy.app.version),
+            "server_running": getattr(self, "running", False),
+            "capabilities": {
+                "scene_info": True,
+                "scene_graph": True,
+                "multi_view_screenshots": True,
+                "assembly_analysis": True,
+                "assembly_sequence": True,
+                "execute_code": True,
+                "image_to_3d_hunyuan": True,
+                "image_to_3d_rodin": True,
+            },
+            "services": {},
+        }
+        for name, fn in (
+            ("polyhaven", self.get_polyhaven_status),
+            ("hyper3d", self.get_hyper3d_status),
+            ("sketchfab", self.get_sketchfab_status),
+            ("hunyuan3d", self.get_hunyuan3d_status),
+        ):
+            try:
+                status["services"][name] = fn()
+            except Exception as e:
+                status["services"][name] = {"error": str(e)}
+        return status
 
     def get_polyhaven_categories(self, asset_type):
         """Get categories for a specific asset type from Polyhaven"""
@@ -2536,7 +3034,16 @@ class BLENDERMCP_PT_Panel(bpy.types.Panel):
                 layout.prop(scene, "blendermcp_hunyuan3d_num_inference_steps", text="Number of Inference Steps")
                 layout.prop(scene, "blendermcp_hunyuan3d_guidance_scale", text="Guidance Scale")
                 layout.prop(scene, "blendermcp_hunyuan3d_texture", text="Generate Texture")
-        
+
+        # Always-on advanced capabilities (glonorce/Blender_mcp fusion)
+        layout.separator()
+        layout.label(text="Advanced (always on, no API key):", icon='OUTLINER')
+        adv_box = layout.box()
+        adv_box.label(text="get_scene_graph · 场景层级/变换")
+        adv_box.label(text="get_viewport_screenshots · 多视角渲染")
+        adv_box.label(text="analyze_assembly · 装配/干涉/可制造性")
+        adv_box.label(text="get_assembly_sequence · 拆解顺序")
+
         if not scene.blendermcp_server_running:
             layout.operator("blendermcp.start_server", text="Connect to MCP server")
         else:

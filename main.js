@@ -310,6 +310,89 @@ const materials = {
   }),
 };
 
+// ===== 乐高 / 原生 外观切换（2026-07 新增）=====
+// 乐高风格：亮色塑料质感、无金属、轻微自发光，营造积木玩具观感（不改几何体）
+let currentModelStyle = "native"; // 'native' | 'lego'
+
+function makeLegoMaterial(color) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.38,
+    metalness: 0.0,
+    emissive: new THREE.Color(color).multiplyScalar(0.05),
+  });
+}
+function makeLegoGlass() {
+  return new THREE.MeshPhysicalMaterial({
+    color: 0x6fd0ff,
+    roughness: 0.05,
+    metalness: 0.0,
+    transmission: 0.9,
+    thickness: 0.4,
+    transparent: true,
+    opacity: 0.7,
+  });
+}
+const legoMaterials = {
+  frontPlate: makeLegoMaterial(0xf4f5f6),
+  body: makeLegoMaterial(0x15161a),
+  lensBarrel: makeLegoMaterial(0x0a69c2),
+  lensGlass: makeLegoGlass(),
+  camera: makeLegoMaterial(0x3b3b3b),
+  sensor: new THREE.MeshBasicMaterial({ color: 0x0a1a33 }),
+  strapArm: makeLegoMaterial(0xc91a22),
+  foam: makeLegoMaterial(0x4a4a4a),
+  pcb: makeLegoMaterial(0x1e9e4a),
+};
+
+// 原生材质 → 乐高材质 映射
+const nativeToLego = new Map();
+nativeToLego.set(materials.frontPlate, legoMaterials.frontPlate);
+nativeToLego.set(materials.body, legoMaterials.body);
+nativeToLego.set(materials.lensBarrel, legoMaterials.lensBarrel);
+nativeToLego.set(materials.lensGlass, legoMaterials.lensGlass);
+nativeToLego.set(materials.camera, legoMaterials.camera);
+nativeToLego.set(materials.sensor, legoMaterials.sensor);
+nativeToLego.set(materials.strapArm, legoMaterials.strapArm);
+nativeToLego.set(materials.foam, legoMaterials.foam);
+nativeToLego.set(materials.pcb, legoMaterials.pcb);
+
+// 自定义模型：根据原始颜色推导亮色积木色
+function brightenToLego(hex) {
+  const tmp = new THREE.Color(hex);
+  const hsl = {};
+  tmp.getHSL(hsl);
+  if (hsl.l < 0.08) return 0x2b2b2b; // 近黑 → 暗塑料
+  return new THREE.Color().setHSL(hsl.h, Math.max(0.6, hsl.s), 0.5).getHex();
+}
+function getLegoMaterialForMesh(child) {
+  const nativeMat = child.userData._nativeMaterial;
+  if (nativeToLego.has(nativeMat)) return nativeToLego.get(nativeMat);
+  if (child.userData._legoMaterial) return child.userData._legoMaterial;
+  let color = 0x3498db;
+  if (nativeMat && nativeMat.color) color = brightenToLego(nativeMat.color.getHex());
+  const lm = makeLegoMaterial(color);
+  child.userData._legoMaterial = lm;
+  return lm;
+}
+
+// 应用模型外观风格：'native' | 'lego'
+function applyModelStyle(style) {
+  currentModelStyle = style;
+  const setLego = style === "lego";
+  const groups = [questGroup];
+  if (typeof customModelGroup !== "undefined") groups.push(customModelGroup);
+  groups.forEach((group) => {
+    group.traverse((child) => {
+      if (!child.isMesh) return;
+      if (child.userData._nativeMaterial === undefined) {
+        child.userData._nativeMaterial = child.material;
+      }
+      child.material = setLego ? getLegoMaterialForMesh(child) : child.userData._nativeMaterial;
+    });
+  });
+}
+
 // ===== Quest 3 简化模型构建 =====
 const questGroup = new THREE.Group();
 scene.add(questGroup);
@@ -532,6 +615,8 @@ function clearCustomModelGroup() {
   customModelParts = [];
   customModelGroup.scale.set(1, 1, 1);
   customModelGroup.position.set(0, 0, 0);
+  // 清除上一个模型的装配顺序，避免误用
+  assemblySequenceOrder = null;
 }
 
 /**
@@ -834,6 +919,121 @@ function autoSplitModel(model) {
   });
 }
 
+// ===== Blender MCP 装配顺序对接 =====
+// 由 /api/assembly/sequence 获取的部件拆解顺序（名称数组，索引小者先拆）
+let assemblySequenceOrder = null;
+
+/**
+ * 从后端（server.js -> Blender MCP addon）拉取装配拆解顺序。
+ * @param {string} method distance|size|hierarchy
+ * @returns {Promise<string[]|null>} 部件名称数组；不可用时返回 null
+ */
+async function fetchAssemblySequenceOrder(method = "distance") {
+  try {
+    const resp = await fetch(`/api/assembly/sequence?method=${encodeURIComponent(method)}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (data && data.success && Array.isArray(data.order) && data.order.length) {
+      return data.order;
+    }
+  } catch {
+    /* 后端或 Blender 未就绪，静默回退 */
+  }
+  return null;
+}
+
+/**
+ * 尝试用 Blender 装配分析结果优化当前自定义模型的拆解步骤。
+ * 仅当返回顺序与当前部件名称有足够重叠（判定为同一模型）时才应用。
+ * 非阻塞：失败时保持原有距离排序。
+ * @param {string} fileName 当前模型文件名（用于重建步骤）
+ */
+async function maybeApplyAssemblySequence(fileName) {
+  if (!hasCustomModel || !customModelParts.length) return;
+  const order = await fetchAssemblySequenceOrder();
+  if (!order || !order.length) return;
+
+  // 校验：Blender 场景中的部件名称需与前端模型有足够重叠
+  const names = new Set(customModelParts.map(p => p.name));
+  const overlap = order.filter(n => names.has(n));
+  if (overlap.length < 2) return; // 判定为不同模型，跳过
+
+  assemblySequenceOrder = order;
+  stepGroups = generateCustomStepGroups(customModelParts, fileName);
+  totalSteps = stepGroups.length;
+  if (currentStep >= totalSteps) currentStep = totalSteps - 1;
+  if (typeof updateStepUI === "function") updateStepUI();
+  showStatus(
+    `🔧 已根据 Blender 装配分析优化拆解顺序（匹配 ${overlap.length} 个部件）`,
+    "success",
+  );
+
+  // 同一份 Blender 数据可用：自动拉取可制造性评分并展开面板
+  const panel = document.getElementById("assembly-panel");
+  if (panel && typeof panel.open !== "undefined") panel.open = true;
+  runAssemblyAnalysis();
+}
+
+/**
+ * 调用后端装配分析接口，在「装配分析」面板展示可制造性评分（0-100）、
+ * 等级、扣分明细与建议。Blender/后端不可用时给出友好提示。
+ */
+async function runAssemblyAnalysis() {
+  const btn = document.getElementById("assembly-analyze-btn");
+  const resultEl = document.getElementById("assembly-result");
+  if (!resultEl) return;
+
+  if (btn) btn.disabled = true;
+  resultEl.classList.remove("hidden");
+  resultEl.innerHTML = "⏳ 正在分析…（需 Blender 后端运行）";
+
+  try {
+    const resp = await fetch("/api/assembly/analysis");
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.success) {
+      resultEl.innerHTML =
+        `⚠️ 装配分析不可用：<br>${data.error || resp.status}<br><br>` +
+        `请确认 Blender 已启动且 MCP addon 已连接（侧栏 BlenderMCP → Connect to MCP server）。`;
+      return;
+    }
+
+    const pr = data.production_readiness || {};
+    const score = typeof pr.score === "number" ? pr.score : null;
+    const level = pr.level || "—";
+    const color = score == null ? "#888" : score >= 80 ? "#2e7d32" : score >= 55 ? "#f9a825" : "#c62828";
+
+    const recs = Array.isArray(pr.recommendations) && pr.recommendations.length
+      ? pr.recommendations.map(r => `<li>${r}</li>`).join("")
+      : "<li>无明显制造风险</li>";
+
+    const bd = pr.breakdown || {};
+    const bdRows = Object.keys(bd).length
+      ? `<table class="asm-table"><tr><th>扣分项</th><th>分值</th></tr>` +
+        Object.entries(bd)
+          .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`)
+          .join("") +
+        `</table>`
+      : "";
+
+    resultEl.innerHTML = `
+      <div class="asm-score">
+        <div class="asm-score-badge" style="border-color:${color};color:${color}">${score == null ? "—" : score}</div>
+        <div class="asm-score-meta">
+          <div>可制造性评分 <strong style="color:${color}">${level}</strong></div>
+          <div class="asm-sub">部件数：${data.part_count ?? "—"} ｜ 干涉：${data.interference_count ?? "—"} ｜ 配合面：${data.interface_count ?? "—"}</div>
+        </div>
+      </div>
+      ${bdRows}
+      <div class="asm-rec-title">改进建议</div>
+      <ul class="asm-rec">${recs}</ul>
+    `;
+  } catch (e) {
+    resultEl.innerHTML = `⚠️ 请求失败：${e.message}`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 // 为自定义模型生成动态步骤
 function generateCustomStepGroups(customParts, fileName) {
   const partCount = customParts.length;
@@ -853,12 +1053,27 @@ function generateCustomStepGroups(customParts, fileName) {
 💡 点击"下一步"开始逐步拆解，或点击"爆炸视图"一键展开。`,
   });
 
-  // 按距离中心排序（外层先拆）
-  const sortedParts = [...customParts].sort((a, b) => {
-    const distA = (a.partCenter || a.homePos).length();
-    const distB = (b.partCenter || b.homePos).length();
-    return distB - distA; // 距离远的先拆
-  });
+  // 部件拆解排序：优先使用 Blender MCP 装配分析给出的顺序，
+  // 否则回退到"按距离中心降序（外层先拆）"。
+  let sortedParts;
+  if (assemblySequenceOrder && assemblySequenceOrder.length) {
+    const orderIndex = new Map(assemblySequenceOrder.map((n, i) => [n, i]));
+    sortedParts = [...customParts].sort((a, b) => {
+      const ia = orderIndex.has(a.name) ? orderIndex.get(a.name) : Infinity;
+      const ib = orderIndex.has(b.name) ? orderIndex.get(b.name) : Infinity;
+      if (ia !== ib) return ia - ib; // MCP 顺序：索引小者先拆
+      // 未匹配的部件按距离中心降序回退
+      const distA = (a.partCenter || a.homePos).length();
+      const distB = (b.partCenter || b.homePos).length();
+      return distB - distA;
+    });
+  } else {
+    sortedParts = [...customParts].sort((a, b) => {
+      const distA = (a.partCenter || a.homePos).length();
+      const distB = (b.partCenter || b.homePos).length();
+      return distB - distA; // 距离远的先拆
+    });
+  }
 
   // 将部件分组到各步骤
   const partsPerGroup = Math.ceil(partCount / groupCount);
@@ -1421,6 +1636,9 @@ async function loadSTLModel(arrayBuffer, fileName) {
       "success",
     );
 
+    // 若 Blender MCP 可用，尝试用装配分析优化拆解顺序（非阻塞）
+    maybeApplyAssemblySequence(fileName);
+
     // ========== 自动放大微小的模型 ==========
     autoScaleModel("STL");
 
@@ -1691,6 +1909,9 @@ async function loadURDFModel(urdfText, fileName) {
     questGroup.visible = false;
     customModelGroup.visible = true;
 
+    // 套用当前外观风格（乐高 / 原生）
+    applyModelStyle(currentModelStyle);
+
     // 生成动态步骤
     stepGroups = generateCustomStepGroups(customModelParts, fileName);
     totalSteps = stepGroups.length;
@@ -1707,6 +1928,9 @@ async function loadURDFModel(urdfText, fileName) {
         `\n⚠️ 注意: URDF 引用的 mesh 文件 (${splitParts[0].mesh.userData.meshFile}) 需单独上传\n当前使用占位几何体` :
         "";
     showStatus(`✅ URDF 解析完成：${partCount} 个 link（部件）${meshNote}`, "success");
+
+    // 若 Blender MCP 可用，尝试用装配分析优化拆解顺序（非阻塞）
+    maybeApplyAssemblySequence(fileName);
 
     // ========== 自动放大微小的模型 ==========
     autoScaleModel("URDF");
@@ -1744,6 +1968,8 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
 
     // 清除之前的自定义模型
     clearCustomModelGroup();
+    // 立即隐藏默认（Quest 3）模型，确保生成的模型单独显示、不与主模型叠加
+    questGroup.visible = false;
 
     const model = gltf.scene;
     model.updateMatrixWorld(true);
@@ -1916,9 +2142,6 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
 
     hasCustomModel = true;
 
-    // 隐藏默认模型
-    questGroup.visible = false;
-
     // ========== 生成动态步骤 ==========
     stepGroups = generateCustomStepGroups(customModelParts, fileName);
     totalSteps = stepGroups.length;
@@ -1942,6 +2165,9 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
     // ========== 智能调整爆炸距离 ==========
     adjustSmartExplodeDistances();
 
+    // 若 Blender MCP 可用，尝试用装配分析优化拆解顺序（非阻塞）
+    maybeApplyAssemblySequence(fileName);
+
     // 默认合体状态（不自动爆炸）
     goToStep(0);
     isExploded = false;
@@ -1952,6 +2178,10 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
   } catch (err) {
     console.error("加载模型失败：", err);
     showStatus(`❌ 加载失败：${err.message}`, "error");
+    // 加载失败：恢复默认模型可见，并清除可能已部分添加的自定义模型，避免与主模型叠加
+    clearCustomModelGroup();
+    questGroup.visible = true;
+    hasCustomModel = false;
   }
 }
 
@@ -2149,6 +2379,18 @@ let mouseControlEnabled = false; // 是否启用鼠标控制
 const stepDuration = 600; // 每步动画时长（毫秒）
 let isAnimating = false;
 
+// ===== 一键爆炸/合体的平滑动画（所有部件同时炸开/合体）=====
+let explodeAnimActive = false;   // 是否正在播放爆炸/合体动画
+let explodeAnimFrom = 0;         // 起始全局炸开因子 (0=合体, 1=完全炸开)
+let explodeAnimTo = 0;           // 目标全局炸开因子
+let explodeAnimStart = 0;        // 动画开始时间戳
+let explodeAnimFactor = 0;       // 当前全局炸开因子
+let explodeAllMode = false;      // true 时所有部件按同一因子同时炸开（忽略分步）
+let explodeAnimDuration = 1100;  // 爆炸动画时长（毫秒，受循环速度档控制）
+let loopHoldMs = 900;            // 循环播放时炸开/合体之间的停留时间（毫秒）
+let explodeLoop = false;         // 爆炸/合体动画是否自动循环播放
+let explodeLoopTimer = null;     // 循环反向定时器，便于手动接管时取消
+
 const prevBtn = document.getElementById("prev-step");
 const nextBtn = document.getElementById("next-step");
 const resetBtn = document.getElementById("reset-step");
@@ -2308,6 +2550,7 @@ function goToStep(newStep) {
   newStep = THREE.MathUtils.clamp(newStep, 0, totalSteps);
   if (newStep === displayedStep || isAnimating) return;
 
+  stopExplodeLoop(); // 手动分步控制接管，停止循环播放
   needsExplodeUpdate = true; // 标记需要重新计算部件位置
   animationFrom = currentStep;
   animatingStep = newStep;
@@ -2413,29 +2656,125 @@ resetBtn.addEventListener("click", () => {
 const explodeBtn = document.getElementById("explode-btn");
 let isExploded = false;
 
+// 装配分析面板按钮
+const assemblyAnalyzeBtn = document.getElementById("assembly-analyze-btn");
+if (assemblyAnalyzeBtn) {
+  assemblyAnalyzeBtn.addEventListener("click", () => runAssemblyAnalysis());
+}
+
 function toggleExplode() {
   isExploded = !isExploded;
-  mouseControlEnabled = isExploded;
-  needsExplodeUpdate = true; // 标记需要重新计算
+  // 退出其它控制模式，由本次爆炸动画接管
+  mouseControlEnabled = false;
+  explodeAllMode = true;
+  isAnimating = false;
+  clearInterval(playInterval);
+  if (timelinePlayBtn) timelinePlayBtn.textContent = "▶️ 播放";
+  isPlaying = false;
 
   if (isExploded) {
-    // 进入爆炸模式，启用鼠标控制
+    // 进入爆炸模式：所有部件平滑炸开到完全展开
     explodeBtn.classList.add("exploded");
-    explodeBtn.textContent = "🖱️ 移动鼠标控制范围";
-    // 初始炸开因子为1（完全炸开）
-    mouseFactor = 1;
-    currentStep = totalSteps;
-    displayedStep = totalSteps;
-    updateStepUI();
+    explodeBtn.textContent = "🔄 合体";
+    explodeAnimFrom = explodeAnimFactor; // 从当前状态开始
+    explodeAnimTo = 1;
   } else {
-    // 退出爆炸模式，回到合体
+    // 退出爆炸模式：所有部件平滑合体
     explodeBtn.classList.remove("exploded");
     explodeBtn.textContent = "💥 爆炸";
-    goToStep(0);
+    explodeAnimFrom = explodeAnimFactor;
+    explodeAnimTo = 0;
   }
+  explodeAnimStart = performance.now();
+  explodeAnimActive = true;
+  needsExplodeUpdate = true;
+  updateStepUI();
 }
 
 explodeBtn.addEventListener("click", toggleExplode);
+
+// ===== 爆炸循环播放 =====
+const explodeLoopBtn = document.getElementById("explode-loop");
+const explodeLoopSpeed = document.getElementById("explode-loop-speed");
+
+// 更新循环按钮的视觉状态
+function setExplodeLoopUI() {
+  if (!explodeLoopBtn) return;
+  explodeLoopBtn.classList.toggle("active", explodeLoop);
+  explodeLoopBtn.textContent = explodeLoop ? "🔁 循环中" : "🔁 循环";
+}
+
+// 停止循环播放，并切回分步/滑块控制
+function stopExplodeLoop() {
+  explodeLoop = false;
+  if (explodeLoopTimer) {
+    clearTimeout(explodeLoopTimer);
+    explodeLoopTimer = null;
+  }
+  explodeAnimActive = false; // 中止进行中的循环动画
+  explodeAllMode = false;
+  setExplodeLoopUI();
+}
+
+if (explodeLoopBtn) {
+  explodeLoopBtn.addEventListener("click", () => {
+    explodeLoop = !explodeLoop;
+    if (explodeLoop && !isExploded) {
+      // 开启循环且当前为合体状态，立即开始炸开并循环
+      setExplodeLoopUI();
+      toggleExplode();
+    } else if (explodeLoop) {
+      // 已是炸开状态，继续循环（先合体再往复）
+      setExplodeLoopUI();
+    } else {
+      // 关闭循环：停在当前状态
+      stopExplodeLoop();
+    }
+  });
+}
+
+// 循环速度档：影响动画时长与炸开/合体之间的停留时间
+if (explodeLoopSpeed) {
+  explodeLoopSpeed.addEventListener("change", e => {
+    const v = parseFloat(e.target.value) || 1;
+    explodeAnimDuration = Math.round(1100 / v);
+    loopHoldMs = Math.round(900 / v);
+  });
+}
+
+// 从生成库加载已拆解模型（models/generated/）
+const generatedSelect = document.getElementById("generated-select");
+const generatedLoadBtn = document.getElementById("generated-load");
+if (generatedSelect && generatedLoadBtn) {
+  fetch("/api/generated")
+    .then(r => r.json())
+    .then(data => {
+      if (!data.success || !data.files || !data.files.length) return;
+      data.files.forEach(f => {
+        const opt = document.createElement("option");
+        opt.value = f.url;
+        const kb = (f.size / 1024).toFixed(0);
+        opt.textContent = `${f.name} (${kb} KB)`;
+        generatedSelect.appendChild(opt);
+      });
+    })
+    .catch(() => { /* 忽略：无生成库时不展示 */ });
+
+  generatedLoadBtn.addEventListener("click", async () => {
+    const url = generatedSelect.value;
+    if (!url) return;
+    try {
+      showStatus("📦 正在从生成库加载模型...", "info");
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error("加载失败 " + resp.status);
+      const buf = await resp.arrayBuffer();
+      const name = decodeURIComponent(url.split("/").pop());
+      loadCustomModel(buf, name, null);
+    } catch (err) {
+      showStatus("❌ 从生成库加载失败: " + err.message, "error");
+    }
+  });
+}
 
 // 爆炸深度滑块
 if (depthSlider && depthValueEl) {
@@ -2443,8 +2782,9 @@ if (depthSlider && depthValueEl) {
     const depth = parseInt(e.target.value);
     depthValueEl.textContent = `${depth}%`;
 
-    // 退出鼠标控制模式，让滑块接管
+    // 退出鼠标/整体炸开控制模式，让滑块接管
     if (mouseControlEnabled) exitMouseControl();
+    stopExplodeLoop(); // 深度滑块接管，停止循环播放
 
     // 计算炸开因子 (0-1)
     const factor = depth / 100;
@@ -2454,6 +2794,7 @@ if (depthSlider && depthValueEl) {
       needsExplodeUpdate = true; // 标记需要重新计算
       currentStep = factor * totalSteps;
       displayedStep = Math.round(currentStep);
+      explodeAnimFactor = factor; // 同步整体炸开因子，供后续动画续接
       updateStepUI();
     }
 
@@ -2551,6 +2892,8 @@ function focusCurrentPart() {
 renderer.domElement.addEventListener("mousemove", e => {
   if (!mouseControlEnabled) return;
 
+  stopExplodeLoop(); // 鼠标接管，停止循环播放
+
   // 计算鼠标在屏幕上的相对位置（0-1）
   const rect = renderer.domElement.getBoundingClientRect();
   const x = (e.clientX - rect.left) / rect.width;
@@ -2559,6 +2902,7 @@ renderer.domElement.addEventListener("mousemove", e => {
   // 使用鼠标Y轴位置控制炸开范围：鼠标越往下，炸开越大
   // 加上鼠标X轴影响，让控制更有趣
   mouseFactor = Math.max(0.1, y * 1.2); // 最小保持 0.1 的炸开
+  explodeAnimFactor = mouseFactor; // 同步整体炸开因子，供后续动画续接
 
   // 更新当前步骤显示
   currentStep = mouseFactor * totalSteps;
@@ -2608,19 +2952,46 @@ function updateExplodedView(now) {
     const eased = easeOutCubic(progress);
     currentStep = animationFrom + (animatingStep - animationFrom) * eased;
     needsExplodeUpdate = true; // 动画中每帧都需要更新
+  } else if (explodeAnimActive) {
+    // 一键爆炸/合体的整体平滑动画
+    const elapsed = now - explodeAnimStart;
+    let progress = elapsed / explodeAnimDuration;
+    if (progress >= 1) {
+      progress = 1;
+      explodeAnimActive = false;
+      explodeAnimFactor = explodeAnimTo; // 锁定到目标状态
+      // 循环播放：停留片刻后自动反向（合体↔炸开）
+      if (explodeLoop) {
+        explodeLoopTimer = setTimeout(() => {
+          explodeLoopTimer = null;
+          if (explodeLoop) toggleExplode();
+        }, loopHoldMs);
+      }
+    } else {
+      const eased = easeOutCubic(progress);
+      explodeAnimFactor = explodeAnimFrom + (explodeAnimTo - explodeAnimFrom) * eased;
+    }
+    needsExplodeUpdate = true; // 动画中每帧都需要更新
   }
 
   // 优化：如果状态未变化，跳过部件位置计算
   if (!needsExplodeUpdate) return;
 
-  // 如果启用了鼠标控制，使用鼠标因子
-  const globalFactor = mouseControlEnabled ? mouseFactor : currentStep / totalSteps;
+  // 整体炸开模式下，所有部件使用同一因子；否则按分步/鼠标因子
+  const globalFactor = explodeAllMode
+    ? explodeAnimFactor
+    : (mouseControlEnabled ? mouseFactor : currentStep / totalSteps);
   axisMat.opacity = globalFactor * 0.5;
 
   // 统一的部件更新函数（避免重复代码）
   const updatePart = part => {
-    const controlValue = mouseControlEnabled ? mouseFactor * totalSteps : currentStep;
-    const partFactor = smoothStep(part.stepIndex - 1, part.stepIndex, controlValue);
+    const partFactor = explodeAllMode
+      ? explodeAnimFactor
+      : smoothStep(
+          part.stepIndex - 1,
+          part.stepIndex,
+          mouseControlEnabled ? mouseFactor * totalSteps : currentStep
+        );
 
     part.mesh.position.lerpVectors(part.homePos, part.explodePos, partFactor);
     part.mesh.rotation.x = THREE.MathUtils.lerp(part.homeRot.x, part.explodeRot.x, partFactor);
@@ -2636,8 +3007,8 @@ function updateExplodedView(now) {
     customModelParts.forEach(updatePart);
   }
 
-  // 非动画、非鼠标控制时，标记为已更新
-  if (!isAnimating && !mouseControlEnabled) {
+  // 非动画、非鼠标、非整体炸开动画时，标记为已更新（冻结当前状态）
+  if (!isAnimating && !mouseControlEnabled && !explodeAnimActive) {
     needsExplodeUpdate = false;
   }
 }
@@ -2928,9 +3299,16 @@ function setupAIPaint() {
   const imagePreview = document.getElementById("ai-paint-image-preview");
   const previewImg = document.getElementById("ai-paint-preview-img");
   const removeImgBtn = document.getElementById("ai-paint-remove-image");
+  const imgTo3DBtn = document.getElementById("img-to-3d-btn");
+  const imgTo3DDeploy = document.getElementById("img-to-3d-deploy");
+  const imgTo3DModelLocal = document.getElementById("img-to-3d-model-local");
+  const imgTo3DModel = document.getElementById("img-to-3d-model");
+  const imgTo3DModelCustom = document.getElementById("img-to-3d-model-custom");
 
   // 当前上传的图片特征
   let uploadedImageFeatures = null;
+  // 当前上传图片的 data URL（用于图片转 3D）
+  let uploadedImageDataUrl = null;
 
   if (!promptInput || !paintBtn) {
     console.warn("AI 绘画元素未找到，跳过初始化");
@@ -3125,6 +3503,7 @@ function setupAIPaint() {
     reader.onload = async e => {
       const dataUrl = e.target.result;
       previewImg.src = dataUrl;
+      uploadedImageDataUrl = dataUrl;
       imagePreview.classList.remove("hidden");
       dropzoneText.textContent = `已上传: ${file.name}`;
 
@@ -3153,7 +3532,8 @@ function setupAIPaint() {
   // 清除已上传图片
   function clearUploadedImage() {
     uploadedImageFeatures = null;
-    previewImg.src = "";
+    uploadedImageDataUrl = null;
+    previewImg.removeAttribute("src");
     imagePreview.classList.add("hidden");
     dropzoneText.textContent = "上传参考图片（可选）— 提取颜色和形状特征";
     if (fileInput) fileInput.value = "";
@@ -3192,6 +3572,122 @@ function setupAIPaint() {
       e.stopPropagation();
       clearUploadedImage();
     });
+  }
+
+  // 图片转 3D 按钮
+  if (imgTo3DBtn) {
+    imgTo3DBtn.addEventListener("click", () => imageTo3D());
+  }
+
+  // 部署方式：本地显示本地模型下拉，云端显示云端模型下拉
+  function refreshTo3DControls() {
+    const deploy = imgTo3DDeploy ? imgTo3DDeploy.value : "local";
+    const isLocal = deploy === "local";
+    if (imgTo3DModelLocal) imgTo3DModelLocal.classList.toggle("hidden", !isLocal);
+    if (imgTo3DModel) imgTo3DModel.classList.toggle("hidden", isLocal);
+    if (imgTo3DModelCustom) imgTo3DModelCustom.classList.add("hidden");
+  }
+  if (imgTo3DDeploy) {
+    imgTo3DDeploy.addEventListener("change", refreshTo3DControls);
+  }
+  if (imgTo3DModel) {
+    imgTo3DModel.addEventListener("change", () => {
+      const isCustom = imgTo3DModel.value === "__custom__";
+      if (imgTo3DModelCustom) imgTo3DModelCustom.classList.toggle("hidden", !isCustom);
+    });
+  }
+  refreshTo3DControls();
+
+  // 默认使用本地重建（离线、无需 Token）；如需云端，可在下拉框手动选择「Replicate 云端」
+
+  // 图片转 3D：上传图 → 服务端生成 GLB → 载入场景
+  async function imageTo3D() {
+    if (!uploadedImageDataUrl) {
+      showAIStatus("❌ 请先上传一张参考图（拖入或点击上方区域）", "error");
+      return;
+    }
+
+    const deploy = imgTo3DDeploy ? imgTo3DDeploy.value : "local";
+    const isLocal = deploy === "local";
+
+    if (imgTo3DBtn) {
+      imgTo3DBtn.disabled = true;
+      imgTo3DBtn.textContent = "⏳ 重建中...";
+    }
+    showAIStatus(
+      `<span class="ai-paint-spinner"></span>` +
+        (isLocal
+          ? "正在用本地 TripoSR 真重建 3D（单图重建，首次需下载模型权重，约 1-3 分钟）..."
+          : "正在用 Replicate 重建 3D 模型...（约 1-3 分钟，请耐心等待）"),
+      "info",
+    );
+
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.responseType = "arraybuffer";
+      xhr.timeout = 1200000; // 20 分钟（CPU 首跑含权重下载可能较慢）
+
+      const result = await new Promise((resolve, reject) => {
+        xhr.addEventListener("load", () => {
+          try {
+            if (xhr.status !== 200) {
+              const errText = new TextDecoder().decode(xhr.response);
+              let errMsg = `服务器错误 ${xhr.status}`;
+              try {
+                errMsg = JSON.parse(errText).error || errMsg;
+              } catch {}
+              reject(new Error(errMsg));
+              return;
+            }
+            const manifestBase64 = xhr.getResponseHeader("X-Manifest") || "";
+            let manifest = null;
+            if (manifestBase64) manifest = JSON.parse(base64ToUtf8(manifestBase64));
+            resolve({
+              arrayBuffer: xhr.response,
+              manifest,
+              totalParts: parseInt(xhr.getResponseHeader("X-Total-Parts") || "0", 10),
+            });
+          } catch (err) {
+            reject(err);
+          }
+        });
+        xhr.addEventListener("error", () =>
+          reject(new Error("网络错误：无法连接到服务器（请确认 server.js 已启动）")),
+        );
+        xhr.addEventListener("timeout", () => reject(new Error("请求超时（20分钟）")));
+
+        xhr.open("POST", `${BLENDER_SERVER_AI}/api/image-to-3d`);
+        xhr.setRequestHeader("Content-Type", "application/json");
+        // 部署方式 + 模型：本地走 TripoSR 真重建，云端走 Replicate（owner/name）
+        const payload = { image: uploadedImageDataUrl, deploy };
+        if (deploy === "local") {
+          const q = imgTo3DModelLocal ? imgTo3DModelLocal.value : "256";
+          payload.mcResolution = parseInt(q, 10) || 256; // 真重建：重建质量（marching cubes 分辨率）
+          payload.tiles = 1; // 真重建为单网格，不再切块
+        } else {
+          let m = imgTo3DModel ? imgTo3DModel.value : "";
+          if (m === "__custom__" && imgTo3DModelCustom) m = imgTo3DModelCustom.value.trim();
+          if (m) payload.model = m;
+        }
+        xhr.send(JSON.stringify(payload));
+      });
+
+      showAIStatus(`✅ 重建成功！正在加载到场景...`, "success");
+      await loadCustomModel(result.arrayBuffer, "图片转3D", result.manifest);
+      showAIStatus(
+        `✅ 图片转3D 已加载\n可旋转/缩放，可切换乐高/原生风格`,
+        "success",
+      );
+      showStatus(`✅ 图片转3D：模型已加载`, "success");
+    } catch (err) {
+      console.error("图片转3D 失败:", err);
+      showAIStatus(`❌ 重建失败：${err.message}`, "error");
+    } finally {
+      if (imgTo3DBtn) {
+        imgTo3DBtn.disabled = false;
+        imgTo3DBtn.textContent = "🧊 图片转3D";
+      }
+    }
   }
 
   // 发送 AI 绘画请求
@@ -3404,6 +3900,95 @@ if (themeToggle && uiOverlay) {
     }, 300);
   });
 }
+
+// ===== 乐高 / 原生 外观切换 =====
+const styleToggle = document.getElementById("style-toggle");
+if (styleToggle) {
+  let modelStyle = localStorage.getItem("quest3-model-style") || "native";
+  applyModelStyle(modelStyle);
+  styleToggle.textContent = modelStyle === "lego" ? "🧱 乐高风格" : "🛠️ 原生风格";
+  styleToggle.classList.toggle("lego", modelStyle === "lego");
+
+  styleToggle.addEventListener("click", () => {
+    modelStyle = modelStyle === "lego" ? "native" : "lego";
+    applyModelStyle(modelStyle);
+    localStorage.setItem("quest3-model-style", modelStyle);
+    styleToggle.textContent = modelStyle === "lego" ? "🧱 乐高风格" : "🛠️ 原生风格";
+    styleToggle.classList.toggle("lego", modelStyle === "lego");
+    styleToggle.style.transform = "rotate(360deg) scale(1.05)";
+    setTimeout(() => { styleToggle.style.transform = ""; }, 300);
+  });
+}
+
+// ===== Blender 状态检测 + 一键启动 =====
+const blenderStatusEl = document.getElementById("blender-status");
+const blenderBanner = document.getElementById("blender-banner");
+const blenderLaunchBtn = document.getElementById("blender-launch");
+const blenderDismissBtn = document.getElementById("blender-dismiss");
+
+// 依次尝试同源与独立后端端口，兼容两种部署方式
+async function fetchBlenderHealth() {
+  const candidates = [
+    location.origin + "/api/health",
+    `http://${location.hostname}:3001/api/health`,
+  ];
+  for (const u of candidates) {
+    try {
+      const r = await fetch(u, { method: "GET" });
+      if (r.ok) return await r.json();
+    } catch (_) {
+      /* 尝试下一个地址 */
+    }
+  }
+  return null; // 后端不可达
+}
+
+function updateBlenderUI(health) {
+  if (!blenderStatusEl) return;
+  if (!health || health.status !== "ok") {
+    blenderStatusEl.className = "blender-chip " + (health ? "error" : "unknown");
+    blenderStatusEl.textContent = health ? "❌ Blender 不可用" : "⚠️ 后端离线";
+    if (blenderBanner) {
+      // 仅当后端可达但 Blender 不可用时提示
+      blenderBanner.classList.toggle("hidden", !health);
+    }
+  } else {
+    blenderStatusEl.className = "blender-chip ok";
+    blenderStatusEl.textContent = `✅ Blender ${health.version || ""}`.trim();
+    if (blenderBanner) blenderBanner.classList.add("hidden");
+  }
+}
+
+async function launchBlender() {
+  if (blenderLaunchBtn) blenderLaunchBtn.disabled = true;
+  const candidates = [
+    location.origin + "/api/blender/launch",
+    `http://${location.hostname}:3001/api/blender/launch`,
+  ];
+  let ok = false;
+  for (const u of candidates) {
+    try {
+      const r = await fetch(u, { method: "POST" });
+      if (r.ok) { ok = true; break; }
+    } catch (_) {
+      /* 尝试下一个地址 */
+    }
+  }
+  if (blenderLaunchBtn) blenderLaunchBtn.disabled = false;
+  updateBlenderUI(await fetchBlenderHealth());
+  if (!ok && blenderBanner) {
+    const t = blenderBanner.querySelector(".bb-text");
+    if (t) t.textContent = "未能启动 Blender，请确认本机已安装 Blender 应用。";
+  }
+}
+
+if (blenderLaunchBtn) blenderLaunchBtn.addEventListener("click", launchBlender);
+if (blenderDismissBtn && blenderBanner) {
+  blenderDismissBtn.addEventListener("click", () => blenderBanner.classList.add("hidden"));
+}
+
+// 打开软件时检测 Blender 状态
+fetchBlenderHealth().then(updateBlenderUI);
 
 // ===== 步骤描述淡入动画 =====
 let lastStepDesc = "";

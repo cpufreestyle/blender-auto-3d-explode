@@ -67,6 +67,16 @@
             margin-bottom: 20px;
         }
         
+        .checkbox-inline {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #ccc;
+            cursor: pointer;
+        }
+        .checkbox-inline input { width: auto; }
+        
         label {
             display: block;
             margin-bottom: 8px;
@@ -273,6 +283,14 @@
                         <div class="provider-desc">GLM-5.2</div>
                     </label>
                 </div>
+                
+                <div class="radio-item">
+                    <input type="radio" name="provider" id="provider-kimi" value="kimi">
+                    <label for="provider-kimi">
+                        <div class="provider-name">Kimi</div>
+                        <div class="provider-desc">月之暗面 Moonshot</div>
+                    </label>
+                </div>
             </div>
         </div>
         
@@ -408,6 +426,83 @@
             </div>
         </div>
         
+        <!-- Kimi 配置 -->
+        <div id="config-kimi" class="card config-section hidden">
+            <div class="card-title">
+                <div class="icon">🌙</div>
+                Kimi 配置
+            </div>
+            
+            <div class="form-group">
+                <label>API Key</label>
+                <input type="password" id="kimi-key" placeholder="sk-...">
+                <p class="help-text">从 <a href="https://platform.moonshot.cn/" target="_blank">Moonshot 平台</a> 获取</p>
+            </div>
+            
+            <div class="form-group">
+                <label>模型</label>
+                <select id="kimi-model">
+                    <option value="moonshot-v1-8k" selected>moonshot-v1-8k</option>
+                    <option value="moonshot-v1-32k">moonshot-v1-32k</option>
+                    <option value="moonshot-v1-128k">moonshot-v1-128k</option>
+                </select>
+            </div>
+            
+            <div class="form-group checkbox-group">
+                <label class="checkbox-inline">
+                    <input type="checkbox" id="kimi-long-context">
+                    <span>🌙 长上下文（自动切到 128k 模型）</span>
+                </label>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-title">
+                <div class="icon">🧊</div>
+                图片转 3D
+            </div>
+            <p class="help-text">把上传图片重建为带贴图的 GLB。支持<strong>本地部署</strong>（默认，TripoSR 真重建，离线推理）与 <strong>Replicate 云端</strong>两种模式。</p>
+            <div class="form-group">
+                <label>部署方式</label>
+                <select id="replicate-mode" class="config-select">
+                    <option value="local">本地部署（TripoSR 真重建）</option>
+                    <option value="replicate">Replicate 云端</option>
+                </select>
+            </div>
+            <div id="replicate-local-fields" class="config-sub">
+                <p class="help-text">本地模式由 server.js 调用 <code>scripts/triposr_infer.py</code>（TripoSR 真重建）离线生成带体积的真·GLB，无需任何云端 API。首次需联网下载模型权重，请先运行 <code>bash scripts/setup_triposr.sh</code> 准备环境。</p>
+                <div class="form-group">
+                    <label>重建质量 (marching cubes 分辨率)</label>
+                    <input type="number" id="replicate-mc-resolution" value="256">
+                    <p class="help-text">越大越精细也越慢（建议 256–384，CPU 首跑较慢）</p>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="replicate-bake-texture"> 烘焙纹理图集 (bake-texture)</label>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="replicate-remove-bg"> 移除背景 (rembg)</label>
+                    <p class="help-text">勾选后用 rembg 自动抠图，效果更干净但依赖更重</p>
+                </div>
+            </div>
+            <div id="replicate-cloud-fields" class="config-sub hidden">
+                <div class="form-group">
+                    <label>API Token</label>
+                    <input type="password" id="replicate-token" placeholder="r8_...">
+                    <p class="help-text">从 <a href="https://replicate.com/account/api-tokens" target="_blank">Replicate API Tokens</a> 获取</p>
+                </div>
+                <div class="form-group">
+                    <label>模型 owner/name</label>
+                    <input type="text" id="replicate-owner-name" value="tencent/hunyuan3d-2" placeholder="tencent/hunyuan3d-2">
+                    <p class="help-text">格式：owner/name。例如 triposr、hunyuan3d-2 等</p>
+                </div>
+                <div class="form-group">
+                    <label>模型版本（可选）</label>
+                    <input type="text" id="replicate-version" placeholder="留空则用 owner/name">
+                    <p class="help-text">留空优先用上面的 owner/name；填入具体版本哈希则按版本调用</p>
+                </div>
+            </div>
+        </div>
+        
         <div class="card">
             <div class="card-title">
                 <div class="icon">🧪</div>
@@ -426,6 +521,10 @@
     </div>
     
     <script>
+        // 后端 API 地址（与 main.js 保持一致，指向 server.js 端口 3001）
+        // 因为页面可能从 8080 静态服务器打开，必须用绝对地址才能命中真正的 API 服务
+        const API_BASE = "http://localhost:3001";
+
         // 切换配置面板
         document.querySelectorAll('input[name="provider"]').forEach(radio => {
             radio.addEventListener('change', (e) => {
@@ -435,11 +534,30 @@
                 document.getElementById(`config-${e.target.value}`).classList.remove('hidden');
             });
         });
+
+        // 图片转3D 部署方式切换（本地/云端）
+        const repModeSel = document.getElementById('replicate-mode');
+        if (repModeSel) {
+            repModeSel.addEventListener('change', (e) => {
+                const local = e.target.value === 'local';
+                document.getElementById('replicate-local-fields').classList.toggle('hidden', !local);
+                document.getElementById('replicate-cloud-fields').classList.toggle('hidden', local);
+            });
+        }
+        
+        // Kimi 长上下文开关：勾选时自动切到 128k 模型，取消时回到 8k
+        const kimiLongCtx = document.getElementById('kimi-long-context');
+        const kimiModelSel = document.getElementById('kimi-model');
+        if (kimiLongCtx && kimiModelSel) {
+            kimiLongCtx.addEventListener('change', (e) => {
+                kimiModelSel.value = e.target.checked ? 'moonshot-v1-128k' : 'moonshot-v1-8k';
+            });
+        }
         
         // 加载保存的配置
         async function loadConfig() {
             try {
-                const response = await fetch('/api/ai-config');
+                const response = await fetch(`${API_BASE}/api/ai-config`);
                 const config = await response.json();
                 
                 if (config.provider) {
@@ -471,6 +589,25 @@
                         document.getElementById('nvidia-base_url').value = config.nvidia.base_url || 'https://integrate.api.nvidia.com/v1';
                         document.getElementById('nvidia-key').value = config.nvidia.key || '';
                         document.getElementById('nvidia-model').value = config.nvidia.model || 'z-ai/glm-5.2';
+                    }
+                    if (config.kimi) {
+                        document.getElementById('kimi-key').value = config.kimi.key || '';
+                        document.getElementById('kimi-model').value = config.kimi.model || 'moonshot-v1-8k';
+                        document.getElementById('kimi-long-context').checked = Boolean(config.kimi.longContext);
+                    }
+                    if (config.replicate) {
+                        const r = config.replicate;
+                        const modeSel = document.getElementById('replicate-mode');
+                        if (modeSel) modeSel.value = r.mode || 'local';
+                        document.getElementById('replicate-mc-resolution').value = r.mcResolution ?? 256;
+                        document.getElementById('replicate-bake-texture').checked = Boolean(r.bakeTexture);
+                        document.getElementById('replicate-remove-bg').checked = Boolean(r.removeBg);
+                        document.getElementById('replicate-token').value = r.token || '';
+                        document.getElementById('replicate-owner-name').value =
+                            (r.owner || 'tencent') + '/' + (r.name || 'hunyuan3d-2');
+                        document.getElementById('replicate-version').value = r.modelVersion || '';
+                        const ev = document.getElementById('replicate-mode');
+                        if (ev) ev.dispatchEvent(new Event('change'));
                     }
                 }
             } catch (err) {
@@ -508,11 +645,27 @@
                     base_url: document.getElementById('nvidia-base_url').value,
                     key: document.getElementById('nvidia-key').value,
                     model: document.getElementById('nvidia-model').value
+                },
+                kimi: {
+                    key: document.getElementById('kimi-key').value,
+                    model: document.getElementById('kimi-model').value,
+                    longContext: document.getElementById('kimi-long-context').checked
+                },
+                replicate: {
+                    mode: document.getElementById('replicate-mode').value,
+                    mcResolution: Number(document.getElementById('replicate-mc-resolution').value) || 256,
+                    bakeTexture: document.getElementById('replicate-bake-texture').checked,
+                    removeBg: document.getElementById('replicate-remove-bg').checked,
+                    device: 'auto',
+                    token: document.getElementById('replicate-token').value,
+                    owner: (document.getElementById('replicate-owner-name').value.split('/')[0] || 'tencent').trim(),
+                    name: (document.getElementById('replicate-owner-name').value.split('/')[1] || 'hunyuan3d-2').trim(),
+                    modelVersion: document.getElementById('replicate-version').value
                 }
             };
             
             try {
-                const response = await fetch('/api/ai-config', {
+                const response = await fetch(`${API_BASE}/api/ai-config`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(config)
@@ -520,8 +673,14 @@
                 
                 const result = await response.json();
                 if (result.success) {
-                    // 保存成功后刷新页面
-                    window.location.href = window.location.pathname + '?saved=true';
+                    if (window.self !== window.top) {
+                        // 在首次使用引导弹窗（iframe）中：通知父页面关闭弹窗
+                        showStatus('配置已保存 ✅，可关闭窗口', true);
+                        window.parent.postMessage({ type: 'config-saved' }, '*');
+                    } else {
+                        // 保存成功后刷新页面
+                        window.location.href = window.location.pathname + '?saved=true';
+                    }
                 } else {
                     showStatus('保存失败: ' + result.error, false);
                 }
@@ -537,7 +696,7 @@
             resultDiv.textContent = '测试中...';
             
             try {
-                const response = await fetch('/api/ai-test', {
+                const response = await fetch(`${API_BASE}/api/ai-test`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ prompt: 'Hello, are you working?' })

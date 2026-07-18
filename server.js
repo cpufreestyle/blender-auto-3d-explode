@@ -19,7 +19,8 @@
  */
 
 import http from "http";
-import { execFile } from "child_process";
+import net from "net";
+import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
 import {
@@ -41,9 +42,15 @@ const PORT = process.env.PORT || 3001;
 // ── 配置 ──────────────────────────────────────────────
 const BLENDER_PATH = process.env.BLENDER_PATH || findBlender();
 const UPLOAD_DIR = path.join(os.tmpdir(), "blender-split-uploads");
+const GENERATED_DIR = path.join(__dirname, "models", "generated");
+
+// Blender MCP addon（scripts/blender_mcp_addon.py）监听的 TCP 端口
+const BLENDER_MCP_HOST = process.env.BLENDERMCP_HOST || "localhost";
+const BLENDER_MCP_PORT = Number(process.env.BLENDERMCP_PORT || 9876);
 
 // 确保上传目录存在
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+fs.mkdirSync(GENERATED_DIR, { recursive: true });
 
 // 启动时清理残留临时文件
 cleanupOldTempFiles(UPLOAD_DIR, fs, path);
@@ -111,6 +118,7 @@ function findBlender() {
 async function runBlenderAIPaint(prompt, outputPath, manifestPath, imageFeaturesPath) {
   const scriptPath = path.join(__dirname, "blender_ai_paint.py");
   const args = [
+    "--factory-startup",
     "--background",
     "--python",
     scriptPath,
@@ -144,6 +152,7 @@ async function runBlenderAIPaint(prompt, outputPath, manifestPath, imageFeatures
 async function runBlenderSplit(inputPath, outputPath, manifestPath, originalFileName) {
   const scriptPath = path.join(__dirname, "blender_split_glb.py");
   const args = [
+    "--factory-startup",
     "--background",
     "--python",
     scriptPath,
@@ -245,7 +254,7 @@ function sendJSON(res, statusCode, data) {
  * 改进：GLB 以二进制流返回，manifest 通过自定义头传递
  * 节省 33% 带宽（不再 base64 编码）
  */
-function sendBinaryResult(res, glbBuffer, manifest, elapsed) {
+function sendBinaryResult(res, glbBuffer, manifest, elapsed, baseName) {
   const manifestJson = JSON.stringify(manifest);
   const manifestBase64 = Buffer.from(manifestJson, "utf-8").toString("base64");
 
@@ -259,6 +268,129 @@ function sendBinaryResult(res, glbBuffer, manifest, elapsed) {
     "X-Manifest": manifestBase64,
   });
   res.end(glbBuffer);
+
+  // 生成完成后：把模型存盘，并按需自动用 Blender GUI 打开显示
+  try {
+    const saved = saveGeneratedModel(glbBuffer, baseName || "model");
+    if (shouldOpenInBlender()) openInBlender(saved);
+  } catch (e) {
+    console.warn(`  ⚠️ 模型存盘/在 Blender 中打开失败: ${e.message}`);
+  }
+}
+
+/**
+ * 是否自动用 Blender GUI 打开生成的三维模型。
+ * 默认开启；可用环境变量 OPEN_IN_BLENDER=0 临时关闭（如自动化测试）。
+ */
+function shouldOpenInBlender() {
+  if (process.env.OPEN_IN_BLENDER === "0") return false;
+  return AI_CONFIG.openInBlender !== false;
+}
+
+/**
+ * 把生成的 GLB 存盘到 models/generated/，返回文件路径
+ */
+function saveGeneratedModel(glbBuffer, baseName) {
+  fs.mkdirSync(GENERATED_DIR, { recursive: true });
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const fileName = `${baseName}-${ts}.glb`;
+  const outPath = path.join(GENERATED_DIR, fileName);
+  fs.writeFileSync(outPath, glbBuffer);
+  console.log(`  💾 模型已存盘: ${outPath}`);
+  return outPath;
+}
+
+/**
+ * 记录上一个被打开的 Blender GUI 进程，用于「打开新窗口后自动关闭旧窗口」。
+ */
+let lastBlenderChild = null;
+
+/**
+ * 用 Blender GUI 打开指定 GLB（fire-and-forget，不阻塞响应）
+ * 每次调用都会拉起一个新的 Blender 窗口；新窗口就绪后，自动关闭上一个窗口。
+ */
+function openInBlender(glbPath) {
+  const platform = os.platform();
+  // 写一个「导入 + 框选」脚本，并单独把 GLB 路径写入临时文件，
+  // 避免路径含空格/特殊字符导致命令行解析问题。
+  // 注意：不能用 `open -a Blender file.glb`，macOS 会把它当文档交给 Blender，
+  // 触发「格式不支持」。必须显式 import_scene.gltf。
+  const pathFile = path.join(UPLOAD_DIR, `open_path-${Date.now()}.txt`);
+  fs.writeFileSync(pathFile, glbPath);
+  const importerPath = path.join(UPLOAD_DIR, `open_importer-${Date.now()}.py`);
+  const importer = [
+    "import bpy",
+    "pf = r'" + pathFile + "'",
+    "with open(pf, 'r', encoding='utf-8') as f:",
+    "    fp = f.read().strip()",
+    "# 清场（移除默认立方体等）",
+    "for o in list(bpy.data.objects):",
+    "    bpy.data.objects.remove(o, do_unlink=True)",
+    "bpy.ops.import_scene.gltf(filepath=fp)",
+    "# 框选所有物体（仅在有 3D 视口时）",
+    "for area in (bpy.context.screen.areas if getattr(bpy.context, 'screen', None) else []):",
+    "    if area.type == 'VIEW_3D':",
+    "        for region in area.regions:",
+    "            if region.type == 'WINDOW':",
+    "                ctx = bpy.context.copy()",
+    "                ctx['area'] = area",
+    "                ctx['region'] = region",
+    "                try:",
+    "                    bpy.ops.view3d.view_all(ctx)",
+    "                except Exception:",
+    "                    pass",
+    "                break",
+  ].join("\n");
+  fs.writeFileSync(importerPath, importer);
+
+  let cmd, args;
+  if (platform === "darwin") {
+    // 直接启动 GUI Blender 二进制并传 --python，确保每次生成都拉起新实例并正确导入
+    cmd = BLENDER_PATH;
+    args = ["--python", importerPath];
+  } else {
+    cmd = "blender";
+    args = ["--python", importerPath];
+  }
+
+  // 记录旧窗口进程，待新窗口拉起并加载完成后自动关闭
+  const prevChild = lastBlenderChild;
+  lastBlenderChild = null;
+
+  const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
+  child.unref();
+  lastBlenderChild = child;
+
+  // macOS：把 Blender 窗口提到最前，确保用户能看到
+  if (platform === "darwin") {
+    let appName = "Blender";
+    const mm = BLENDER_PATH && BLENDER_PATH.match(/(.+?\.app)\/Contents\/MacOS\/Blender$/);
+    if (mm) appName = mm[1];
+    try { spawn("open", ["-a", appName], { detached: true, stdio: "ignore" }).unref(); } catch {}
+  }
+
+  // 新窗口已拉起；稍等 GUI 完成加载后再关闭旧窗口，避免画面空白闪烁
+  if (prevChild) {
+    const prevPid = prevChild.pid;
+    setTimeout(() => {
+      try {
+        prevChild.kill("SIGTERM");
+      } catch {
+        /* 进程可能已自行退出 */
+      }
+      // 兜底：若 SIGTERM 后仍未退出，3 秒后强制结束
+      setTimeout(() => {
+        try { process.kill(prevPid, "SIGKILL"); } catch {}
+      }, 3000);
+    }, 4000);
+  }
+
+  // Blender 读完脚本后清理临时文件
+  setTimeout(() => {
+    try { fs.unlinkSync(importerPath); } catch {}
+    try { fs.unlinkSync(pathFile); } catch {}
+  }, 15000);
+  console.log(`  🪟 已在 Blender 中打开模型: ${glbPath}` + (prevChild ? "（旧窗口将自动关闭）" : ""));
 }
 
 // ── 路由处理 ──────────────────────────────────────────
@@ -336,7 +468,7 @@ async function handleAIPaint(req, res) {
       );
 
       // 6. 返回二进制 GLB + manifest 头
-      sendBinaryResult(res, outputBuffer, manifest, elapsed);
+      sendBinaryResult(res, outputBuffer, manifest, elapsed, "ai-paint");
     } finally {
       // 清理临时文件
       [outputPath, manifestPath].forEach(f => {
@@ -358,6 +490,281 @@ async function handleAIPaint(req, res) {
 }
 
 /**
+ * 读取较大的 JSON 请求体（图片转 3D 需要传 base64 图片，默认 10KB 不够）
+ */
+function readJSONBodyMax(req, maxSize) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    req.on("data", chunk => {
+      total += chunk.length;
+      if (total > maxSize) {
+        reject(new Error("请求体太大"));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf-8")));
+      } catch (err) {
+        reject(new Error("JSON 解析失败: " + err.message));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+const REPLICATE_BASE = "https://api.replicate.com/v1";
+
+/**
+ * POST /api/image-to-3d
+ * Body: { "image": "data:image/png;base64,....", "deploy": "local"|"replicate", "model": "..." }
+ * 本地模式：POST {localUrl}/generate → 响应直接返回 GLB 二进制（无需轮询）
+ * 云端模式：上传 Replicate → 创建预测 → 轮询 → 下载 GLB
+ * 返回：二进制 GLB + manifest 头（同 /api/split 格式）
+ */
+async function handleImageTo3D(req, res) {
+  const startTime = Date.now();
+  try {
+    const body = await readJSONBodyMax(req, 25 * 1024 * 1024); // 25MB
+    const imageDataUrl = body.image;
+    if (!imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
+      sendJSON(res, 400, { error: "缺少有效的图片数据（image 字段应为 data URL）" });
+      return;
+    }
+
+    const rep = AI_CONFIG.replicate || {};
+    const mode = body.deploy || rep.mode || "local";
+
+    const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/.exec(imageDataUrl);
+    if (!match) {
+      sendJSON(res, 400, { error: "图片 data URL 格式错误" });
+      return;
+    }
+    const imageBase64 = match[2]; // 不含 data: 前缀的纯 base64
+
+    // 本地部署模式：调用本地 TripoSR 真重建（scripts/triposr_infer.py）由图片生成真·GLB
+    if (mode === "local") {
+      try {
+        await runLocalImageTo3D(rep, body, imageBase64, res, startTime);
+        return;
+      } catch (localErr) {
+        // 已配置 Replicate Token 时，本地服务不可用则自动回退云端，提升易用性
+        if (rep.token) {
+          console.warn(`  ⚠️ 本地图像转3D服务不可用，自动回退到 Replicate 云端: ${localErr.message}`);
+          // 继续走下方云端逻辑
+        } else {
+          throw localErr;
+        }
+      }
+    }
+
+    // 云端 Replicate 模式
+    const token = rep.token;
+    if (!token) {
+      sendJSON(res, 400, {
+        error:
+          "图片转3D 失败：未配置 Replicate Token。请先在 ai-config.html 填写 Replicate API Token（及模型 owner/name），" +
+          "并在下拉框选择「Replicate 云端」；或运行 `bash scripts/setup_triposr.sh` 准备本地 TripoSR 真重建环境。",
+      });
+      return;
+    }
+    const imageBytes = Buffer.from(imageBase64, "base64");
+    const auth = { Authorization: `Bearer ${token}` };
+    const mime = match[1];
+
+    // 1. 上传图片到 Replicate 文件服务，换取可访问 URL
+    //    注意：Replicate /v1/files 要求 multipart/form-data，文件字段名为 "content"
+    console.log(`  ☁️ 图片转3D: 上传图片到 Replicate (${(imageBytes.length / 1024).toFixed(1)} KB)`);
+    const form = new FormData();
+    form.append("content", new Blob([imageBytes], { type: mime }), "image.png");
+    const uploadRes = await fetch(`${REPLICATE_BASE}/files`, {
+      method: "POST",
+      headers: auth, // 不手动设 Content-Type，由 fetch 自动附加 multipart boundary
+      body: form,
+    });
+    if (!uploadRes.ok) {
+      const t = await uploadRes.text();
+      throw new Error(`Replicate 文件上传失败 ${uploadRes.status}: ${t.slice(0, 500)}`);
+    }
+    const uploadJson = await uploadRes.json();
+    const fileUrl = uploadJson?.urls?.get;
+    if (!fileUrl) throw new Error("Replicate 未返回文件 URL");
+
+    // 2. 创建预测任务（请求体里的 model 可临时覆盖配置；优先用 modelVersion，否则自动解析模型最新版本）
+    //    注意：Replicate 已弃用 /models/{owner}/{name}/predictions 路由，创建预测必须用 /v1/predictions + version
+    //    仅当显式选择「云端」模式时，才使用 body.model 作为云端模型；
+    //    本地模式回退到云端时，body.model 是本地生成方式（relief/voxel 等），不能当作 Replicate 模型名
+    const reqModel = mode === "replicate" ? body.model : undefined;
+    const [reqOwner, reqName] = reqModel ? reqModel.split("/") : [];
+    const owner = reqOwner || rep.owner || "tencent";
+    const name = reqName || rep.name || "hunyuan3d-2";
+    let version = body.modelVersion || rep.modelVersion;
+    if (!version) {
+      const mRes = await fetch(`${REPLICATE_BASE}/models/${owner}/${name}`, { headers: auth });
+      if (!mRes.ok) {
+        const t = await mRes.text();
+        throw new Error(`获取模型 ${owner}/${name} 版本失败 ${mRes.status}: ${t.slice(0, 300)}`);
+      }
+      const mJson = await mRes.json();
+      version = mJson?.latest_version?.id;
+      if (!version) throw new Error(`模型 ${owner}/${name} 未找到可用版本`);
+    }
+    const predUrl = `${REPLICATE_BASE}/predictions`;
+    const predBody = { version, input: { image: fileUrl } };
+    console.log(`  🚀 图片转3D: 创建 Replicate 预测 ${owner}/${name}`);
+    const predRes = await fetch(predUrl, {
+      method: "POST",
+      headers: { ...auth, "Content-Type": "application/json" },
+      body: JSON.stringify(predBody),
+    });
+    if (!predRes.ok) {
+      const t = await predRes.text();
+      // 余额不足（402）：给出中文指引，避免暴露原始英文报错
+      if (predRes.status === 402) {
+        throw new Error(
+          "Replicate 余额不足：请到 https://replicate.com/account/billing 绑定支付方式并充值，" +
+            "等待几分钟后重试。当前图片转3D功能需要在 Replicate 上消耗额度。"
+        );
+      }
+      throw new Error(`Replicate 预测创建失败 ${predRes.status}: ${t.slice(0, 500)}`);
+    }
+    const pred = await predRes.json();
+    const predId = pred.id;
+    if (!predId) throw new Error("Replicate 未返回预测 ID");
+
+    // 3. 轮询任务状态（最长 8 分钟）
+    let result = pred;
+    const deadline = Date.now() + 8 * 60 * 1000;
+    while (result.status !== "succeeded" && result.status !== "failed" && result.status !== "canceled") {
+      if (Date.now() > deadline) throw new Error("Replicate 任务超时（8 分钟）");
+      await new Promise(r => setTimeout(r, 4000));
+      const pr = await fetch(`${REPLICATE_BASE}/predictions/${predId}`, { headers: auth });
+      if (!pr.ok) throw new Error(`Replicate 状态查询失败 ${pr.status}`);
+      result = await pr.json();
+    }
+    if (result.status !== "succeeded") {
+      const detail = result.error ? " - " + JSON.stringify(result.error) : "";
+      throw new Error(`Replicate 任务失败: ${result.status}${detail}`);
+    }
+
+    // 4. 解析输出（TripoSR 返回单个 glb 文件 URL；兼容数组/对象）
+    const out = result.output;
+    let glbUrl = null;
+    if (typeof out === "string") glbUrl = out;
+    else if (Array.isArray(out)) glbUrl = typeof out[0] === "string" ? out[0] : out[0]?.url;
+    else if (out && typeof out === "object") glbUrl = out.url || out.mesh || out.model;
+    if (!glbUrl) throw new Error("Replicate 输出中未找到 GLB 文件 URL");
+
+    // 5. 下载 GLB
+    console.log("  ⬇️ 图片转3D: 下载生成的 GLB...");
+    const glbRes = await fetch(glbUrl);
+    if (!glbRes.ok) throw new Error(`GLB 下载失败 ${glbRes.status}`);
+    const glbBuffer = Buffer.from(await glbRes.arrayBuffer());
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    const manifest = { total_parts: 0, parts: [] };
+    console.log(`  ✅ 图片转3D 完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
+    sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
+  } catch (err) {
+    console.error(`  ❌ 图片转3D 失败: ${err.message}`);
+    sendJSON(res, 500, { success: false, error: err.message });
+  }
+}
+
+/**
+ * 本地部署图像转3D（TripoSR 真重建，离线推理）
+ * 把 base64 图片写成临时 PNG，调用 scripts/triposr_infer.py（TripoSR 虚拟环境 python）
+ * 生成真正的 3D 网格 GLB（有体积/背面），返回二进制结果。
+ */
+async function runLocalImageTo3D(rep, body, imageBase64, res, startTime) {
+  const jobId = `img3d-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const imgPath = path.join(UPLOAD_DIR, `img3d-${jobId}.png`);
+  const outputPath = path.join(UPLOAD_DIR, `img3d-${jobId}.glb`);
+  const manifestPath = path.join(UPLOAD_DIR, `img3d-${jobId}.json`);
+
+  fs.writeFileSync(imgPath, Buffer.from(imageBase64, "base64"));
+
+  // 定位 TripoSR 仓库与它的虚拟环境 python（由 scripts/setup_triposr.sh 创建）
+  const triposrDir = process.env.TRIPOSR_DIR || path.join(__dirname, "external", "TripoSR");
+  const venvPython = path.join(triposrDir, ".venv", "bin", "python3");
+  const inferScript = path.join(__dirname, "scripts", "triposr_infer.py");
+
+  if (!fs.existsSync(venvPython)) {
+    throw new Error(
+      "本地真重建环境未就绪：未找到 TripoSR 虚拟环境（" + venvPython + "）。\n" +
+      "请先运行：bash scripts/setup_triposr.sh"
+    );
+  }
+  if (!fs.existsSync(inferScript)) {
+    throw new Error("未找到推理脚本: " + inferScript);
+  }
+
+  const mcResolution = body.mcResolution ?? rep.mcResolution ?? 256;
+  const bakeTexture = body.bakeTexture ?? rep.bakeTexture ?? false;
+  const removeBg = body.removeBg ?? rep.removeBg ?? false;
+  const device = body.device ?? rep.device ?? "auto";
+  const textureResolution = body.textureResolution ?? rep.textureResolution ?? 2048;
+  const chunkSize = body.chunkSize ?? rep.chunkSize ?? 8192;
+
+  const args = [
+    inferScript,
+    "--image", imgPath,
+    "--output", outputPath,
+    "--manifest", manifestPath,
+    "--device", device,
+    "--mc-resolution", String(mcResolution),
+    "--texture-resolution", String(textureResolution),
+    "--chunk-size", String(chunkSize),
+    "--triposr-dir", triposrDir,
+  ];
+  if (bakeTexture) args.push("--bake-texture");
+  if (removeBg) args.push("--remove-bg");
+
+  console.log(`  🧊 图片转3D: 本地 TripoSR 真重建 ${inferScript} (mc=${mcResolution}, bake=${bakeTexture}, device=${device})`);
+  let stdout = "";
+  let stderr = "";
+  try {
+    const r = await execFileAsync(venvPython, args, {
+      timeout: 900_000, // 单图真重建在 CPU 上需数分钟（含首次权重下载），放宽到 15 分钟
+      maxBuffer: 200 * 1024 * 1024,
+    });
+    stdout = r.stdout || "";
+    stderr = r.stderr || "";
+  } catch (berr) {
+    throw new Error(`TripoSR 推理失败: ${(berr.stderr || berr.stdout || berr.message || "").slice(0, 2000)}`);
+  }
+  if (stdout) console.log(`  📤 TripoSR stdout:\n${stdout.slice(0, 2000)}`);
+  if (stderr) console.log(`  📤 TripoSR stderr:\n${stderr.slice(0, 2000)}`);
+
+  if (!fs.existsSync(outputPath)) {
+    throw new Error(
+      `本地真实重建未生成 GLB 文件。请确认 TripoSR 环境已就绪（bash scripts/setup_triposr.sh）。` +
+      `TripoSR stderr: ${stderr.slice(0, 800)}`
+    );
+  }
+
+  const glbBuffer = fs.readFileSync(outputPath);
+  let manifest = { total_parts: 0, parts: [] };
+  if (fs.existsSync(manifestPath)) {
+    try {
+      manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+    } catch { /* 用默认 manifest */ }
+  }
+
+  // 清理临时文件
+  [imgPath, outputPath, manifestPath].forEach(f => {
+    try { fs.unlinkSync(f); } catch { /* ignore */ }
+  });
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+  console.log(`  ✅ 图片转3D（本地·真重建）完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
+  sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
+}
+
+/**
  * AI 配置存储
  */
 let AI_CONFIG = {
@@ -367,14 +774,45 @@ let AI_CONFIG = {
   ollama: { url: 'http://localhost:11434', model: 'codellama' },
   lmstudio: { url: 'http://localhost:1234/v1', model: '' },
   stepfun: { key: '', model: 'step-3.5-flash' },
-  nvidia: { key: '', model: 'z-ai/glm-5.2', base_url: 'https://integrate.api.nvidia.com/v1' }
+  nvidia: { key: '', model: 'z-ai/glm-5.2', base_url: 'https://integrate.api.nvidia.com/v1' },
+  // Kimi（月之暗面 / Moonshot AI）— OpenAI 兼容接口
+  kimi: { key: '', model: 'moonshot-v1-8k', longContext: false },
+  // 生成的三维模型完成后是否自动用 Blender GUI 打开显示（默认开启）
+  openInBlender: true,
+  // 图片转 3D：mode=local 调用本地 TripoSR 真重建（scripts/triposr_infer.py，离线推理，需先 bash scripts/setup_triposr.sh）；
+  //          mode=replicate 走 Replicate 云端（token/owner/name/modelVersion）
+  replicate: {
+    mode: 'local',
+    // 本地真重建（TripoSR）参数
+    mcResolution: 256,
+    bakeTexture: false,
+    removeBg: false,
+    device: 'auto',
+    textureResolution: 2048,
+    token: '',
+    owner: 'tencent',
+    name: 'hunyuan3d-2',
+    modelVersion: ''
+  }
 };
 
-// 加载保存的配置
+// 加载保存的配置（与默认值深度合并，避免缺字段导致崩溃）
 const CONFIG_FILE = path.join(__dirname, 'ai-config.json');
 try {
   if (fs.existsSync(CONFIG_FILE)) {
-    AI_CONFIG = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+    const loaded = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+    AI_CONFIG = {
+      ...AI_CONFIG,
+      ...loaded,
+      openai: { ...AI_CONFIG.openai, ...(loaded.openai || {}) },
+      anthropic: { ...AI_CONFIG.anthropic, ...(loaded.anthropic || {}) },
+      ollama: { ...AI_CONFIG.ollama, ...(loaded.ollama || {}) },
+      lmstudio: { ...AI_CONFIG.lmstudio, ...(loaded.lmstudio || {}) },
+      stepfun: { ...AI_CONFIG.stepfun, ...(loaded.stepfun || {}) },
+      nvidia: { ...AI_CONFIG.nvidia, ...(loaded.nvidia || {}) },
+      kimi: { ...AI_CONFIG.kimi, ...(loaded.kimi || {}) },
+      replicate: { ...AI_CONFIG.replicate, ...(loaded.replicate || {}) },
+    };
     console.log('  ✅ AI 配置已加载');
   }
 } catch (err) {
@@ -387,13 +825,30 @@ try {
 function handleAIConfigGet(req, res) {
   // 返回配置（隐藏 API Key）
   const safeConfig = {
+    // 是否已保存过配置文件：用于前端判断「首次使用」引导
+    saved: fs.existsSync(CONFIG_FILE),
+    // 是否已配置 Replicate Token（不泄露明文，仅供前端决定默认部署方式）
+    replicateConfigured: Boolean(AI_CONFIG.replicate && AI_CONFIG.replicate.token),
     provider: AI_CONFIG.provider,
     openai: { ...AI_CONFIG.openai, key: AI_CONFIG.openai.key ? '***' : '' },
     anthropic: { ...AI_CONFIG.anthropic, key: AI_CONFIG.anthropic.key ? '***' : '' },
     ollama: AI_CONFIG.ollama,
     lmstudio: AI_CONFIG.lmstudio,
     stepfun: { ...AI_CONFIG.stepfun, key: AI_CONFIG.stepfun.key ? '***' : '' },
-    nvidia: { ...AI_CONFIG.nvidia, key: AI_CONFIG.nvidia.key ? '***' : '' }
+    nvidia: { ...AI_CONFIG.nvidia, key: AI_CONFIG.nvidia.key ? '***' : '' },
+    kimi: { ...AI_CONFIG.kimi, key: AI_CONFIG.kimi.key ? '***' : '' },
+    replicate: {
+      mode: AI_CONFIG.replicate?.mode || 'local',
+      mcResolution: AI_CONFIG.replicate?.mcResolution ?? 256,
+      bakeTexture: AI_CONFIG.replicate?.bakeTexture ?? false,
+      removeBg: AI_CONFIG.replicate?.removeBg ?? false,
+      device: AI_CONFIG.replicate?.device || 'auto',
+      token: (AI_CONFIG.replicate?.token) ? '***' : '',
+      owner: AI_CONFIG.replicate?.owner || 'tencent',
+      name: AI_CONFIG.replicate?.name || 'hunyuan3d-2',
+      modelVersion: AI_CONFIG.replicate?.modelVersion || '',
+    },
+    openInBlender: AI_CONFIG.openInBlender !== false,
   };
   sendJSON(res, 200, safeConfig);
 }
@@ -416,6 +871,20 @@ function handleAIConfigPost(req, res) {
       }
       if (config.nvidia && !config.nvidia.key) {
         config.nvidia.key = AI_CONFIG.nvidia.key;
+      }
+      // 保留现有的 Kimi Token（脱敏值 '***' 或空都视为未修改）
+      if (config.kimi) {
+        const existingKimi = (AI_CONFIG.kimi || {}).key || '';
+        if (!config.kimi.key || config.kimi.key === '***') {
+          config.kimi.key = existingKimi;
+        }
+      }
+      // 保留现有的 Replicate Token（脱敏值 '***' 或空都视为未修改）
+      if (config.replicate) {
+        const existing = (AI_CONFIG.replicate || {}).token || '';
+        if (!config.replicate.token || config.replicate.token === '***') {
+          config.replicate.token = existing;
+        }
       }
       
       AI_CONFIG = { ...AI_CONFIG, ...config };
@@ -463,6 +932,11 @@ async function callAI(prompt) {
       url: AI_CONFIG.nvidia.base_url || 'https://integrate.api.nvidia.com/v1',
       label: 'NVIDIA',
       systemPrompt: '你是一个乐高积木模型专家。根据用户的描述，用标准的乐高砖块拼接出模型。返回 JSON 格式：{ "bricks": [{ "name": "名称", "type": "2x4|2x2|1x2", "position": [x,y,z], "rotation": 0|90|180|270, "color": "red|blue|green" }] }',
+    },
+    kimi: {
+      cfg: AI_CONFIG.kimi,
+      url: 'https://api.moonshot.cn/v1',
+      label: 'Kimi',
     },
   };
 
@@ -603,6 +1077,75 @@ async function handleHealth(req, res) {
 }
 
 /**
+ * 列出 models/generated/ 下已生成的模型（最新在前），供前端「从生成库加载」
+ */
+async function handleGeneratedList(req, res) {
+  try {
+    const entries = fs.readdirSync(GENERATED_DIR, { withFileTypes: true });
+    const files = entries
+      .filter(e => e.isFile() && /\.(glb|gltf|stl)$/i.test(e.name))
+      .map(e => {
+        const full = path.join(GENERATED_DIR, e.name);
+        const stat = fs.statSync(full);
+        return {
+          name: e.name,
+          url: `/models/generated/${encodeURIComponent(e.name)}`,
+          size: stat.size,
+          mtime: stat.mtimeMs,
+        };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+    sendJSON(res, 200, { success: true, files });
+  } catch (err) {
+    sendJSON(res, 500, { success: false, error: err.message });
+  }
+}
+
+/**
+ * 在本机启动 Blender 应用程序（GUI），用于「一键启动」功能。
+ * 仅负责打开应用，不改变 BLENDER_PATH 检测逻辑。
+ */
+function launchBlenderApp() {
+  const platform = os.platform();
+  let cmd, args;
+  if (platform === "darwin") {
+    cmd = "open";
+    args = ["-a", "Blender"];
+  } else if (platform === "win32") {
+    cmd = "cmd";
+    args = ["/c", "start", "", "blender"];
+  } else {
+    // Linux：后台启动 blender GUI
+    cmd = "blender";
+    args = [];
+  }
+  const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
+  child.unref();
+  return true;
+}
+
+/**
+ * 一键启动 Blender：打开应用并重新检测可用性
+ */
+async function handleLaunchBlender(req, res) {
+  try {
+    launchBlenderApp();
+    // 启动后重新检测 Blender CLI 是否可用（GUI 打开不影响 CLI 检测，此处仅做状态反馈）
+    let health = null;
+    try {
+      const { stdout } = await execFileAsync(BLENDER_PATH, ["--version"], { timeout: 10_000 });
+      const version = stdout.match(/Blender ([\d.]+)/)?.[1] || "unknown";
+      health = { status: "ok", blender: BLENDER_PATH, version };
+    } catch {
+      health = { status: "error", blender: BLENDER_PATH };
+    }
+    sendJSON(res, 200, { launched: true, health });
+  } catch (err) {
+    sendJSON(res, 500, { launched: false, error: err.message });
+  }
+}
+
+/**
  * 拆解 GLB
  * 修复：blenderStdout/blenderStderr 提到 try 外层，catch 可访问
  */
@@ -673,7 +1216,7 @@ async function handleSplit(req, res) {
       console.log(`  ✅ 拆解完成: ${manifest.total_parts} 个部件 (${elapsed}s)`);
 
       // 7. 返回二进制 GLB + manifest 头（不再 base64 编码）
-      sendBinaryResult(res, outputBuffer, manifest, elapsed);
+      sendBinaryResult(res, outputBuffer, manifest, elapsed, "split");
     } finally {
       // 清理临时文件
       [inputPath, outputPath, manifestPath].forEach(f => {
@@ -694,6 +1237,102 @@ async function handleSplit(req, res) {
   }
 }
 
+// ── Blender MCP addon 客户端（TCP，行分隔 JSON）────────
+
+/**
+ * 向 Blender MCP addon 发送单条命令并返回解析后的 JSON 结果。
+ * addon 对每条命令回复一个完整 JSON。
+ * @param {string} type   命令类型（如 get_assembly_sequence）
+ * @param {object} params 命令参数
+ * @param {number} timeoutMs 超时（默认 15s）
+ * @returns {Promise<object>} addon 的 result 字段
+ */
+function callBlenderMcp(type, params = {}, timeoutMs = 15_000) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(
+      { host: BLENDER_MCP_HOST, port: BLENDER_MCP_PORT },
+      () => {
+        socket.write(JSON.stringify({ type, params }) + "\n");
+      },
+    );
+    let buf = "";
+    let done = false;
+    const finish = (fn, arg) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        socket.destroy();
+      } catch {
+        /* noop */
+      }
+      fn(arg);
+    };
+    const timer = setTimeout(
+      () => finish(reject, new Error("Blender MCP addon 响应超时")),
+      timeoutMs,
+    );
+    socket.setEncoding("utf8");
+    socket.on("data", chunk => {
+      buf += chunk;
+      try {
+        const parsed = JSON.parse(buf);
+        if (parsed && parsed.status === "error") {
+          finish(reject, new Error(parsed.message || "addon error"));
+        } else {
+          finish(resolve, parsed && "result" in parsed ? parsed.result : parsed);
+        }
+      } catch {
+        /* JSON 尚不完整，继续接收 */
+      }
+    });
+    socket.on("error", err =>
+      finish(
+        reject,
+        new Error(`无法连接 Blender MCP addon (${BLENDER_MCP_HOST}:${BLENDER_MCP_PORT})：${err.message}`),
+      ),
+    );
+    socket.on("end", () => {
+      if (!done && buf) {
+        try {
+          const parsed = JSON.parse(buf);
+          finish(resolve, parsed && "result" in parsed ? parsed.result : parsed);
+        } catch (e) {
+          finish(reject, new Error("addon 响应解析失败: " + e.message));
+        }
+      }
+    });
+  });
+}
+
+/**
+ * GET /api/assembly/sequence?method=distance|size|hierarchy
+ * 返回：{ success, order:[名称...], method, count }
+ */
+async function handleAssemblySequence(req, res, url) {
+  const method = url.searchParams.get("method") || "distance";
+  try {
+    const result = await callBlenderMcp("get_assembly_sequence", { method });
+    sendJSON(res, 200, { success: true, ...result });
+  } catch (err) {
+    sendJSON(res, 502, { success: false, error: err.message });
+  }
+}
+
+/**
+ * GET /api/assembly/analysis?tolerance=0.001
+ * 返回：analyze_assembly 的完整结果（含 production_readiness）
+ */
+async function handleAssemblyAnalysis(req, res, url) {
+  const tolerance = Number(url.searchParams.get("tolerance") || 0.001);
+  try {
+    const result = await callBlenderMcp("analyze_assembly", { tolerance });
+    sendJSON(res, 200, { success: true, ...result });
+  } catch (err) {
+    sendJSON(res, 502, { success: false, error: err.message });
+  }
+}
+
 // ── 创建 HTTP 服务器 ──────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
@@ -708,16 +1347,26 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && url.pathname === "/api/health") {
     await handleHealth(req, res);
+  } else if (req.method === "GET" && url.pathname === "/api/generated") {
+    await handleGeneratedList(req, res);
+  } else if (req.method === "POST" && url.pathname === "/api/blender/launch") {
+    await handleLaunchBlender(req, res);
   } else if (req.method === "POST" && url.pathname === "/api/split") {
     await handleSplit(req, res);
   } else if (req.method === "POST" && url.pathname === "/api/ai-paint") {
     await handleAIPaint(req, res);
+  } else if (req.method === "POST" && url.pathname === "/api/image-to-3d") {
+    await handleImageTo3D(req, res);
   } else if (req.method === "GET" && url.pathname === "/api/ai-config") {
     handleAIConfigGet(req, res);
   } else if (req.method === "POST" && url.pathname === "/api/ai-config") {
     handleAIConfigPost(req, res);
   } else if (req.method === "POST" && url.pathname === "/api/ai-test") {
     await handleAITest(req, res);
+  } else if (req.method === "GET" && url.pathname === "/api/assembly/sequence") {
+    await handleAssemblySequence(req, res, url);
+  } else if (req.method === "GET" && url.pathname === "/api/assembly/analysis") {
+    await handleAssemblyAnalysis(req, res, url);
   } else if (req.method === "GET") {
     serveStatic(req, res, url);
   } else {
@@ -797,8 +1446,12 @@ server.listen(PORT, () => {
   console.log("\n  端点:");
   console.log("    GET  /              — 静态文件 (index.html)");
   console.log("    GET  /api/health   — 健康检查");
+  console.log("    POST /api/blender/launch — 一键启动 Blender（GUI）");
   console.log("    POST /api/split    — 拆解 GLB（二进制响应）");
-  console.log("    POST /api/ai-paint — AI 绘画（生成3D模型）\n");
+  console.log("    POST /api/ai-paint — AI 绘画（生成3D模型）");
+  console.log("    POST /api/image-to-3d — 图片转3D（本地 TripoSR 真重建 / Replicate 云端）");
+  console.log("    GET  /api/assembly/sequence — 装配拆解顺序（Blender MCP）");
+  console.log("    GET  /api/assembly/analysis — 装配/干涉/可制造性分析（Blender MCP）\n");
 
   // 启动时检测 Blender
   execFileAsync(BLENDER_PATH, ["--version"], { timeout: 10_000 })

@@ -19,5 +19,11 @@
   "stepfun": {
     "key": "YOUR_STEPFUN_API_KEY_HERE",
     "model": "step-1-32k"
+  },
+  "replicate": {
+    "token": "YOUR_REPLICATE_API_TOKEN",
+    "owner": "tencent",
+    "name": "hunyuan3d-2",
+    "modelVersion": ""
   }
 }

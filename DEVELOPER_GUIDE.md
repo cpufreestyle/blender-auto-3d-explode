@@ -86,6 +86,75 @@ npm run build:analyze
 - quest3_exploded_blender.py // Quest 3 爆炸脚本
 ```
 
+#### 5. MCP 融合集成 (glonorce/Blender_mcp)
+
+把 [glonorce/Blender_mcp](https://github.com/glonorce/Blender_mcp) 的核心能力融合进本项目的 Blender addon（未克隆，直接基于其架构重新实现/适配），并通过一个自包含的 MCP 服务端暴露给 AI 助手（Claude / CatPaw 等）。
+
+```python
+# MCP 融合相关文件
+- scripts/blender_mcp_addon.py  # Blender 端 addon（TCP 9876），含融合能力
+- scripts/mcp_server.py         # 本地 MCP 服务端（stdio JSON-RPC，仅用标准库）
+- .mcp.json                     # MCP 客户端配置（blender + blender-fusion）
+```
+
+**addon 端（始终可用，无需外部 API/密钥）核心 handler：**
+| 命令 | 能力 |
+| --- | --- |
+| `get_scene_graph` | 完整场景层级（父子）、世界变换、世界 AABB、顶点/面数、材质名 |
+| `get_viewport_screenshots` | 多视角离屏渲染（front/back/left/right/top/bottom/perspective） |
+| `analyze_assembly` | 装配智能：逐部件几何统计、两两间隙、BVH 真实干涉、0–100 可制造性评分 |
+| `get_assembly_sequence` | 拆解顺序建议（distance / size / hierarchy），对应本项目爆炸视图 |
+| `get_blender_info` / `get_addon_status` | 环境信息 / 能力 + 服务状态聚合 |
+
+图片转 3D（Hunyuan3D / Rodin）命令（`create_hunyuan_job` 等）原已内置，现也可经 MCP 直接调用。
+
+### 本地图片转3D 真重建（TripoSR）
+
+`/api/image-to-3d` 的 `deploy: local` 模式走**真正的单图 3D 重建**：`scripts/triposr_infer.py` 调用 [VAST-AI-Research/TripoSR](https://github.com/VAST-AI-Research/TripoSR)（基于 LRM 的前馈单图重建），从单张 RGB 图推断 triplane → 用 marching cubes 提取带体积 / 背面的水密网格 → 导出 GLB。这与旧的 `blender_image_to_3d.py`（亮度挤出浮雕 / 像素块，属 2.5D 假3D）完全不同。
+
+`/api/image-to-3d` 的 `deploy: replicate` 云端模式同样走真重建：默认高保真模型 `tencent/hunyuan3d-2`，前端下拉另可选 `camenduru/triposr`（快速真重建），**不再有任何浮雕 / 假3D 选项**，与本地 TripoSR 真重建保持一致。
+
+**首次使用前准备环境（需联网一次）：**
+```bash
+bash scripts/setup_triposr.sh
+```
+脚本会：克隆 TripoSR 到 `external/TripoSR`、创建独立 venv 并安装 PyTorch + 依赖（含 `torchmcubes` 源码编译）、预下载模型权重。macOS 需先装 Xcode Command Line Tools（`xcode-select --install`）。
+
+**运行参数（前端 / `ai-config.html` / 请求体均可覆盖）：**
+
+| 参数 | 说明 | 默认 |
+| --- | --- | --- |
+| `mcResolution` | marching cubes 分辨率（越大越精细越慢） | 256 |
+| `bakeTexture` | 烘焙纹理图集（否则用顶点色） | false |
+| `removeBg` | 用 rembg 自动抠图 | false |
+| `device` | `auto` / `cpu` / `cuda` | auto |
+
+**说明：** 纯离线推理，运行时无需任何云端 API/Token；权重首次从 HuggingFace 自动下载（约数百 MB，慢可设 `HF_ENDPOINT=https://hf-mirror.com`）；CPU 上单张推理可能需数分钟，server 端超时已放宽到 15 分钟、前端 20 分钟；`blender_image_to_3d.py` 仍保留但 local 模式已不再调用它。
+
+**本地 MCP 服务端 `scripts/mcp_server.py`** 通过 TCP 连接 addon（默认 `localhost:9876`），把上述能力暴露为 **16 个 MCP 工具**（含 `execute_code` 逃生通道）。它通过 `.mcp.json` 的 `blender-fusion` 入口被 IDE 加载，与 stock `blender` 服务端并存。
+
+```bash
+# 手动验证 MCP 服务端（需 Blender 中 addon 已启动）
+python3 scripts/mcp_server.py
+# stdin 发送 JSON-RPC：initialize -> tools/list -> tools/call
+```
+
+> 注意：`analyze_assembly` / `get_viewport_screenshots` 需在 Blender 实机运行验证；可制造性评分为**启发式（中置信度）**。
+
+**前端爆炸视图对接：** `server.js` 新增两个只读接口把 addon 能力桥接到浏览器：
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/assembly/sequence?method=distance\|size\|hierarchy` | 返回部件拆解顺序 `{ order:[...], method, count }` |
+| `GET /api/assembly/analysis?tolerance=0.001` | 返回装配分析（含 `production_readiness`） |
+
+`main.js` 在自定义模型（GLB/STL/URDF）加载后**非阻塞**调用 `maybeApplyAssemblySequence()`：
+1. 请求 `/api/assembly/sequence`；
+2. 仅当返回的部件名与前端模型名重叠 ≥ 2 个（判定为同一模型）时，用该顺序重排拆解步骤；
+3. Blender/后端不可用时静默回退到"按距离中心降序（外层先拆）"。
+
+> `distance` 排序两端已对齐：addon 与前端均为"外层先拆、内层最后"。
+
 ## 🔧 关键功能说明
 
 ### 3D 爆炸动画系统
@@ -157,6 +226,8 @@ function fitCameraToModel(modelGroup) {
 - 程序化建模
 - 自动拆解算法
 - 文件转换导出
+- MCP addon (`blender_mcp_addon.py`)：场景图、多视角渲染、装配/干涉分析、图片转 3D
+- 本地 MCP 服务端 (`mcp_server.py`)：把 addon 能力暴露为 MCP 工具
 
 ## 🛠️ 开发规范
 
@@ -249,7 +320,9 @@ quest3-exploded/
 │   └── *.html               # 测试页面
 ├── 📂 scripts/              # Python 脚本
 │   ├── blender_control.py
-│   └── blender_watcher.py
+│   ├── blender_watcher.py
+│   ├── blender_mcp_addon.py # Blender MCP addon（融合 glonorce 能力）
+│   └── mcp_server.py        # 本地 MCP 服务端（stdio）
 ├── main.js                  # 主要前端逻辑
 ├── server.js                # Node.js 服务器
 ├── index.html              # 页面结构
@@ -366,6 +439,16 @@ function animate() {
 2. 优化材质数量
 3. 降低渲染分辨率
 4. 使用性能分析工具
+```
+
+### 4. MCP 工具不可用（场景图 / 装配分析 / 多视角）
+```bash
+# 排查步骤
+1. Blender 内 addon 是否已启动（侧栏 BlenderMCP -> Connect to MCP server）
+2. 端口是否被占用 / 与 .mcp.json 中 BLENDERMCP_PORT 一致（默认 9876）
+3. IDE 重新加载 MCP 配置后，确认出现 blender-fusion 服务端
+4. 命令行自测：python3 scripts/mcp_server.py 并发送 initialize / tools/list
+5. 图片转 3D 类工具需先在 Blender 侧栏启用对应服务（Hunyuan3D / Rodin）
 ```
 
 ## 📚 参考资源

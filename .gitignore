@@ -48,6 +48,7 @@ yarn-install.log*
 *.tmp
 *.temp
 blender_output/
+models/generated/
 *.glb
 !models/*.glb
 !meta-quest-3/source/*.glb
@@ -115,3 +116,6 @@ docs/CREATE_RELEASE.md
 docs/QUEST3_SUCCESS.md
 docs/REAL_MODEL_AR_PLAN.md
 docs/REAL_MODEL_INTEGRATION.md
+
+# 第三方仓库 (TripoSR 等，含 .venv，体积巨大)
+external/

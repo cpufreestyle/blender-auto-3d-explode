@@ -50,8 +50,17 @@
     <div class="ui-header">
       <div class="header-row">
         <h1>🔧 3D 拆解教学</h1>
+        <span id="blender-status" class="blender-chip unknown" title="Blender 状态">⏳ Blender…</span>
         <button id="theme-toggle" class="theme-toggle" title="切换主题">🌙</button>
       </div>
+    </div>
+
+    <!-- ===== Blender 状态提示横幅 ===== -->
+    <div id="blender-banner" class="blender-banner hidden">
+      <span class="bb-icon">⚠️</span>
+      <span class="bb-text">未检测到 Blender，AI 绘画与高质量拆解将降级为前端处理。</span>
+      <button id="blender-launch" class="btn-mini bb-btn">▶️ 启动 Blender</button>
+      <button id="blender-dismiss" class="btn-mini bb-btn-dismiss">忽略</button>
     </div>
 
     <!-- ===== AI 绘画（可折叠）===== -->
@@ -72,9 +81,27 @@
             <span class="dz-text" id="ai-paint-dropzone-text">参考图（可选）</span>
           </div>
           <div id="ai-paint-image-preview" class="img-preview hidden">
-            <img id="ai-paint-preview-img" src="" alt="预览" />
+            <img id="ai-paint-preview-img" alt="预览" />
             <button id="ai-paint-remove-image" class="img-remove">✕</button>
           </div>
+        </div>
+        <div class="ai-to3d-row">
+          <button id="img-to-3d-btn" class="btn btn-secondary">🧊 图片转3D</button>
+          <select id="img-to-3d-deploy" class="ai-select" title="部署方式">
+            <option value="local">本地 TripoSR（真重建）</option>
+            <option value="replicate">Replicate 云端</option>
+          </select>
+          <select id="img-to-3d-model-local" class="ai-select" title="重建质量">
+            <option value="256">标准 (256)</option>
+            <option value="384">高精 (384)</option>
+          </select>
+          <select id="img-to-3d-model" class="ai-select hidden" title="云端模型（高保真真重建）">
+            <option value="tencent/hunyuan3d-2">Hunyuan3D-2（高保真）</option>
+            <option value="camenduru/triposr">TripoSR（快速）</option>
+            <option value="__custom__">自定义…</option>
+          </select>
+          <input id="img-to-3d-model-custom" class="ai-input ai-input-sm hidden" placeholder="owner/name" />
+          <span class="ai-to3d-hint">需先上传参考图</span>
         </div>
         <div class="ai-presets">
           <button class="chip" data-prompt="红色球体">🔴球体</button>
@@ -115,6 +142,13 @@
         <div class="upload-actions">
           <button id="upload-btn" class="btn">📂 选择文件</button>
           <button id="clear-model-btn" class="btn btn-danger" style="display:none">🗑️ 清除</button>
+        </div>
+        <div class="generated-lib">
+          <div class="gen-lib-title">📚 从生成库加载</div>
+          <select id="generated-select" class="gen-select">
+            <option value="">— 加载已生成的模型 —</option>
+          </select>
+          <button id="generated-load" class="btn btn-mini">⬇️ 载入</button>
         </div>
       </div>
     </details>
@@ -165,13 +199,32 @@
       <button id="prev-step" class="btn" disabled>⏮️上一步</button>
       <button id="next-step" class="btn btn-primary">下一步⏭️</button>
       <button id="reset-step" class="btn">🔄重置</button>
+      <button id="style-toggle" class="btn btn-style">🛠️ 原生风格</button>
       <button id="explode-btn" class="btn btn-explode">💥爆炸视图</button>
+      <button id="explode-loop" class="btn btn-loop">🔁循环</button>
+      <select id="explode-loop-speed" class="speed-select loop-speed" title="循环速度">
+        <option value="0.6">慢</option>
+        <option value="1" selected>正常</option>
+        <option value="1.8">快</option>
+      </select>
       <label class="checkbox-inline">
         <input id="auto-rotate" type="checkbox" checked />
         <span>🔄自动旋转</span>
       </label>
       <button id="ar-btn" class="btn btn-ar" style="display:none">📱 AR 预览</button>
     </div>
+
+    <!-- ===== 装配分析（可制造性评分，Blender MCP）===== -->
+    <details class="panel collapsible" id="assembly-panel">
+      <summary class="panel-header">
+        <span>🔧 装配分析</span>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="panel-body">
+        <button id="assembly-analyze-btn" class="btn btn-secondary">🔍 运行装配分析</button>
+        <div id="assembly-result" class="status-box hidden"></div>
+      </div>
+    </details>
 
     <!-- ===== 工具 + 部件（合并折叠）===== -->
     <details class="panel collapsible">
@@ -225,6 +278,62 @@
     <p class="hint">🎓 专为 VR 新手设计</p>
   </div>
 
-  <script type="module" src="main.js?v=3.1.0"></script>
+  <!-- ===== 首次使用：模型配置引导弹窗 ===== -->
+  <div id="first-config-modal" class="fcm-overlay hidden">
+    <div class="fcm-dialog">
+      <div class="fcm-header">
+        <h2>👋 欢迎使用，先配置 AI 模型</h2>
+        <button id="fcm-close" class="fcm-close" title="稍后再说">✕</button>
+      </div>
+      <p class="fcm-sub">
+        首次使用需要选择一个 AI 模型提供方（OpenAI / Anthropic / 本地 Ollama 等）并填入凭证，
+        AI 绘画与图片转 3D 功能才能正常工作。配置页面已嵌入下方，填好点「保存配置」即可。
+      </p>
+      <iframe id="fcm-iframe" src="ai-config.html" title="模型配置"></iframe>
+      <div class="fcm-footer">
+        <button id="fcm-later" class="btn">稍后再说</button>
+        <button id="fcm-done" class="btn btn-primary" disabled>已完成配置 ✓</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="main.js?v=3.2.2"></script>
+
+  <!-- 首次使用：检测是否已配置，未配置则弹出模型配置 -->
+  <script>
+    (function () {
+      const API_BASE = "http://localhost:3001";
+      const overlay = document.getElementById('first-config-modal');
+      if (!overlay) return;
+      const show = () => overlay.classList.remove('hidden');
+      const hide = () => overlay.classList.add('hidden');
+      const dismiss = () => {
+        try { sessionStorage.setItem('configPromptDismissed', '1'); } catch (e) {}
+        hide();
+      };
+      document.getElementById('fcm-close').addEventListener('click', dismiss);
+      document.getElementById('fcm-later').addEventListener('click', dismiss);
+      document.getElementById('fcm-done').addEventListener('click', hide);
+
+      // 配置页在 iframe 内保存成功后通知父页面
+      window.addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'config-saved') {
+          const done = document.getElementById('fcm-done');
+          if (done) done.disabled = false;
+          hide();
+        }
+      });
+
+      let dismissed = false;
+      try { dismissed = sessionStorage.getItem('configPromptDismissed') === '1'; } catch (e) {}
+
+      fetch(API_BASE + '/api/ai-config')
+        .then((r) => r.json())
+        .then((cfg) => {
+          if (!cfg.saved && !dismissed) show();
+        })
+        .catch(() => { /* 后端不可达时不打扰 */ });
+    })();
+  </script>
 </body>
 </html>
