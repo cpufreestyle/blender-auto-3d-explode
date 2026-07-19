@@ -572,6 +572,11 @@ async function handleImageTo3D(req, res) {
       return await runHyper3DImageTo3D(AI_CONFIG.providers?.hyper3d, body, imageBase64, res, startTime);
     }
 
+    // VLM 视觉模型程序化重建（看图→生成 3D 代码→自动修复→导出 GLB）
+    if (mode === "vlm") {
+      return await runVLMImageTo3D(AI_CONFIG.vlm, body, imageBase64, res, startTime);
+    }
+
     // 云端 Replicate 模式
     const token = rep.token;
     if (!token) {
@@ -681,6 +686,48 @@ async function handleImageTo3D(req, res) {
     sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
   } catch (err) {
     console.error(`  ❌ 图片转3D 失败: ${err.message}`);
+    sendJSON(res, 500, { success: false, error: err.message });
+  }
+}
+
+/**
+ * VLM 视觉模型程序化重建（图片转3D 的 VLM 路线）
+ * 调用 scripts/vlm_img_to_blender.py：视觉模型看图→生成 Blender 代码→沙箱执行+自动修复→导出 GLB
+ */
+async function runVLMImageTo3D(vlmCfg, body, imageBase64, res, startTime) {
+  try {
+    const provider = vlmCfg?.provider || "stepfun";
+    const model = vlmCfg?.model || "step-3.7-flash";
+    const imgPath = path.join(os.tmpdir(), "vlm_in.png");
+    fs.writeFileSync(imgPath, Buffer.from(imageBase64, "base64"));
+
+    const script = path.join(__dirname, "scripts", "vlm_img_to_blender.py");
+    const args = ["--provider", provider, "--model", model, "--image", imgPath];
+    console.log(`  🤖 图片转3D(VLM): spawn ${provider}/${model}`);
+
+    const child = spawn("python3", [script, ...args], { cwd: __dirname });
+    let stdout = "", stderr = "";
+    child.stdout.on("data", (d) => (stdout += d));
+    child.stderr.on("data", (d) => (stderr += d));
+
+    await new Promise((resolve, reject) => {
+      child.on("close", (code) =>
+        code === 0 ? resolve() : reject(new Error(`VLM 脚本退出 ${code}: ${stderr.slice(-800)}`))
+      );
+      child.on("error", reject);
+    });
+
+    const glbPath = "/tmp/vlm_img_to_3d.glb";
+    if (!fs.existsSync(glbPath)) {
+      throw new Error("VLM 未导出 GLB；脚本输出: " + stdout.slice(-600));
+    }
+    const glbBuffer = fs.readFileSync(glbPath);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    const manifest = { total_parts: 0, parts: [] };
+    console.log(`  ✅ 图片转3D(VLM) 完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
+    sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
+  } catch (err) {
+    console.error(`  ❌ 图片转3D(VLM) 失败: ${err.message}`);
     sendJSON(res, 500, { success: false, error: err.message });
   }
 }
@@ -990,8 +1037,8 @@ let AI_CONFIG = {
   lmstudio: { url: 'http://localhost:1234/v1', model: '' },
   stepfun: { key: '', model: 'step-3.5-flash' },
   nvidia: { key: '', model: 'z-ai/glm-5.2', base_url: 'https://integrate.api.nvidia.com/v1' },
-  // Kimi（月之暗面 / Moonshot AI）— OpenAI 兼容接口
-  kimi: { key: '', model: 'moonshot-v1-8k', longContext: false },
+  // Kimi（月之暗面 / Moonshot AI）— OpenAI 兼容接口；默认最新旗舰 kimi-k3（原生 1M 上下文）
+  kimi: { key: '', model: 'kimi-k3', longContext: false },
   // 生成的三维模型完成后是否自动用 Blender GUI 打开显示（默认开启）
   openInBlender: true,
   // 图片转 3D：mode=local 调用本地 TripoSR 真重建（scripts/triposr_infer.py，离线推理，需先 bash scripts/setup_triposr.sh）；
@@ -1076,6 +1123,8 @@ function handleAIConfigGet(req, res) {
       tripo: { apiKey: (AI_CONFIG.providers?.tripo?.apiKey) ? '***' : '' },
       hyper3d: { apiKey: (AI_CONFIG.providers?.hyper3d?.apiKey) ? '***' : '' },
     },
+    // 图片转3D 的 VLM 视觉模型路线（无 Key，仅 provider/model）
+    vlm: AI_CONFIG.vlm ? { provider: AI_CONFIG.vlm.provider, model: AI_CONFIG.vlm.model } : undefined,
     openInBlender: AI_CONFIG.openInBlender !== false,
   };
   sendJSON(res, 200, safeConfig);

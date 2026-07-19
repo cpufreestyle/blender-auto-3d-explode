@@ -481,22 +481,30 @@
             <div class="form-group">
                 <label>API Key</label>
                 <input type="password" id="kimi-key" placeholder="sk-...">
-                <p class="help-text">从 <a href="https://platform.moonshot.cn/" target="_blank">Moonshot 平台</a> 获取</p>
+                <p class="help-text">从 <a href="https://platform.kimi.com/" target="_blank">Kimi 开放平台</a> 获取</p>
             </div>
             
             <div class="form-group">
                 <label>模型</label>
                 <select id="kimi-model">
-                    <option value="moonshot-v1-8k" selected>moonshot-v1-8k</option>
-                    <option value="moonshot-v1-32k">moonshot-v1-32k</option>
-                    <option value="moonshot-v1-128k">moonshot-v1-128k</option>
+                    <optgroup label="Kimi K3 / K2 系列（推荐）">
+                        <option value="kimi-k3" selected>kimi-k3（最新旗舰 · 1M 上下文 · 多模态）</option>
+                        <option value="kimi-k2.7-code">kimi-k2.7-code（代码 · 256k）</option>
+                        <option value="kimi-k2.6">kimi-k2.6（256k）</option>
+                    </optgroup>
+                    <optgroup label="Moonshot V1（2026-08-31 下线）">
+                        <option value="moonshot-v1-8k">moonshot-v1-8k</option>
+                        <option value="moonshot-v1-32k">moonshot-v1-32k</option>
+                        <option value="moonshot-v1-128k">moonshot-v1-128k</option>
+                    </optgroup>
                 </select>
+                <p class="help-text">Kimi K3 原生 1M token 上下文，无需再手动切长上下文模型。</p>
             </div>
             
             <div class="form-group checkbox-group">
                 <label class="checkbox-inline">
                     <input type="checkbox" id="kimi-long-context">
-                    <span>🌙 长上下文（自动切到 128k 模型）</span>
+                    <span>🌙 长上下文（旧版 Moonshot V1 时自动切到 128k 模型）</span>
                 </label>
             </div>
         </div>
@@ -542,6 +550,13 @@
                     <label for="img3d-provider-hyper3d">
                         <div class="provider-name">🌐 Hyper3D（Rodin）</div>
                         <div class="provider-desc">图生 3D（multipart 直传）</div>
+                    </label>
+                </div>
+                <div class="radio-item">
+                    <input type="radio" name="img3d-provider" id="img3d-provider-vlm" value="vlm">
+                    <label for="img3d-provider-vlm">
+                        <div class="provider-name">🤖 AI 视觉模型（VLM）</div>
+                        <div class="provider-desc">看图→生成 3D 代码→自动修复</div>
                     </label>
                 </div>
             </div>
@@ -621,6 +636,19 @@
             <span id="hyper3d-test-result" class="test-inline"></span>
         </div>
 
+        <!-- VLM 视觉模型重建 -->
+        <div id="config-img3d-vlm" class="img3d-section hidden">
+            <div class="form-group" style="margin-top:16px">
+                <label>视觉模型</label>
+                <select id="vlm-model">
+                    <option value="stepfun|step-3.7-flash">StepFun step-3.7-flash</option>
+                    <option value="kimi|kimi-k3">Kimi kimi-k3</option>
+                    <option value="anthropic|claude-3-sonnet-20240229">Claude claude-3-sonnet</option>
+                </select>
+                <p class="help-text">调用视觉模型"看"图并生成 Blender 代码重建 3D（程序化近似，非高保真纹理）。使用对应提供商已配置的 API Key（StepFun / Kimi / Claude）。</p>
+            </div>
+        </div>
+
         <div class="card">
             <div class="card-title">
                 <div class="icon">🧪</div>
@@ -663,18 +691,19 @@
         document.querySelectorAll('input[name="img3d-provider"]').forEach(radio => {
             radio.addEventListener('change', (e) => {
                 const value = e.target.value;
-                ['local', 'replicate', 'meshy', 'tripo', 'hyper3d'].forEach(v => {
+                ['local', 'replicate', 'meshy', 'tripo', 'hyper3d', 'vlm'].forEach(v => {
                     const card = document.getElementById(`config-img3d-${v}`);
                     if (card) card.classList.toggle('hidden', v !== value);
                 });
             });
         });
         
-        // Kimi 长上下文开关：勾选时自动切到 128k 模型，取消时回到 8k
+        // Kimi 长上下文开关：仅对旧版 Moonshot V1 生效（K3/K2 已是超长上下文，不覆盖）
         const kimiLongCtx = document.getElementById('kimi-long-context');
         const kimiModelSel = document.getElementById('kimi-model');
         if (kimiLongCtx && kimiModelSel) {
             kimiLongCtx.addEventListener('change', (e) => {
+                if (!kimiModelSel.value.startsWith('moonshot-v1')) return;
                 kimiModelSel.value = e.target.checked ? 'moonshot-v1-128k' : 'moonshot-v1-8k';
             });
         }
@@ -719,7 +748,7 @@
                     }
                     if (config.kimi) {
                         document.getElementById('kimi-key').value = config.kimi.key || '';
-                        document.getElementById('kimi-model').value = config.kimi.model || 'moonshot-v1-8k';
+                        document.getElementById('kimi-model').value = config.kimi.model || 'kimi-k3';
                         document.getElementById('kimi-long-context').checked = Boolean(config.kimi.longContext);
                     }
                     if (config.replicate) {
@@ -744,6 +773,12 @@
                         if (meshyCard) meshyCard.classList.toggle('hidden', mode !== 'meshy');
                         if (tripoCard) tripoCard.classList.toggle('hidden', mode !== 'tripo');
                         if (hyperCard) hyperCard.classList.toggle('hidden', mode !== 'hyper3d');
+                        const vlmCard = document.getElementById('config-img3d-vlm');
+                        if (vlmCard) vlmCard.classList.toggle('hidden', mode !== 'vlm');
+                        if (config.vlm && config.vlm.provider) {
+                            const vsel = document.getElementById('vlm-model');
+                            if (vsel) vsel.value = `${config.vlm.provider}|${config.vlm.model}`;
+                        }
                         document.getElementById('meshy-api-key').value = (config.providers?.meshy?.apiKey) ? '***' : '';
                         document.getElementById('tripo-api-key').value = (config.providers?.tripo?.apiKey) ? '***' : '';
                         document.getElementById('tripo-model').value = config.providers?.tripo?.model || 'v3.1-20260211';
@@ -817,6 +852,11 @@
                     name: (document.getElementById('replicate-owner-name').value.split('/')[1] || 'hunyuan3d-2').trim(),
                     modelVersion: document.getElementById('replicate-version').value
                 },
+                vlm: (() => {
+                    const v = document.getElementById('vlm-model').value || 'stepfun|step-3.7-flash';
+                    const [provider, model] = v.split('|');
+                    return { provider, model };
+                })(),
                 providers: {
                     meshy: {
                         apiKey: document.getElementById('meshy-api-key').value,
