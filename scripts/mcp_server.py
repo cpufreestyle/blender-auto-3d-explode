@@ -458,6 +458,116 @@ TOOLS = [
             "required": ["filepath"],
         },
     },
+    # ---- Status diagnostics (always available in the addon) ----
+    {
+        "name": "get_polyhaven_status",
+        "description": "PolyHaven integration status (enabled flag, API reachability) for diagnostics.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_hyper3d_status",
+        "description": "Hyper3D (Rodin) integration status for diagnostics.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_sketchfab_status",
+        "description": "Sketchfab integration status (enabled flag, API key configured) for diagnostics.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_hunyuan3d_status",
+        "description": "Hunyuan3D integration status for diagnostics.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_telemetry_consent",
+        "description": "Read the current telemetry-consent setting of the Blender MCP addon.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    # ---- PolyHaven assets (requires PolyHaven enabled in the addon) ----
+    {
+        "name": "get_polyhaven_categories",
+        "description": "List PolyHaven categories for an asset type (hdris/textures/models/all).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"asset_type": {"type": "string", "enum": ["hdris", "textures", "models", "all"], "default": "all"}},
+            "required": ["asset_type"],
+        },
+    },
+    {
+        "name": "search_polyhaven_assets",
+        "description": "Search PolyHaven assets (HDRI/texture/model) with optional type and category filters.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "asset_type": {"type": "string", "enum": ["hdris", "textures", "models", "all"], "description": "Asset type filter"},
+                "categories": {"type": "string", "description": "Comma-separated category slugs"},
+            },
+        },
+    },
+    {
+        "name": "download_polyhaven_asset",
+        "description": "Download a PolyHaven asset (HDRI/texture/model) into the scene by asset id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "asset_id": {"type": "string", "description": "PolyHaven asset id"},
+                "asset_type": {"type": "string", "enum": ["hdris", "textures", "models"], "description": "Asset type"},
+                "resolution": {"type": "string", "default": "1k", "description": "e.g. 1k/2k/4k"},
+                "file_format": {"type": "string", "description": "Optional format override (hdr/exr/jpg/png/blend...)"},
+            },
+            "required": ["asset_id", "asset_type"],
+        },
+    },
+    {
+        "name": "set_texture",
+        "description": "Apply a downloaded PolyHaven texture to an object (creates a material).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_name": {"type": "string", "description": "Target object name in the scene"},
+                "texture_id": {"type": "string", "description": "PolyHaven texture asset id"},
+            },
+            "required": ["object_name", "texture_id"],
+        },
+    },
+    # ---- Sketchfab models (requires Sketchfab enabled in the addon) ----
+    {
+        "name": "search_sketchfab_models",
+        "description": "Search Sketchfab models by query (requires Sketchfab API key configured in the addon).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search keywords"},
+                "categories": {"type": "string", "description": "Optional category filter"},
+                "count": {"type": "integer", "default": 20},
+                "downloadable": {"type": "boolean", "default": True},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "get_sketchfab_model_preview",
+        "description": "Get the thumbnail preview image of a Sketchfab model by its UID.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"uid": {"type": "string", "description": "Sketchfab model UID"}},
+            "required": ["uid"],
+        },
+    },
+    {
+        "name": "download_sketchfab_model",
+        "description": "Download a Sketchfab model by UID into the scene (optionally normalized to a target size).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "uid": {"type": "string", "description": "Sketchfab model UID"},
+                "normalize_size": {"type": "boolean", "default": False},
+                "target_size": {"type": "number", "default": 1.0},
+            },
+            "required": ["uid"],
+        },
+    },
 ]
 
 # Map tool name -> addon command type
@@ -483,6 +593,21 @@ TOOL_COMMAND = {
     "create_hyper3d_job": "create_rodin_job",
     "poll_hyper3d_job": "poll_rodin_job_status",
     "import_hyper3d_asset": "import_generated_asset",
+    # ---- Status diagnostics (always available in the addon) ----
+    "get_polyhaven_status": "get_polyhaven_status",
+    "get_hyper3d_status": "get_hyper3d_status",
+    "get_sketchfab_status": "get_sketchfab_status",
+    "get_hunyuan3d_status": "get_hunyuan3d_status",
+    "get_telemetry_consent": "get_telemetry_consent",
+    # ---- PolyHaven assets (requires PolyHaven enabled in the addon) ----
+    "get_polyhaven_categories": "get_polyhaven_categories",
+    "search_polyhaven_assets": "search_polyhaven_assets",
+    "download_polyhaven_asset": "download_polyhaven_asset",
+    "set_texture": "set_texture",
+    # ---- Sketchfab models (requires Sketchfab enabled in the addon) ----
+    "search_sketchfab_models": "search_sketchfab_models",
+    "get_sketchfab_model_preview": "get_sketchfab_model_preview",
+    "download_sketchfab_model": "download_sketchfab_model",
 }
 
 
