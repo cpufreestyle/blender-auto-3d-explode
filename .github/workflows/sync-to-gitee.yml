@@ -32,3 +32,40 @@ jobs:
           git remote add gitee https://cpufreestyle:${{ secrets.GITEE_TOKEN }}@gitee.com/cpufreestyle/blender-auto-3d-explode.git
           git push gitee --all --force
           git push gitee --tags --force
+
+      - name: Sync Releases to Gitee
+        run: |
+          GITEE_API="https://gitee.com/api/v5/repos/cpufreestyle/blender-auto-3d-explode"
+
+          # Get all GitHub releases
+          GH_RELEASES=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/cpufreestyle/blender-auto-3d-explode/releases?per_page=100")
+
+          # Get existing Gitee releases
+          GITEE_RELEASES=$(curl -s "$GITEE_API/releases?access_token=${{ secrets.GITEE_TOKEN }}&per_page=100")
+
+          echo "$GH_RELEASES" | jq -c '.[]' | while read -r release; do
+            TAG=$(echo "$release" | jq -r '.tag_name')
+            NAME=$(echo "$release" | jq -r '.name // .tag_name')
+            BODY=$(echo "$release" | jq -r '.body // ""')
+            PRERELEASE=$(echo "$release" | jq -r '.prerelease')
+            TARGET=$(echo "$release" | jq -r '.target_commitish // "main"')
+
+            # Check if this tag already has a release on Gitee
+            EXISTS=$(echo "$GITEE_RELEASES" | jq -r --arg tag "$TAG" '.[] | select(.tag_name==$tag) | .tag_name')
+            if [ -n "$EXISTS" ]; then
+              echo "Release $TAG already exists on Gitee, skipping"
+            else
+              echo "Creating release $TAG on Gitee..."
+              curl -s -X POST "$GITEE_API/releases?access_token=${{ secrets.GITEE_TOKEN }}" \
+                -H "Content-Type: application/json" \
+                -d "$(jq -n \
+                  --arg tag "$TAG" \
+                  --arg name "$NAME" \
+                  --arg body "$BODY" \
+                  --arg target "$TARGET" \
+                  --argjson prerelease "$PRERELEASE" \
+                  '{tag_name: $tag, name: $name, body: $body, target_commitish: $target, prerelease: $prerelease}')"
+              echo ""
+            fi
+          done
