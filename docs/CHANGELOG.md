@@ -2,6 +2,27 @@
 
 所有项目的显著变更都将记录在此文件中。
 
+## [v3.2.0] - 2026-07-19
+
+### 🤖 图片转 3D · VLM 视觉模型路线
+
+#### ✨ 新功能
+
+- **图片转 3D 新增 VLM 视觉模型路线** — 视觉模型"看"图 → 生成 Blender Python 代码 → 沙箱执行 + 自动修复循环 → 导出 GLB（程序化近似重建，非高保真纹理网格）。
+  - 支持模型：**StepFun step-3.7-flash** / **Kimi kimi-k3** / **Claude claude-3-sonnet**，在 `ai-config.html` 的「图片转 3D → 🤖 AI 视觉模型（VLM）」下拉切换。
+  - `server.js`：`handleImageTo3D` 新增 `vlm` 分支（`runVLMImageTo3D`）；`GET /api/ai-config` 响应补充 `vlm` 字段。
+  - `scripts/vlm_img_to_blender.py`：多 provider 支持（OpenAI 兼容走 `/chat/completions`，Claude 走原生 Messages API），含沙箱自动修复（最多 4 次迭代）与 GLB 导出。
+
+#### ⚙️ 使用提示
+
+- 默认走 StepFun，需已在 `ai-config.json` 配置 StepFun Key。
+- 选 Kimi / Claude 需先填入对应 API Key 并保存配置。
+- 实时重建需 Blender 运行且 MCP 插件监听 `localhost:9876`。
+
+#### 📄 文档
+
+- 新增 `docs/VLM_IMAGE_TO_3D.md`：VLM 图片转 3D 使用说明、管线原理与配置参考。
+
 ## [v3.0.0] - 2026-07-06
 
 ### 🎨 AI 绘画引擎全面升级
