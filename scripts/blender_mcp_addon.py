@@ -290,6 +290,8 @@ class BlenderMCPServer:
             "get_assembly_sequence": self.get_assembly_sequence,
             "get_blender_info": self.get_blender_info,
             "get_addon_status": self.get_addon_status,
+            # --- generic GLB import bridge for external 3D generation MCP tools ---
+            "import_glb_from_file": self.import_glb_from_file,
         }
 
         # Add Polyhaven handlers only if enabled
@@ -1921,6 +1923,35 @@ class BlenderMCPServer:
             print("Having issue with renaming, give up renaming.")
 
         return mesh_obj
+
+    def import_glb_from_file(self, filepath, name=None):
+        """Import a local .glb file into the current scene.
+
+        Used as the final step of external 3D-generation MCP tools
+        (Meshy / Tripo / Hyper3D / etc.): the MCP server downloads the
+        generated GLB to a temp file and hands the path to Blender here.
+        """
+        import os
+        if not filepath or not os.path.exists(filepath):
+            return {"succeed": False, "error": f"GLB file not found: {filepath}"}
+        try:
+            obj = self._clean_imported_glb(filepath=filepath, mesh_name=name)
+            if obj is None:
+                return {"succeed": False, "error": "No mesh imported from GLB (empty or invalid file)"}
+            result = {
+                "name": obj.name,
+                "type": obj.type,
+                "location": [obj.location.x, obj.location.y, obj.location.z],
+                "rotation": [obj.rotation_euler.x, obj.rotation_euler.y, obj.rotation_euler.z],
+                "scale": [obj.scale.x, obj.scale.y, obj.scale.z],
+            }
+            if obj.type == "MESH":
+                bbox = self._get_aabb(obj)
+                if bbox:
+                    result["world_bounding_box"] = bbox
+            return {"succeed": True, **result}
+        except Exception as e:
+            return {"succeed": False, "error": str(e)}
 
     def import_generated_asset(self, *args, **kwargs):
         match bpy.context.scene.blendermcp_hyper3d_mode:
