@@ -632,6 +632,7 @@ class OrbitControls extends EventDispatcher {
 
 			performCursorZoom = true;
 
+			if ( ! scope.domElement ) return;
 			const rect = scope.domElement.getBoundingClientRect();
 			const dx = x - rect.left;
 			const dy = y - rect.top;

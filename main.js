@@ -2895,7 +2895,10 @@ renderer.domElement.addEventListener("mousemove", e => {
   stopExplodeLoop(); // 鼠标接管，停止循环播放
 
   // 计算鼠标在屏幕上的相对位置（0-1）
-  const rect = renderer.domElement.getBoundingClientRect();
+  const el = renderer && renderer.domElement;
+  if (!el) return; // 渲染器/画布尚未就绪（预览或 WebGL 不可用时）时安全跳过
+  const rect = el.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
   const x = (e.clientX - rect.left) / rect.width;
   const y = (e.clientY - rect.top) / rect.height;
 
