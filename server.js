@@ -1031,8 +1031,8 @@ async function runHyper3DImageTo3D(cfg, body, imageBase64, res, startTime) {
  */
 let AI_CONFIG = {
   provider: 'openai',
-  openai: { key: '', model: 'gpt-3.5-turbo' },
-  anthropic: { key: '', model: 'claude-3-sonnet-20240229' },
+  openai: { key: '', model: 'gpt-5.6-sol' },
+  anthropic: { key: '', model: 'claude-sonnet-5' },
   ollama: { url: 'http://localhost:11434', model: 'codellama' },
   lmstudio: { url: 'http://localhost:1234/v1', model: '' },
   stepfun: { key: '', model: 'step-3.5-flash' },
@@ -1365,7 +1365,7 @@ async function callAnthropic(prompt) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: model || 'claude-3-sonnet-20240229',
+      model: model || 'claude-sonnet-5',
       max_tokens: 1024,
       messages: [{ role: 'user', content: prompt }],
     }),
