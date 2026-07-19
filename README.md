@@ -17,7 +17,7 @@
 | 📱 **WebXR AR 预览** | 在支持 AR 的设备上将模型投射到现实空间 |
 | 🧱 **乐高砖块拼接** | 2x4, 2x2, 1x2 等标准砖块，真实积木拼接效果 |
 | 🎨 **自定义模型上传** | 上传 GLB 模型直接预览拆解效果 |
-| 🔌 **多 AI 提供商** | OpenAI / Anthropic / StepFun / Ollama / LM Studio / NVIDIA / Replicate |
+| 🔌 **多 AI 提供商** | OpenAI / Anthropic / StepFun / Kimi / NVIDIA / Ollama / LM Studio |
 | 🌐 **3D 生成 MCP 联动** | Meshy / Tripo(Triple 3D) / Hyper3D(Rodin) 经 MCP 工具调用，生成模型直接导入 Blender 场景 |
 
 ---
@@ -102,10 +102,12 @@ npm run build         # 生产构建
 | OpenAI | 文本生成模型 | API Key |
 | Anthropic | 文本生成模型 | API Key |
 | StepFun (阶跃星辰) | 文本生成模型 | API Key |
+| Kimi (月之暗面 Moonshot) | 文本生成模型 | API Key |
 | NVIDIA | GLM-5.2 模型 | API Key |
 | Ollama | 本地模型 | 本地地址 |
 | LM Studio | 本地模型 | 本地地址 |
-| Replicate | Hunyuan3D-2 图生3D | API Token |
+
+> 图片转 3D 的云端提供商（Replicate / Meshy / Tripo / Hyper3D）在下方「图片转 3D」部署方式中单独配置，不在此文本生成提供商之列。
 
 复制 `ai-config.example.json` 为 `ai-config.json` 并填入密钥即可。
 
@@ -133,6 +135,20 @@ npm run build         # 生产构建
 
 - 密钥通过参数 `api_key` 传入，或设置环境变量 `MESHY_API_KEY` / `TRIPO_API_KEY`
 - `create`/`poll` 无需 Blender 运行；`import_*` 会把生成的 GLB 下载到本地并导入当前 Blender 场景（联动）
+
+### Web 端「图片转 3D」直接调用
+
+除了 MCP CUI 联动外，本项目 Web 界面（首页「🧊 图片转3D」下拉框）也内置了这些云端提供商。在 `ai-config.html` 的「图片转3D」中填入对应 **API Key** 后，即可在下拉框选择：
+
+| 部署方式（`deploy`） | 说明 |
+|------|------|
+| `local` | 本地 TripoSR 真重建（离线，无需 API） |
+| `replicate` | Replicate 云端（Hunyuan3D-2） |
+| `meshy` | **Meshy AI** 图生 3D（`api.meshy.ai`，支持 base64 直传） |
+| `tripo` | **Tripo (Triple 3D)** 图生模型（先上传换 `file_token` 再生成） |
+| `hyper3d` | **Hyper3D (Rodin)** 图生 3D（`hyperhuman.deemos.com`，multipart 直传） |
+
+三种云端方式的服务端实现见 `server.js` 的 `runMeshyImageTo3D` / `runTripoImageTo3D` / `runHyper3DImageTo3D`，与 MCP 工具逻辑一致。
 
 ---
 
