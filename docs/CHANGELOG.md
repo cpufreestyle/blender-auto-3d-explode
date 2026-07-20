@@ -2,6 +2,20 @@
 
 所有项目的显著变更都将记录在此文件中。
 
+## [v3.2.3] - 2026-07-20
+
+### 🐛 修复 · 图片转 3D VLM 脚本与文档
+
+#### 🐞 Bug 修复
+
+- **VLM 默认模型回退错误** — `scripts/vlm_img_to_blender.py` 各 provider 新增 `default_model`，未显式指定模型时按 provider 回退（StepFun `step-3.7-flash` / Kimi `kimi-k3` / Claude `claude-3-sonnet-20240229` / OpenAI `gpt-4o`），避免 anthropic / openai 误用 stepfun 的默认模型。
+- **GLB 误导出** — 仅当本次在 Blender 中成功执行过代码（`result is not None`）才导出 GLB，防止 VLM 调用失败时把 Blender 场景中残留的旧 `GLM_VLM_*` 对象误导出。
+
+#### 🧹 工程化
+
+- 新增 `.markdownlint.json`（关闭 MD013 / MD022 / MD024 / MD031 / MD032 / MD036 / MD029 等噪声规则）。
+- 全量 `docs/*.md` 修复 markdownlint 实质警告：裸 URL 加 `<>`、标题去尾标点、无语言代码块补语言标记、清理行尾空白。
+
 ## [v3.2.0] - 2026-07-19
 
 ### 🤖 图片转 3D · VLM 视觉模型路线
