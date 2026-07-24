@@ -4,7 +4,7 @@
  */
 
 // ── 安全配置 ──────────────────────────────────────────
-export const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
+export const MAX_FILE_SIZE = 150 * 1024 * 1024; // 150 MB
 export const MAX_PARTS = 10; // multipart 最大 part 数量
 export const MAX_BOUNDARY_LENGTH = 200; // boundary 最大长度
 export const MAX_HEADER_SIZE = 8192; // 单个 multipart part header 最大大小
