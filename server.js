@@ -30,6 +30,7 @@ import {
 } from "./src/server-utils.js";
 import { readBody } from "./src/body.js";
 import { runMeshyImageTo3D, runTripoImageTo3D, runHyper3DImageTo3D } from "./src/providers/image-to-3d.js";
+import { DEFAULT_MODELS } from "./src/provider-models.js";
 import path from "path";
 import os from "os";
 import { fileURLToPath } from "url";
@@ -765,12 +766,12 @@ async function runLocalImageTo3D(rep, body, imageBase64, res, startTime) {
  */
 let AI_CONFIG = {
   provider: 'openai',
-  openai: { key: '', model: 'gpt-5.6-sol' },
-  anthropic: { key: '', model: 'claude-sonnet-5' },
-  ollama: { url: 'http://localhost:11434', model: 'codellama' },
-  lmstudio: { url: 'http://localhost:1234/v1', model: '' },
-  stepfun: { key: '', model: 'step-3.5-flash' },
-  nvidia: { key: '', model: 'z-ai/glm-5.2', base_url: 'https://integrate.api.nvidia.com/v1' },
+  openai: { key: '', model: DEFAULT_MODELS.openai },
+  anthropic: { key: '', model: DEFAULT_MODELS.anthropic },
+  ollama: { url: 'http://localhost:11434', model: DEFAULT_MODELS.ollama },
+  lmstudio: { url: 'http://localhost:1234/v1', model: DEFAULT_MODELS.lmstudio },
+  stepfun: { key: '', model: DEFAULT_MODELS.stepfun },
+  nvidia: { key: '', model: DEFAULT_MODELS.nvidia, base_url: 'https://integrate.api.nvidia.com/v1' },
   // Kimi（月之暗面 / Moonshot AI）— OpenAI 兼容接口；默认最新旗舰 kimi-k3（原生 1M 上下文）
   kimi: { key: '', model: 'kimi-k3', longContext: false },
   // 生成的三维模型完成后是否自动用 Blender GUI 打开显示（默认开启）
@@ -1099,7 +1100,7 @@ async function callAnthropic(prompt) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: model || 'claude-sonnet-5',
+      model: model || DEFAULT_MODELS.anthropic,
       max_tokens: 1024,
       messages: [{ role: 'user', content: prompt }],
     }),
@@ -1119,7 +1120,7 @@ async function callOllama(prompt) {
   const response = await fetch(`${url}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: model || 'codellama', prompt, stream: false }),
+    body: JSON.stringify({ model: model || DEFAULT_MODELS.ollama, prompt, stream: false }),
   });
 
   const data = await response.json();
