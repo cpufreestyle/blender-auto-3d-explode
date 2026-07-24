@@ -27,12 +27,12 @@
 | NE4 | 配置 schema 化 + 模型单一来源：`src/provider-models.js` 抽模型清单，server 与 `ai-config.html` 共享；`handleAIConfigPost` 增加校验 | Should | 无 | ✅ `7c32679` |
 
 ## Later — Sprint 4+（方向性）
-| ID | 任务 | MoSCoW |
-|---|---|---|
-| L1 | 统一路由/中间件 + 错误响应 + 结构化日志（`wrap(handler)` 收敛 try/catch 与 `console.log`） | Could |
-| L2 | `main.js` 前端模块化（按 3D 视图/上传/配置面板/VLM 流程拆 ES module） | Could |
+| ID | 任务 | MoSCoW | 状态 |
+|---|---|---|---|
+| L1 | 统一路由/中间件 + 错误响应 + 结构化日志（`wrap(handler)` 收敛 try/catch 与 `console.log`） | Could | ✅ `src/logger.js` + `wrap`/`respondError` 中间件 + 进程级异常守卫；`console.*` 重定向为结构化日志 |
+| L2 | `main.js` 前端模块化（按 3D 视图/上传/配置面板/VLM 流程拆 ES module） | Could | ⬜ 风险高、3D 预览难在此环境验证，放最后单独做 |
 | L3 | 提升测试覆盖：provider 生成/预检函数单测（当前只能 HTTP 端到端） | Could | ✅ `tests/provider-test.mjs`（mock fetch，22 项全绿，无需真实 Key） |
-| L4 | 依赖漏洞治理：`npm audit` 跟进（default 分支存在 high 级漏洞，见 GitHub Dependabot 告警） | Must(技术健康) |
+| L4 | 依赖漏洞治理：`npm audit` 跟进（default 分支存在 high 级漏洞，见 GitHub Dependabot 告警） | Must(技术健康) | ✅ lockfile 已修（npm audit fix）；GitHub Dependabot 因缓存滞后仍显 3 high，以 lockfile 为准 |
 
 ## 依赖与风险
 - **N3 → NE1**：先抽公共逻辑，再拆模块，避免拆出多份重复。
@@ -45,3 +45,4 @@
 - 2026-07-24：N2/N3 完成并推送；启动 NE1-NE4 + 依赖治理（用户指令「1 2 3」）。
 - 2026-07-24：依赖 3 项 high 漏洞修复（npm audit fix，传递 devDeps）；NE1（providers 模块抽出）+ NE2 + NE3（统一请求体解析）完成，server.js 约 1854→1530 行，冒烟测试通过（/api/health、/api/ai-config 均 200）。NE4（模型清单单一来源）待做。
 - 2026-07-24：L3 落地 — 新增 `tests/provider-test.mjs`，mock 全局 fetch 测试 `src/providers/image-to-3d.js` 的 Meshy/Tripo/Hyper3D 三个纯函数（成功路径返回 `{glbBuffer, manifest}`、缺失 Key 抛 `status=400`、失败状态上抛），22 项全绿且无真实网络请求；`package.json` 的 `test` 脚本已串联 `unit-test` + `provider-test`。
+- 2026-07-24：L1 落地 — 新增 `src/logger.js` 结构化日志器（时间戳+级别+meta，`LOG_LEVEL` 过滤，写 stderr）；`server.js` 将 `console.*` 重定向到该 logger 统一全部日志；新增 `wrap(handler)` 中间件 + `respondError(res,err)` 统一错误信封（按 `err.status` 取码，默认 500，防连接挂起），并用 `wrap` 包裹 `createServer` 回调；追加进程级 `uncaughtException`/`unhandledRejection` 守卫。冒烟测试通过（/api/health、/api/ai-config=200，未知路由 404，日志为结构化输出）。

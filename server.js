@@ -31,12 +31,21 @@ import {
 import { readBody } from "./src/body.js";
 import { runMeshyImageTo3D, runTripoImageTo3D, runHyper3DImageTo3D } from "./src/providers/image-to-3d.js";
 import { DEFAULT_MODELS } from "./src/provider-models.js";
+import { log } from "./src/logger.js";
 import path from "path";
 import os from "os";
 import { fileURLToPath } from "url";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// 统一日志：将 console.* 重定向到结构化 logger（保留原有消息内容，追加时间戳/级别）。
+// 放在此处（findBlender 调用之前），使全部后续 console.* 均获得结构化输出。
+console.log = (...a) => log.info(...a);
+console.info = (...a) => log.info(...a);
+console.warn = (...a) => log.warn(...a);
+console.error = (...a) => log.error(...a);
+console.debug = (...a) => log.debug(...a);
 
 const PORT = process.env.PORT || 3001;
 
@@ -199,6 +208,45 @@ function sendJSON(res, statusCode, data) {
     ...getCORSHeaders(),
   });
   res.end(json);
+}
+
+/**
+ * 统一错误响应：从 err.status 取状态码（默认 500），返回一致的错误信封
+ * { success:false, error }。若响应头已发送（如流式传输中途出错），则安全结束。
+ */
+function respondError(res, err) {
+  const status =
+    typeof err?.status === "number" && err.status >= 400 && err.status < 600
+      ? err.status
+      : 500;
+  if (res.headersSent) {
+    try {
+      res.end();
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  sendJSON(res, status, {
+    success: false,
+    error: err?.message || "Internal Server Error",
+  });
+}
+
+/**
+ * 中间件式包裹：统一捕获 handler 抛出的异常并转为错误响应，
+ * 避免未捕获异常导致连接挂起 / 进程崩溃。
+ * 用法：http.createServer(wrap(async (req, res) => { ... }))
+ */
+function wrap(handler) {
+  return async (req, res) => {
+    try {
+      await handler(req, res);
+    } catch (err) {
+      log.error(`请求处理异常 ${req.method} ${req.url}:`, err);
+      respondError(res, err);
+    }
+  };
 }
 
 /**
@@ -1409,17 +1457,19 @@ async function handleAssemblyAnalysis(req, res, url) {
 
 // ── 创建 HTTP 服务器 ──────────────────────────────────
 
-const server = http.createServer(async (req, res) => {
-  // CORS 预检
-  if (req.method === "OPTIONS") {
-    res.writeHead(204, getCORSHeaders());
-    res.end();
-    return;
-  }
+const server = http.createServer(
+  wrap(async (req, res) => {
+    // CORS 预检
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, getCORSHeaders());
+      res.end();
+      return;
+    }
 
-  const url = new URL(req.url, `http://localhost:${PORT}`);
+    const url = new URL(req.url, `http://localhost:${PORT}`);
+    log.info(`${req.method} ${url.pathname}`);
 
-  if (req.method === "GET" && url.pathname === "/api/health") {
+    if (req.method === "GET" && url.pathname === "/api/health") {
     await handleHealth(req, res);
   } else if (req.method === "GET" && url.pathname === "/api/generated") {
     await handleGeneratedList(req, res);
@@ -1448,7 +1498,8 @@ const server = http.createServer(async (req, res) => {
   } else {
     sendJSON(res, 404, { error: "Not Found", path: url.pathname });
   }
-});
+  })
+);
 
 // ── 静态文件服务 ──────────────────────────────────────
 
@@ -1538,4 +1589,15 @@ server.listen(PORT, () => {
     .catch(() => {
       console.log("  ⚠️  Blender 不可用，服务器仍会运行（前端将回退到 JS 拆解）\n");
     });
+});
+
+// ── 进程级异常守卫 ──────────────────────────────────
+// 捕获未被 handler 兜住的致命错误，记录结构化日志后退出（由进程管理器重启），
+// 避免静默挂死；unhandledRejection 仅记录，不退出（多为可恢复的异步问题）。
+process.on("uncaughtException", (err) => {
+  log.error("未捕获异常(进程级):", err);
+  process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  log.error("未处理的 Promise 拒绝:", reason);
 });
