@@ -24,14 +24,14 @@
 | NE1 | `server.js` 模块化拆分：云端图片转3D 厂商函数抽至 `src/providers/image-to-3d.js`（纯函数，返回 `{glbBuffer, manifest}`）；`server.js` 降至 ~1530 行 | Should | N3 | ✅ 已完成 |
 | NE2 | 复用 `src/server-utils.js`：移除并行实现，`server.js` 仅引入 `getCORSHeaders`/`cleanupOldTempFiles`/`MAX_FILE_SIZE` | Should | 无 | ✅ 已完成 |
 | NE3 | 统一请求体解析：`src/body.js` 的 `readBody(req,{maxSize})` 按 Content-Type 分发 JSON/multipart，复用 `parseMultipartBuffer`，取代三套旧解析器 | Should | NE2 | ✅ 已完成 |
-| NE4 | 配置 schema 化 + 模型单一来源：`src/provider-models.js` 抽模型清单，server 与 `ai-config.html` 共享；`handleAIConfigPost` 增加校验 | Should | 无 | ⬜ |
+| NE4 | 配置 schema 化 + 模型单一来源：`src/provider-models.js` 抽模型清单，server 与 `ai-config.html` 共享；`handleAIConfigPost` 增加校验 | Should | 无 | ✅ `7c32679` |
 
 ## Later — Sprint 4+（方向性）
 | ID | 任务 | MoSCoW |
 |---|---|---|
 | L1 | 统一路由/中间件 + 错误响应 + 结构化日志（`wrap(handler)` 收敛 try/catch 与 `console.log`） | Could |
 | L2 | `main.js` 前端模块化（按 3D 视图/上传/配置面板/VLM 流程拆 ES module） | Could |
-| L3 | 提升测试覆盖：provider 生成/预检函数单测（当前只能 HTTP 端到端） | Could |
+| L3 | 提升测试覆盖：provider 生成/预检函数单测（当前只能 HTTP 端到端） | Could | ✅ `tests/provider-test.mjs`（mock fetch，22 项全绿，无需真实 Key） |
 | L4 | 依赖漏洞治理：`npm audit` 跟进（default 分支存在 high 级漏洞，见 GitHub Dependabot 告警） | Must(技术健康) |
 
 ## 依赖与风险
@@ -44,3 +44,4 @@
 ## 进度日志
 - 2026-07-24：N2/N3 完成并推送；启动 NE1-NE4 + 依赖治理（用户指令「1 2 3」）。
 - 2026-07-24：依赖 3 项 high 漏洞修复（npm audit fix，传递 devDeps）；NE1（providers 模块抽出）+ NE2 + NE3（统一请求体解析）完成，server.js 约 1854→1530 行，冒烟测试通过（/api/health、/api/ai-config 均 200）。NE4（模型清单单一来源）待做。
+- 2026-07-24：L3 落地 — 新增 `tests/provider-test.mjs`，mock 全局 fetch 测试 `src/providers/image-to-3d.js` 的 Meshy/Tripo/Hyper3D 三个纯函数（成功路径返回 `{glbBuffer, manifest}`、缺失 Key 抛 `status=400`、失败状态上抛），22 项全绿且无真实网络请求；`package.json` 的 `test` 脚本已串联 `unit-test` + `provider-test`。
