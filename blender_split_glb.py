@@ -29,7 +29,7 @@ def get_blender_version():
 
 
 def import_model(filepath):
-    """导入 3D 模型文件 — 支持 GLB/GLTF/STL，兼容多版本"""
+    """导入 3D 模型文件 — 支持 GLB/GLTF/STL/OBJ，兼容多版本"""
     ext = os.path.splitext(filepath)[1].lower()
     log(f"  导入文件: {filepath} (格式: {ext})")
 
@@ -89,8 +89,30 @@ def import_model(filepath):
 
         raise RuntimeError(f"无法导入 {filepath}，当前 Blender 版本不支持 STL 导入")
 
+    elif ext == '.obj':
+        # ── OBJ 导入 ──
+        # 方法 1: Blender 4.1+ / 5.x 新 API
+        try:
+            if hasattr(bpy.ops.wm, 'obj_import'):
+                log("  使用 bpy.ops.wm.obj_import")
+                bpy.ops.wm.obj_import(filepath=filepath)
+                return
+        except Exception as e:
+            log(f"  wm.obj_import 失败: {e}")
+
+        # 方法 2: Blender 3.x 旧 API
+        try:
+            if hasattr(bpy.ops.import_scene, 'obj'):
+                log("  使用 bpy.ops.import_scene.obj")
+                bpy.ops.import_scene.obj(filepath=filepath)
+                return
+        except Exception as e:
+            log(f"  import_scene.obj 失败: {e}")
+
+        raise RuntimeError(f"无法导入 {filepath}，当前 Blender 版本不支持 OBJ 导入")
+
     else:
-        raise ValueError(f"不支持的文件格式: {ext}（支持 .glb / .gltf / .stl）")
+        raise ValueError(f"不支持的文件格式: {ext}（支持 .glb / .gltf / .stl / .obj）")
 
 
 def export_glb(filepath):

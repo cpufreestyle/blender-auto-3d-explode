@@ -2929,8 +2929,8 @@ function setupUpload() {
     if (!file) return;
 
     const ext = file.name.split(".").pop().toLowerCase();
-    if (!["glb", "gltf", "stl", "urdf"].includes(ext)) {
-      showStatus("❌ 不支持的文件格式\n请上传 .glb / .gltf / .stl / .urdf 文件", "error");
+    if (!["glb", "gltf", "stl", "urdf", "obj"].includes(ext)) {
+      showStatus("❌ 不支持的文件格式\n请上传 .glb / .gltf / .stl / .urdf / .obj 文件", "error");
       return;
     }
 
@@ -2970,7 +2970,7 @@ function setupUpload() {
       return;
     }
 
-    // GLB / GLTF 文件：优先尝试 Blender 后端拆解（包括 Quest 3 模型）
+    // GLB / GLTF / OBJ 文件：优先尝试 Blender 后端拆解（包括 Quest 3 模型）
     const blenderResult = await tryBlenderSplit(file);
 
     if (blenderResult) {

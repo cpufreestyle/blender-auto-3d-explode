@@ -15,10 +15,14 @@ export async function readBody(req, { maxSize = MAX_FILE_SIZE } = {}) {
     chunks.push(chunk);
   }
   const raw = Buffer.concat(chunks);
-  const ct = (req.headers["content-type"] || "").toLowerCase();
+  // 注意：仅对“是否为 multipart”做大小写不敏感判断；
+  // multipart boundary 值按 RFC 2046 是大小写敏感的，绝不能随 header 一起 toLowerCase，
+  // 否则含大写字母的 boundary（如浏览器/脚本生成的 ----xxxOBJxxx）会匹配失败导致提取不到文件。
+  const rawCt = req.headers["content-type"] || "";
+  const ct = rawCt.toLowerCase();
 
   if (ct.includes("multipart/form-data")) {
-    const m = ct.match(/boundary=("?)([^";]+)\1?/);
+    const m = rawCt.match(/boundary=("?)([^";]+)\1?/);
     const boundary = m ? "--" + m[2] : null;
     if (!boundary) throw new Error("未找到 multipart boundary");
     if (boundary.length - 2 > MAX_BOUNDARY_LENGTH) throw new Error("boundary 过长");

@@ -1287,8 +1287,8 @@ async function handleSplit(req, res) {
 
     const fileName = file.filename;
     const ext = path.extname(fileName).toLowerCase();
-    if (![".glb", ".gltf", ".stl"].includes(ext)) {
-      sendJSON(res, 400, { error: `不支持的格式: ${ext}，支持 .glb / .gltf / .stl` });
+    if (![".glb", ".gltf", ".stl", ".obj"].includes(ext)) {
+      sendJSON(res, 400, { error: `不支持的格式: ${ext}，支持 .glb / .gltf / .stl / .obj` });
       return;
     }
 
