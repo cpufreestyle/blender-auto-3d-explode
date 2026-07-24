@@ -25,11 +25,11 @@ import { promisify } from "util";
 import fs from "fs";
 import {
   getCORSHeaders,
-  parseMultipartBuffer,
   cleanupOldTempFiles,
   MAX_FILE_SIZE,
-  MAX_BOUNDARY_LENGTH,
 } from "./src/server-utils.js";
+import { readBody } from "./src/body.js";
+import { runMeshyImageTo3D, runTripoImageTo3D, runHyper3DImageTo3D } from "./src/providers/image-to-3d.js";
 import path from "path";
 import os from "os";
 import { fileURLToPath } from "url";
@@ -185,55 +185,6 @@ async function runBlenderSplit(inputPath, outputPath, manifestPath, originalFile
  * @param {http.IncomingMessage} req
  * @returns {Promise<{filename: string, data: Buffer, contentType: string}>}
  */
-function parseMultipart(req) {
-  return new Promise((resolve, reject) => {
-    const contentType = req.headers["content-type"] || "";
-    const boundaryMatch = contentType.match(/boundary=([^\s;]+)/);
-    if (!boundaryMatch) {
-      reject(new Error("未找到 multipart boundary"));
-      return;
-    }
-
-    const boundaryStr = boundaryMatch[1];
-
-    // 校验 boundary 长度，防止恶意构造
-    if (boundaryStr.length > MAX_BOUNDARY_LENGTH) {
-      reject(new Error("boundary 过长"));
-      req.destroy();
-      return;
-    }
-
-    const boundary = "--" + boundaryStr;
-    const chunks = [];
-    let totalReceived = 0;
-
-    req.on("data", chunk => {
-      totalReceived += chunk.length;
-      if (totalReceived > MAX_FILE_SIZE) {
-        reject(new Error("文件太大"));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-
-    req.on("end", () => {
-      try {
-        const buffer = Buffer.concat(chunks);
-        const result = parseMultipartBuffer(buffer, boundary);
-        if (!result) {
-          reject(new Error("未能从请求中提取文件"));
-        } else {
-          resolve(result);
-        }
-      } catch (err) {
-        reject(err);
-      }
-    });
-
-    req.on("error", reject);
-  });
-}
 
 // ── 响应工具 ──────────────────────────────────────────
 
@@ -408,7 +359,7 @@ async function handleAIPaint(req, res) {
 
   try {
     // 1. 读取 JSON body
-    const body = await readJSONBody(req);
+    const body = await readBody(req, { maxSize: 10 * 1024 });
     const prompt = body.prompt || "球体";
 
     if (typeof prompt !== "string" || prompt.length > 500) {
@@ -492,29 +443,6 @@ async function handleAIPaint(req, res) {
 /**
  * 读取较大的 JSON 请求体（图片转 3D 需要传 base64 图片，默认 10KB 不够）
  */
-function readJSONBodyMax(req, maxSize) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let total = 0;
-    req.on("data", chunk => {
-      total += chunk.length;
-      if (total > maxSize) {
-        reject(new Error("请求体太大"));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => {
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString("utf-8")));
-      } catch (err) {
-        reject(new Error("JSON 解析失败: " + err.message));
-      }
-    });
-    req.on("error", reject);
-  });
-}
 
 const REPLICATE_BASE = "https://api.replicate.com/v1";
 
@@ -525,10 +453,15 @@ const REPLICATE_BASE = "https://api.replicate.com/v1";
  * 云端模式：上传 Replicate → 创建预测 → 轮询 → 下载 GLB
  * 返回：二进制 GLB + manifest 头（同 /api/split 格式）
  */
+function finishImageTo3D(res, { glbBuffer, manifest }, startTime) {
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+  sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
+}
+
 async function handleImageTo3D(req, res) {
   const startTime = Date.now();
   try {
-    const body = await readJSONBodyMax(req, 25 * 1024 * 1024); // 25MB
+    const body = await readBody(req, { maxSize: 25 * 1024 * 1024 }); // 25MB
     const imageDataUrl = body.image;
     if (!imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
       sendJSON(res, 400, { error: "缺少有效的图片数据（image 字段应为 data URL）" });
@@ -563,13 +496,16 @@ async function handleImageTo3D(req, res) {
 
     // 第三方云端提供商（与 MCP tools 一致）：Meshy / Tripo / Hyper3D(Rodin)
     if (mode === "meshy") {
-      return await runMeshyImageTo3D(AI_CONFIG.providers?.meshy, body, imageBase64, res, startTime);
+      const out = await runMeshyImageTo3D(AI_CONFIG.providers?.meshy, body, imageBase64);
+      return finishImageTo3D(res, out, startTime);
     }
     if (mode === "tripo") {
-      return await runTripoImageTo3D(AI_CONFIG.providers?.tripo, body, imageBase64, res, startTime);
+      const out = await runTripoImageTo3D(AI_CONFIG.providers?.tripo, body, imageBase64);
+      return finishImageTo3D(res, out, startTime);
     }
     if (mode === "hyper3d") {
-      return await runHyper3DImageTo3D(AI_CONFIG.providers?.hyper3d, body, imageBase64, res, startTime);
+      const out = await runHyper3DImageTo3D(AI_CONFIG.providers?.hyper3d, body, imageBase64);
+      return finishImageTo3D(res, out, startTime);
     }
 
     // VLM 视觉模型程序化重建（看图→生成 3D 代码→自动修复→导出 GLB）
@@ -686,7 +622,8 @@ async function handleImageTo3D(req, res) {
     sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
   } catch (err) {
     console.error(`  ❌ 图片转3D 失败: ${err.message}`);
-    sendJSON(res, 500, { success: false, error: err.message });
+    if (err.status === 400) sendJSON(res, 400, { error: err.message });
+    else sendJSON(res, 500, { success: false, error: err.message });
   }
 }
 
@@ -822,224 +759,6 @@ async function runLocalImageTo3D(rep, body, imageBase64, res, startTime) {
   sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
 }
 
-// ── 第三方云端图片转3D 提供商（Meshy / Tripo / Hyper3D-Rodin）─────────────
-// 直接调用各厂商 REST API（与 scripts/mcp_server.py 中的 MCP 工具逻辑一致），
-// 让 web 端「图片转3D」也能用这些云厂商处理上传图片，实现 MCP CUI 联动。
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function downloadBuffer(url) {
-  const r = await fetch(url, { headers: { "User-Agent": "blender-explode" } });
-  if (!r.ok) throw new Error(`GLB 下载失败 ${r.status}`);
-  return Buffer.from(await r.arrayBuffer());
-}
-
-function providerApiKey(cfg, envVar) {
-  return (cfg && cfg.apiKey) || process.env[envVar] || "";
-}
-
-/**
- * 校验厂商 API Key；缺失则直接回 400 并返回 null（调用方应 return）。
- */
-function requireProviderKey(label, cfg, envVar, res) {
-  const apiKey = providerApiKey(cfg, envVar);
-  if (!apiKey) {
-    sendJSON(res, 400, {
-      error:
-        `${label} 未配置 API Key：请在 ai-config.html 的「图片转3D」中填入 ${label} API Key，` +
-        `或设置环境变量 ${envVar}。`,
-    });
-  }
-  return apiKey || null;
-}
-
-/**
- * 通用轮询：周期性调用 checkStatus 直到返回 { done } 或超时。
- * checkStatus 返回 { done:boolean, failed?:boolean, error?:string, modelUrl?:string }。
- */
-async function pollTask({ deadline, timeoutMsg, intervalMs = 5000, checkStatus }) {
-  while (true) {
-    if (Date.now() > deadline) throw new Error(timeoutMsg);
-    await sleep(intervalMs);
-    const r = await checkStatus();
-    if (r.failed) throw new Error(r.error || "任务失败");
-    if (r.done) return r.modelUrl;
-  }
-}
-
-/**
- * Meshy image-to-3d：POST /openapi/v1/image-to-3d（image_url 支持 base64 Data URI）
- * → 轮询 GET /openapi/v1/image-to-3d/:id → 下载 model_urls.glb
- */
-async function runMeshyImageTo3D(cfg, body, imageBase64, res, startTime) {
-  const apiKey = requireProviderKey("Meshy", cfg, "MESHY_API_KEY", res);
-  if (!apiKey) return;
-  const mime = (/^data:(image\/[a-zA-Z0-9.+-]+)/.exec(body.image) || [])[1] || "image/png";
-  const dataUri = `data:${mime};base64,${imageBase64}`;
-  console.log("  🌐 图片转3D: 创建 Meshy image-to-3d 任务");
-  const createRes = await fetch("https://api.meshy.ai/openapi/v1/image-to-3d", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ image_url: dataUri, should_texture: true, enable_pbr: true, target_formats: ["glb"] }),
-  });
-  if (!createRes.ok) {
-    const t = await createRes.text();
-    throw new Error(`Meshy 创建任务失败 ${createRes.status}: ${t.slice(0, 400)}`);
-  }
-  const taskId = (await createRes.json()).result;
-  if (!taskId) throw new Error("Meshy 未返回任务 ID");
-  const deadline = Date.now() + 10 * 60 * 1000;
-  const modelUrl = await pollTask({
-    deadline,
-    timeoutMsg: "Meshy 任务超时（10 分钟）",
-    intervalMs: 5000,
-    checkStatus: async () => {
-      const pr = await fetch(`https://api.meshy.ai/openapi/v1/image-to-3d/${taskId}`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
-      if (!pr.ok) throw new Error(`Meshy 状态查询失败 ${pr.status}`);
-      const d = await pr.json();
-      return {
-        done: d.status === "SUCCEEDED",
-        failed: d.status === "FAILED" || d.status === "CANCELED",
-        error: d.status,
-        modelUrl: d.model_urls?.glb || d.model_url,
-      };
-    },
-  });
-  if (!modelUrl) throw new Error("Meshy 输出中未找到 GLB 链接");
-  const glbBuffer = await downloadBuffer(modelUrl);
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-  const manifest = { total_parts: 0, parts: [], engine: "meshy" };
-  console.log(`  ✅ 图片转3D（Meshy）完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
-  sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
-}
-
-/**
- * Tripo image-to-model：上传图片换 file_token → POST /v3/generation/image-to-model
- * → 轮询 GET /v3/tasks/:id → 下载 output.model_url
- */
-async function runTripoImageTo3D(cfg, body, imageBase64, res, startTime) {
-  const apiKey = requireProviderKey("Tripo", cfg, "TRIPO_API_KEY", res);
-  if (!apiKey) return;
-  const mime = (/^data:(image\/[a-zA-Z0-9.+-]+)/.exec(body.image) || [])[1] || "image/png";
-  const imageBytes = Buffer.from(imageBase64, "base64");
-  const form = new FormData();
-  form.append("file", new Blob([imageBytes], { type: mime }), "image.png");
-  console.log(`  🌐 图片转3D: 上传图片到 Tripo (${(imageBytes.length / 1024).toFixed(1)} KB)`);
-  const upRes = await fetch("https://openapi.tripo3d.ai/v3/files", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form,
-  });
-  if (!upRes.ok) {
-    const t = await upRes.text();
-    throw new Error(`Tripo 文件上传失败 ${upRes.status}: ${t.slice(0, 400)}`);
-  }
-  const fileToken = (await upRes.json())?.data?.file_token;
-  if (!fileToken) throw new Error("Tripo 未返回 file_token");
-  const model = (cfg && cfg.model) || body.model || "v3.1-20260211";
-  console.log(`  🚀 图片转3D: 创建 Tripo image-to-model (${model})`);
-  const taskRes = await fetch("https://openapi.tripo3d.ai/v3/generation/image-to-model", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ input: fileToken, model, texture: true, pbr: true }),
-  });
-  if (!taskRes.ok) {
-    const t = await taskRes.text();
-    throw new Error(`Tripo 创建任务失败 ${taskRes.status}: ${t.slice(0, 400)}`);
-  }
-  const taskId = (await taskRes.json())?.data?.task_id;
-  if (!taskId) throw new Error("Tripo 未返回 task_id");
-  const deadline = Date.now() + 10 * 60 * 1000;
-  const modelUrl = await pollTask({
-    deadline,
-    timeoutMsg: "Tripo 任务超时（10 分钟）",
-    intervalMs: 5000,
-    checkStatus: async () => {
-      const pr = await fetch(`https://openapi.tripo3d.ai/v3/tasks/${taskId}`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
-      if (!pr.ok) throw new Error(`Tripo 状态查询失败 ${pr.status}`);
-      const d = (await pr.json()).data || {};
-      return { done: d.status === "success", failed: d.status === "failed", error: d.status, modelUrl: d.output?.model_url };
-    },
-  });
-  if (!modelUrl) throw new Error("Tripo 输出中未找到 GLB 链接");
-  const glbBuffer = await downloadBuffer(modelUrl);
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-  const manifest = { total_parts: 0, parts: [], engine: "tripo" };
-  console.log(`  ✅ 图片转3D（Tripo）完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
-  sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
-}
-
-/**
- * Hyper3D(Rodin) image-to-3d：multipart POST /api/v2/rodin（直接传 base64 解码图片）
- * → 轮询 POST /api/v2/status（subscription_key）→ POST /api/v2/download 取 GLB 链接
- */
-async function runHyper3DImageTo3D(cfg, body, imageBase64, res, startTime) {
-  const apiKey = requireProviderKey("Hyper3D(Rodin)", cfg, "HYPER3D_API_KEY", res);
-  if (!apiKey) return;
-  const mimeMatch = /^data:(image\/[a-zA-Z0-9.+-]+)/.exec(body.image);
-  const mime = (mimeMatch && mimeMatch[1]) || "image/png";
-  const ext = mime === "image/jpeg" ? ".jpg" : mime === "image/webp" ? ".webp" : ".png";
-  const imageBytes = Buffer.from(imageBase64, "base64");
-  const form = new FormData();
-  form.append("images", new Blob([imageBytes], { type: mime }), `0000${ext}`);
-  form.append("tier", "Sketch");
-  form.append("mesh_mode", "Raw");
-  form.append("texture_mode", "high");
-  console.log(`  🌐 图片转3D: 创建 Hyper3D Rodin 任务 (${(imageBytes.length / 1024).toFixed(1)} KB)`);
-  const createRes = await fetch("https://hyperhuman.deemos.com/api/v2/rodin", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form,
-  });
-  if (!createRes.ok) {
-    const t = await createRes.text();
-    throw new Error(`Hyper3D 创建任务失败 ${createRes.status}: ${t.slice(0, 400)}`);
-  }
-  const cd = await createRes.json();
-  const uuid = cd.uuid || (cd.data && cd.data.uuid);
-  const subKey = cd.subscription_key || (cd.data && cd.data.subscription_key);
-  if (!uuid || !subKey) throw new Error("Hyper3D 未返回任务标识 (uuid/subscription_key)");
-  const deadline = Date.now() + 10 * 60 * 1000;
-  await pollTask({
-    deadline,
-    timeoutMsg: "Hyper3D 任务超时（10 分钟）",
-    intervalMs: 5000,
-    checkStatus: async () => {
-      const pr = await fetch("https://hyperhuman.deemos.com/api/v2/status", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ subscription_key: subKey }),
-      });
-      if (!pr.ok) throw new Error(`Hyper3D 状态查询失败 ${pr.status}`);
-      const d = await pr.json();
-      const jobs = d.jobs || [];
-      if (jobs.some((j) => j.status === "Failed")) throw new Error("Hyper3D 生成失败");
-      return { done: jobs.length > 0 && jobs.every((j) => j.status === "Done") };
-    },
-  });
-  const dlRes = await fetch("https://hyperhuman.deemos.com/api/v2/download", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ task_uuid: uuid }),
-  });
-  if (!dlRes.ok) {
-    const t = await dlRes.text();
-    throw new Error(`Hyper3D 下载请求失败 ${dlRes.status}: ${t.slice(0, 400)}`);
-  }
-  const dlData = await dlRes.json();
-  const list = dlData.list || [];
-  const glbItem = list.find((i) => i.name && i.name.endsWith(".glb"));
-  if (!glbItem || !glbItem.url) throw new Error("Hyper3D 未返回 GLB 下载链接");
-  const glbBuffer = await downloadBuffer(glbItem.url);
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-  const manifest = { total_parts: 0, parts: [], engine: "hyper3d" };
-  console.log(`  ✅ 图片转3D（Hyper3D）完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
-  sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
-}
 
 /**
  * AI 配置存储
@@ -1149,7 +868,7 @@ function handleAIConfigGet(req, res) {
  * 保存 AI 配置
  */
 function handleAIConfigPost(req, res) {
-  readJSONBody(req)
+  readBody(req, { maxSize: 10 * 1024 })
     .then(config => {
       // 保留现有的 API Key（新值为空或脱敏占位 '***' 时视为未修改）
       if (config.openai && (!config.openai.key || config.openai.key === '***')) {
@@ -1206,7 +925,7 @@ function handleAIConfigPost(req, res) {
  */
 async function handleAITest(req, res) {
   try {
-    const body = await readJSONBody(req);
+    const body = await readBody(req, { maxSize: 10 * 1024 });
     const prompt = body.prompt || 'Hello';
     
     // 根据配置调用相应的 AI
@@ -1284,7 +1003,7 @@ const PROVIDER_PROBES = {
  */
 async function handleProviderTest(req, res) {
   try {
-    const body = await readJSONBody(req);
+    const body = await readBody(req, { maxSize: 10 * 1024 });
     const provider = body.provider;
     const apiKey = (body.apiKey || "").trim();
     const probe = PROVIDER_PROBES[provider];
@@ -1409,39 +1128,6 @@ async function callOllama(prompt) {
 }
 
 /**
- * 读取 JSON 请求体
- */
-function readJSONBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let totalReceived = 0;
-    const MAX_JSON_SIZE = 10 * 1024; // 10 KB
-
-    req.on("data", chunk => {
-      totalReceived += chunk.length;
-      if (totalReceived > MAX_JSON_SIZE) {
-        reject(new Error("请求体太大"));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-
-    req.on("end", () => {
-      try {
-        const buffer = Buffer.concat(chunks);
-        const json = JSON.parse(buffer.toString("utf-8"));
-        resolve(json);
-      } catch (err) {
-        reject(new Error("JSON 解析失败: " + err.message));
-      }
-    });
-
-    req.on("error", reject);
-  });
-}
-
-/**
  * 健康检查
  */
 async function handleHealth(req, res) {
@@ -1544,7 +1230,7 @@ async function handleSplit(req, res) {
 
   try {
     // 1. 解析上传的文件
-    const file = await parseMultipart(req);
+    const file = await readBody(req, { maxSize: MAX_FILE_SIZE });
     if (!file) {
       sendJSON(res, 400, { error: "未收到文件" });
       return;
