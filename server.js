@@ -839,19 +839,41 @@ function providerApiKey(cfg, envVar) {
 }
 
 /**
+ * 校验厂商 API Key；缺失则直接回 400 并返回 null（调用方应 return）。
+ */
+function requireProviderKey(label, cfg, envVar, res) {
+  const apiKey = providerApiKey(cfg, envVar);
+  if (!apiKey) {
+    sendJSON(res, 400, {
+      error:
+        `${label} 未配置 API Key：请在 ai-config.html 的「图片转3D」中填入 ${label} API Key，` +
+        `或设置环境变量 ${envVar}。`,
+    });
+  }
+  return apiKey || null;
+}
+
+/**
+ * 通用轮询：周期性调用 checkStatus 直到返回 { done } 或超时。
+ * checkStatus 返回 { done:boolean, failed?:boolean, error?:string, modelUrl?:string }。
+ */
+async function pollTask({ deadline, timeoutMsg, intervalMs = 5000, checkStatus }) {
+  while (true) {
+    if (Date.now() > deadline) throw new Error(timeoutMsg);
+    await sleep(intervalMs);
+    const r = await checkStatus();
+    if (r.failed) throw new Error(r.error || "任务失败");
+    if (r.done) return r.modelUrl;
+  }
+}
+
+/**
  * Meshy image-to-3d：POST /openapi/v1/image-to-3d（image_url 支持 base64 Data URI）
  * → 轮询 GET /openapi/v1/image-to-3d/:id → 下载 model_urls.glb
  */
 async function runMeshyImageTo3D(cfg, body, imageBase64, res, startTime) {
-  const apiKey = providerApiKey(cfg, "MESHY_API_KEY");
-  if (!apiKey) {
-    sendJSON(res, 400, {
-      error:
-        "Meshy 未配置 API Key：请在 ai-config.html 的「图片转3D」中填入 Meshy API Key，" +
-        "或设置环境变量 MESHY_API_KEY。",
-    });
-    return;
-  }
+  const apiKey = requireProviderKey("Meshy", cfg, "MESHY_API_KEY", res);
+  if (!apiKey) return;
   const mime = (/^data:(image\/[a-zA-Z0-9.+-]+)/.exec(body.image) || [])[1] || "image/png";
   const dataUri = `data:${mime};base64,${imageBase64}`;
   console.log("  🌐 图片转3D: 创建 Meshy image-to-3d 任务");
@@ -867,19 +889,24 @@ async function runMeshyImageTo3D(cfg, body, imageBase64, res, startTime) {
   const taskId = (await createRes.json()).result;
   if (!taskId) throw new Error("Meshy 未返回任务 ID");
   const deadline = Date.now() + 10 * 60 * 1000;
-  let status = "PENDING", modelUrl = null;
-  while (status !== "SUCCEEDED" && status !== "FAILED" && status !== "CANCELED") {
-    if (Date.now() > deadline) throw new Error("Meshy 任务超时（10 分钟）");
-    await sleep(5000);
-    const pr = await fetch(`https://api.meshy.ai/openapi/v1/image-to-3d/${taskId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (!pr.ok) throw new Error(`Meshy 状态查询失败 ${pr.status}`);
-    const d = await pr.json();
-    status = d.status;
-    modelUrl = d.model_urls?.glb || d.model_url;
-  }
-  if (status !== "SUCCEEDED") throw new Error(`Meshy 任务失败: ${status}`);
+  const modelUrl = await pollTask({
+    deadline,
+    timeoutMsg: "Meshy 任务超时（10 分钟）",
+    intervalMs: 5000,
+    checkStatus: async () => {
+      const pr = await fetch(`https://api.meshy.ai/openapi/v1/image-to-3d/${taskId}`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (!pr.ok) throw new Error(`Meshy 状态查询失败 ${pr.status}`);
+      const d = await pr.json();
+      return {
+        done: d.status === "SUCCEEDED",
+        failed: d.status === "FAILED" || d.status === "CANCELED",
+        error: d.status,
+        modelUrl: d.model_urls?.glb || d.model_url,
+      };
+    },
+  });
   if (!modelUrl) throw new Error("Meshy 输出中未找到 GLB 链接");
   const glbBuffer = await downloadBuffer(modelUrl);
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -893,15 +920,8 @@ async function runMeshyImageTo3D(cfg, body, imageBase64, res, startTime) {
  * → 轮询 GET /v3/tasks/:id → 下载 output.model_url
  */
 async function runTripoImageTo3D(cfg, body, imageBase64, res, startTime) {
-  const apiKey = providerApiKey(cfg, "TRIPO_API_KEY");
-  if (!apiKey) {
-    sendJSON(res, 400, {
-      error:
-        "Tripo 未配置 API Key：请在 ai-config.html 的「图片转3D」中填入 Tripo API Key，" +
-        "或设置环境变量 TRIPO_API_KEY。",
-    });
-    return;
-  }
+  const apiKey = requireProviderKey("Tripo", cfg, "TRIPO_API_KEY", res);
+  if (!apiKey) return;
   const mime = (/^data:(image\/[a-zA-Z0-9.+-]+)/.exec(body.image) || [])[1] || "image/png";
   const imageBytes = Buffer.from(imageBase64, "base64");
   const form = new FormData();
@@ -932,19 +952,19 @@ async function runTripoImageTo3D(cfg, body, imageBase64, res, startTime) {
   const taskId = (await taskRes.json())?.data?.task_id;
   if (!taskId) throw new Error("Tripo 未返回 task_id");
   const deadline = Date.now() + 10 * 60 * 1000;
-  let status = "processing", modelUrl = null;
-  while (status !== "success" && status !== "failed") {
-    if (Date.now() > deadline) throw new Error("Tripo 任务超时（10 分钟）");
-    await sleep(5000);
-    const pr = await fetch(`https://openapi.tripo3d.ai/v3/tasks/${taskId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (!pr.ok) throw new Error(`Tripo 状态查询失败 ${pr.status}`);
-    const d = (await pr.json()).data || {};
-    status = d.status;
-    modelUrl = d.output?.model_url;
-  }
-  if (status !== "success") throw new Error(`Tripo 任务失败: ${status}`);
+  const modelUrl = await pollTask({
+    deadline,
+    timeoutMsg: "Tripo 任务超时（10 分钟）",
+    intervalMs: 5000,
+    checkStatus: async () => {
+      const pr = await fetch(`https://openapi.tripo3d.ai/v3/tasks/${taskId}`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (!pr.ok) throw new Error(`Tripo 状态查询失败 ${pr.status}`);
+      const d = (await pr.json()).data || {};
+      return { done: d.status === "success", failed: d.status === "failed", error: d.status, modelUrl: d.output?.model_url };
+    },
+  });
   if (!modelUrl) throw new Error("Tripo 输出中未找到 GLB 链接");
   const glbBuffer = await downloadBuffer(modelUrl);
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -958,15 +978,8 @@ async function runTripoImageTo3D(cfg, body, imageBase64, res, startTime) {
  * → 轮询 POST /api/v2/status（subscription_key）→ POST /api/v2/download 取 GLB 链接
  */
 async function runHyper3DImageTo3D(cfg, body, imageBase64, res, startTime) {
-  const apiKey = providerApiKey(cfg, "HYPER3D_API_KEY");
-  if (!apiKey) {
-    sendJSON(res, 400, {
-      error:
-        "Hyper3D(Rodin) 未配置 API Key：请在 ai-config.html 的「图片转3D」中填入 Hyper3D API Key，" +
-        "或设置环境变量 HYPER3D_API_KEY。",
-    });
-    return;
-  }
+  const apiKey = requireProviderKey("Hyper3D(Rodin)", cfg, "HYPER3D_API_KEY", res);
+  if (!apiKey) return;
   const mimeMatch = /^data:(image\/[a-zA-Z0-9.+-]+)/.exec(body.image);
   const mime = (mimeMatch && mimeMatch[1]) || "image/png";
   const ext = mime === "image/jpeg" ? ".jpg" : mime === "image/webp" ? ".webp" : ".png";
@@ -991,21 +1004,23 @@ async function runHyper3DImageTo3D(cfg, body, imageBase64, res, startTime) {
   const subKey = cd.subscription_key || (cd.data && cd.data.subscription_key);
   if (!uuid || !subKey) throw new Error("Hyper3D 未返回任务标识 (uuid/subscription_key)");
   const deadline = Date.now() + 10 * 60 * 1000;
-  let allDone = false;
-  while (!allDone) {
-    if (Date.now() > deadline) throw new Error("Hyper3D 任务超时（10 分钟）");
-    await sleep(5000);
-    const pr = await fetch("https://hyperhuman.deemos.com/api/v2/status", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ subscription_key: subKey }),
-    });
-    if (!pr.ok) throw new Error(`Hyper3D 状态查询失败 ${pr.status}`);
-    const d = await pr.json();
-    const jobs = d.jobs || [];
-    if (jobs.some((j) => j.status === "Failed")) throw new Error("Hyper3D 生成失败");
-    allDone = jobs.length > 0 && jobs.every((j) => j.status === "Done");
-  }
+  await pollTask({
+    deadline,
+    timeoutMsg: "Hyper3D 任务超时（10 分钟）",
+    intervalMs: 5000,
+    checkStatus: async () => {
+      const pr = await fetch("https://hyperhuman.deemos.com/api/v2/status", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ subscription_key: subKey }),
+      });
+      if (!pr.ok) throw new Error(`Hyper3D 状态查询失败 ${pr.status}`);
+      const d = await pr.json();
+      const jobs = d.jobs || [];
+      if (jobs.some((j) => j.status === "Failed")) throw new Error("Hyper3D 生成失败");
+      return { done: jobs.length > 0 && jobs.every((j) => j.status === "Done") };
+    },
+  });
   const dlRes = await fetch("https://hyperhuman.deemos.com/api/v2/download", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
