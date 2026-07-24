@@ -21,9 +21,9 @@
 ## Next — Sprint 2–3（已规划）
 | ID | 任务 | MoSCoW | 依赖 | 状态 |
 |---|---|---|---|---|
-| NE1 | `server.js` 模块化拆分：`src/response.js`(sendJSON/sendBinaryResult)、`src/providers/image-to-3d.js`(厂商函数)、`src/routes`/`src/config`；`server.js` 退化为装配入口 | Should | N3 | 🚧 进行中 |
-| NE2 | 复用 `src/server-utils.js`：统一 CORS/文件清理/解析助手，避免并行实现 | Should | 无 | ⬜ |
-| NE3 | 统一请求体解析：合并 `parseMultipart` / `readJSONBodyMax` / `readJSONBody` 为单入口 `readBody(req, {maxSize})`（按 Content-Type 分发，复用 `parseMultipartBuffer`） | Should | NE2 | ⬜ |
+| NE1 | `server.js` 模块化拆分：云端图片转3D 厂商函数抽至 `src/providers/image-to-3d.js`（纯函数，返回 `{glbBuffer, manifest}`）；`server.js` 降至 ~1530 行 | Should | N3 | ✅ 已完成 |
+| NE2 | 复用 `src/server-utils.js`：移除并行实现，`server.js` 仅引入 `getCORSHeaders`/`cleanupOldTempFiles`/`MAX_FILE_SIZE` | Should | 无 | ✅ 已完成 |
+| NE3 | 统一请求体解析：`src/body.js` 的 `readBody(req,{maxSize})` 按 Content-Type 分发 JSON/multipart，复用 `parseMultipartBuffer`，取代三套旧解析器 | Should | NE2 | ✅ 已完成 |
 | NE4 | 配置 schema 化 + 模型单一来源：`src/provider-models.js` 抽模型清单，server 与 `ai-config.html` 共享；`handleAIConfigPost` 增加校验 | Should | 无 | ⬜ |
 
 ## Later — Sprint 4+（方向性）
@@ -43,3 +43,4 @@
 
 ## 进度日志
 - 2026-07-24：N2/N3 完成并推送；启动 NE1-NE4 + 依赖治理（用户指令「1 2 3」）。
+- 2026-07-24：依赖 3 项 high 漏洞修复（npm audit fix，传递 devDeps）；NE1（providers 模块抽出）+ NE2 + NE3（统一请求体解析）完成，server.js 约 1854→1530 行，冒烟测试通过（/api/health、/api/ai-config 均 200）。NE4（模型清单单一来源）待做。
