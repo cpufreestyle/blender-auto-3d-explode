@@ -2934,8 +2934,8 @@ function setupUpload() {
       return;
     }
 
-    if (file.size > 100 * 1024 * 1024) {
-      showStatus("❌ 文件太大\n请上传小于 100MB 的文件", "error");
+    if (file.size > 150 * 1024 * 1024) {
+      showStatus("❌ 文件太大\n请上传小于 150MB 的文件", "error");
       return;
     }
 
