@@ -280,11 +280,14 @@ function sendBinaryResult(res, glbBuffer, manifest, elapsed, baseName) {
 
 /**
  * 是否自动用 Blender GUI 打开生成的三维模型。
- * 默认开启；可用环境变量 OPEN_IN_BLENDER=0 临时关闭（如自动化测试）。
+ * 默认关闭（避免每次生成都弹出 Blender 窗口）；可用环境变量强制覆盖：
+ *   OPEN_IN_BLENDER=0 强制关闭，OPEN_IN_BLENDER=1 强制开启。
+ * 否则跟随配置（ai-config.json 的 openInBlender 字段）。
  */
 function shouldOpenInBlender() {
   if (process.env.OPEN_IN_BLENDER === "0") return false;
-  return AI_CONFIG.openInBlender !== false;
+  if (process.env.OPEN_IN_BLENDER === "1") return true;
+  return AI_CONFIG.openInBlender === true;
 }
 
 /**
@@ -822,8 +825,8 @@ let AI_CONFIG = {
   nvidia: { key: '', model: DEFAULT_MODELS.nvidia, base_url: 'https://integrate.api.nvidia.com/v1' },
   // Kimi（月之暗面 / Moonshot AI）— OpenAI 兼容接口；默认最新旗舰 kimi-k3（原生 1M 上下文）
   kimi: { key: '', model: 'kimi-k3', longContext: false },
-  // 生成的三维模型完成后是否自动用 Blender GUI 打开显示（默认开启）
-  openInBlender: true,
+  // 生成的三维模型完成后是否自动用 Blender GUI 打开显示（默认关闭，避免每次生成都弹出 Blender 窗口）
+  openInBlender: false,
   // 图片转 3D：mode=local 调用本地 TripoSR 真重建（scripts/triposr_infer.py，离线推理，需先 bash scripts/setup_triposr.sh）；
   //          mode=replicate 走 Replicate 云端（token/owner/name/modelVersion）
   replicate: {

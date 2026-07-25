@@ -687,6 +687,20 @@
             </div>
         </div>
 
+        <!-- 通用设置 -->
+        <div class="card">
+            <div class="card-title">
+                <div class="icon">⚙️</div>
+                通用设置
+            </div>
+            <div class="form-group checkbox-group">
+                <label class="checkbox-inline">
+                    <input type="checkbox" id="open-in-blender">
+                    <span>🪟 生成模型后自动用 Blender 打开预览（默认关闭，避免每次都弹出 Blender 窗口；需要时勾选开启）</span>
+                </label>
+            </div>
+        </div>
+
         <div class="card">
             <div class="card-title">
                 <div class="icon">🧪</div>
@@ -823,6 +837,8 @@
                         document.getElementById('hyper3d-api-key').value = (config.providers?.hyper3d?.apiKey) ? '***' : '';
                     }
                 }
+                const openBlenderEl = document.getElementById('open-in-blender');
+                if (openBlenderEl) openBlenderEl.checked = config.openInBlender === true;
                 updateConfigReminder(config);
             } catch (err) {
                 console.log('No saved config');
@@ -908,7 +924,8 @@
                         apiKey: document.getElementById('hyper3d-api-key').value,
                         mode: 'MAIN_SITE'
                     }
-                }
+                },
+                openInBlender: document.getElementById('open-in-blender').checked
             };
             
             try {
