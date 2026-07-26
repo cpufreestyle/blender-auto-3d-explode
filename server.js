@@ -122,6 +122,32 @@ function findBlender() {
   return "blender";
 }
 
+// ── Blender 单飞守卫 ──────────────────────────────────
+// 确保本服务器进程同一时刻最多只持有「一个」Blender：
+//   · 后台任务（拆解 / AI 绘画，均为 --background 无窗口）串行执行，互不重叠；
+//   · GUI 打开前先结束上一个由本服务器拉起的 Blender，避免窗口堆叠。
+// 注：常驻的 Blender MCP 宿主（用户自行启动、监听 9876）不在此管理范围内，保留不动。
+
+let activeBlenderChild = null;          // 本服务器当前持有的 Blender 子进程（GUI）
+let blenderJobChain = Promise.resolve(); // 后台任务串行队列
+
+/** 后台 Blender 任务串行器：保证任意时刻只有一个 --background Blender 在跑 */
+function enqueueBlenderJob(task) {
+  const run = blenderJobChain.then(task, task);
+  blenderJobChain = run.catch(() => {}); // 吞掉异常，避免队列断裂
+  return run;
+}
+
+/** 结束上一个由本服务器拉起的 Blender（GUI 打开前调用，避免窗口堆叠） */
+function killTrackedBlender() {
+  const prev = activeBlenderChild;
+  activeBlenderChild = null;
+  if (!prev) return;
+  try { prev.kill("SIGTERM"); } catch {}
+  const pid = prev.pid;
+  setTimeout(() => { try { process.kill(pid, "SIGKILL"); } catch {} }, 3000);
+}
+
 /**
  * 调用 Blender CLI 进行 AI 绘画（生成模型）
  */
@@ -148,12 +174,13 @@ async function runBlenderAIPaint(prompt, outputPath, manifestPath, imageFeatures
 
   console.log(`  🎨 AI 绘画: ${BLENDER_PATH} ${args.join(" ")}`);
 
-  const { stdout, stderr } = await execFileAsync(BLENDER_PATH, args, {
-    timeout: 120_000, // 2 分钟超时
-    maxBuffer: 50 * 1024 * 1024,
-  });
-
-  return { stdout, stderr };
+  // 单飞守卫：与其他后台 Blender 任务串行，确保同一时刻只跑一个
+  return enqueueBlenderJob(() =>
+    execFileAsync(BLENDER_PATH, args, {
+      timeout: 120_000, // 2 分钟超时
+      maxBuffer: 50 * 1024 * 1024,
+    })
+  );
 }
 
 /**
@@ -188,13 +215,14 @@ async function runBlenderSplit(inputPath, outputPath, manifestPath, originalFile
 
   console.log(`  🔧 调用 Blender: ${BLENDER_PATH} ${args.join(" ")}`);
 
-  const { stdout, stderr } = await execFileAsync(BLENDER_PATH, args, {
-    timeout: 600_000, // 10 分钟超时（大模型需要更久）
-    maxBuffer: 50 * 1024 * 1024,
-    env,
-  });
-
-  return { stdout, stderr };
+  // 单飞守卫：与其他后台 Blender 任务串行，确保同一时刻只跑一个
+  return enqueueBlenderJob(() =>
+    execFileAsync(BLENDER_PATH, args, {
+      timeout: 600_000, // 10 分钟超时（大模型需要更久）
+      maxBuffer: 50 * 1024 * 1024,
+      env,
+    })
+  );
 }
 
 // ── 安全的 multipart 解析器 ────────────────────────────
@@ -314,13 +342,9 @@ function saveGeneratedModel(glbBuffer, baseName) {
 }
 
 /**
- * 记录上一个被打开的 Blender GUI 进程，用于「打开新窗口后自动关闭旧窗口」。
- */
-let lastBlenderChild = null;
-
-/**
  * 用 Blender GUI 打开指定 GLB（fire-and-forget，不阻塞响应）
  * 每次调用都会拉起一个新的 Blender 窗口；新窗口就绪后，自动关闭上一个窗口。
+ * 配合全局单飞守卫（activeBlenderChild / killTrackedBlender），保证本服务器最多只弹出一个 Blender 窗口。
  */
 function openInBlender(glbPath) {
   const platform = os.platform();
@@ -366,13 +390,13 @@ function openInBlender(glbPath) {
     args = ["--python", importerPath];
   }
 
-  // 记录旧窗口进程，待新窗口拉起并加载完成后自动关闭
-  const prevChild = lastBlenderChild;
-  lastBlenderChild = null;
+  // 记录旧窗口进程，待新窗口拉起并加载完成后自动关闭（单飞守卫：同一时刻只有一个 GUI Blender）
+  const prevChild = activeBlenderChild;
+  activeBlenderChild = null;
 
   const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
   child.unref();
-  lastBlenderChild = child;
+  activeBlenderChild = child;
 
   // macOS：把 Blender 窗口提到最前，确保用户能看到
   if (platform === "darwin") {
