@@ -31,7 +31,7 @@
 | ID | 任务 | MoSCoW | 状态 |
 |---|---|---|---|
 | L1 | 统一路由/中间件 + 错误响应 + 结构化日志（`wrap(handler)` 收敛 try/catch 与 `console.log`） | Could | ✅ `src/logger.js` + `wrap`/`respondError` 中间件 + 进程级异常守卫；`console.*` 重定向为结构化日志 |
-| L2 | `main.js` 前端模块化（按 3D 视图/上传/配置面板/VLM 流程拆 ES module） | Could | 🟡 试点×2：① 几何体拆分纯函数迁入 `src/geometry-split.js`；② 材质/乐高外观系统迁入 `src/lego-materials.js`（`currentModelStyle`/`applyModelStyle` 保留 main.js）。`main.js` 持续减负、行为不变；剩余（视图/上传/配置/VLM 面板）因共享状态耦合 + 无法在此环境跑 Three.js 预览，放最后单独做 |
+| L2 | `main.js` 前端模块化（按 3D 视图/上传/配置面板/VLM 流程拆 ES module） | Could | 🟡 试点×3：① 几何体拆分纯函数迁入 `src/geometry-split.js`；② 材质/乐高外观系统迁入 `src/lego-materials.js`（`currentModelStyle`/`applyModelStyle` 保留 main.js）；③ 「配置面板 + Blender 健康检测」迁入 `src/panels/config-panel.js`（`fetchConfigAndHighlight`/`fetchBlenderHealth`/`updateBlenderUI`/`launchBlender`，仅 DOM+fetch 无场景耦合）。`main.js` 持续减负、行为不变；剩余（3D 视图 / 上传 / VLM·AI 绘画面板）因与 scene/camera/renderer/动画循环强耦合 + 此环境无法跑 Three.js 预览，放最后单独做 |
 | L3 | 提升测试覆盖：provider 生成/预检函数单测（当前只能 HTTP 端到端） | Could | ✅ `tests/provider-test.mjs`（mock fetch，22 项全绿，无需真实 Key） |
 | L4 | 依赖漏洞治理：`npm audit` 跟进（default 分支存在 high 级漏洞，见 GitHub Dependabot 告警） | Must(技术健康) | ✅ lockfile 已修（npm audit fix）；GitHub Dependabot 因缓存滞后仍显 3 high，以 lockfile 为准 |
 
@@ -52,3 +52,4 @@
 - 2026-07-24：新增 OBJ 格式支持（上传 + 拆解），提交 `f69d82b`。四处闸门全部打通：`server.js` `/api/split` 格式白名单加入 `.obj`；`blender_split_glb.py` 的 `import_model()` 新增 `.obj` 分支（`bpy.ops.wm.obj_import`，回退 `bpy.ops.import_scene.obj`，均按 Blender 版本探测）；`main.js` `handleFile` 校验数组加入 `obj`；`index.html` 上传提示与 `file-input` accept 加入 `.obj`。端到端验证：上传双立方体 OBJ（972 顶点/768 面）→ Blender 成功导入并拆出 6 个部件 → 返回 GLB（HTTP 200，X-Total-Parts: 6）。
 - 2026-07-24：修复 `src/body.js` 的 multipart boundary 大小写敏感回归（L1 重构引入），含于提交 `f69d82b`。原 `readBody` 对 `content-type` 整体 `toLowerCase()`，会破坏大小写敏感的 boundary 值（RFC 2046），导致含大写字母的 boundary（浏览器/脚本生成的 `FormData` 上传常见）提取不到文件、报错「未能从请求中提取文件」。改为仅对「是否 multipart」判断做小写化，boundary 值保持原始大小写。该 bug 同样影响 GLB/GLTF/STL 等所有上传，对所有格式均生效。
 - 2026-07-25：上传文件大小上限 100MB → 150MB。提交 `fa1ed7f`（`src/server-utils.js` 的 `MAX_FILE_SIZE` + `index.html` 提示文案）+ 提交 `e6b9cdc`（修正 `main.js` `handleFile` 中遗漏的 `file.size > 100MB` 前端硬校验，文案同步为 150MB）。三处（后端上限 / 前端硬校验 / 提示文案）现已一致。
+- 2026-07-26：L2 继续 — 抽取 `main.js` 的「配置面板 + Blender 健康检测」到新模块 `src/panels/config-panel.js`（`fetchConfigAndHighlight` / 配置保存消息监听 / `fetchBlenderHealth` / `updateBlenderUI` / `launchBlender`，仅依赖 DOM+fetch，无 3D 场景耦合）。`main.js` 顶部 `import { fetchConfigAndHighlight }` 并删除原内联实现；`node --check` + `npm test`（22 项）均通过，行为不变。`main.js` 减约 70 行。剩余（3D 视图 / 上传 / VLM·AI 绘画面板）因与 scene/camera/renderer/动画循环强耦合 + 此环境无法跑 Three.js 预览，仍放最后单独做。
