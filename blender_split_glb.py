@@ -859,7 +859,9 @@ def call_vlm_vision_multi(provider, key, model, png_paths, part_labels):
         )
 
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        # 多图请求（一次发送全部部件图）推理较慢，超时给足 180s；
+        # 服务端 runBlenderSplit 整体有 600s 余量，不会因此被掐断。
+        with urllib.request.urlopen(req, timeout=180) as resp:
             data = json.loads(resp.read().decode())
     except Exception as e:
         raise RuntimeError(f"VLM 请求失败: {e}")
