@@ -159,7 +159,7 @@ async function runBlenderAIPaint(prompt, outputPath, manifestPath, imageFeatures
 /**
  * 调用 Blender CLI 拆解 GLB
  */
-async function runBlenderSplit(inputPath, outputPath, manifestPath, originalFileName) {
+async function runBlenderSplit(inputPath, outputPath, manifestPath, originalFileName, vlm = null) {
   const scriptPath = path.join(__dirname, "blender_split_glb.py");
   const args = [
     "--factory-startup",
@@ -177,11 +177,21 @@ async function runBlenderSplit(inputPath, outputPath, manifestPath, originalFile
     originalFileName,
   ];
 
+  // 可选的 VLM 部件语义标注：把 provider/model 作为命令行参数传入；
+  // API Key 只通过环境变量 VLM_API_KEY 安全传递（绝不出现在命令行，避免 ps 泄露）。
+  let env = process.env;
+  if (vlm && vlm.provider) {
+    args.push("--vlm-provider", vlm.provider);
+    if (vlm.model) args.push("--vlm-model", vlm.model);
+    if (vlm.key) env = { ...process.env, VLM_API_KEY: vlm.key };
+  }
+
   console.log(`  🔧 调用 Blender: ${BLENDER_PATH} ${args.join(" ")}`);
 
   const { stdout, stderr } = await execFileAsync(BLENDER_PATH, args, {
     timeout: 600_000, // 10 分钟超时（大模型需要更久）
     maxBuffer: 50 * 1024 * 1024,
+    env,
   });
 
   return { stdout, stderr };
@@ -827,6 +837,8 @@ let AI_CONFIG = {
   kimi: { key: '', model: 'kimi-k3', longContext: false },
   // 生成的三维模型完成后是否自动用 Blender GUI 打开显示（默认关闭，避免每次生成都弹出 Blender 窗口）
   openInBlender: false,
+  // 拆解时是否用 VLM 给每个部件标注语义名称（默认关闭；开启需同时配置 vlm provider/model 及对应 provider 的 API Key）
+  semanticLabel: false,
   // 图片转 3D：mode=local 调用本地 TripoSR 真重建（scripts/triposr_infer.py，离线推理，需先 bash scripts/setup_triposr.sh）；
   //          mode=replicate 走 Replicate 云端（token/owner/name/modelVersion）
   replicate: {
@@ -912,6 +924,8 @@ function handleAIConfigGet(req, res) {
     // 图片转3D 的 VLM 视觉模型路线（无 Key，仅 provider/model）
     vlm: AI_CONFIG.vlm ? { provider: AI_CONFIG.vlm.provider, model: AI_CONFIG.vlm.model } : undefined,
     openInBlender: AI_CONFIG.openInBlender !== false,
+    // 拆解时是否用 VLM 标注部件语义（默认关闭）
+    semanticLabel: AI_CONFIG.semanticLabel === true,
   };
   sendJSON(res, 200, safeConfig);
 }
@@ -1310,7 +1324,19 @@ async function handleSplit(req, res) {
 
       // 4. 调用 Blender
       try {
-        const result = await runBlenderSplit(inputPath, outputPath, manifestPath, fileName);
+        // 是否启用 VLM 部件语义标注：需同时开启 semanticLabel、配置 vlm provider/model，
+        // 且对应 provider（openai/stepfun/kimi/anthropic）已填 API Key；否则跳过。
+        let vlm = null;
+        if (AI_CONFIG.semanticLabel && AI_CONFIG.vlm && AI_CONFIG.vlm.provider) {
+          const prov = AI_CONFIG.vlm.provider;
+          const key = (AI_CONFIG[prov] && AI_CONFIG[prov].key) || "";
+          if (key) {
+            vlm = { provider: prov, model: AI_CONFIG.vlm.model || "", key };
+          } else {
+            console.warn(`  ⚠️ 已开启语义标注但未配置 ${prov} 的 API Key，跳过 VLM 标注`);
+          }
+        }
+        const result = await runBlenderSplit(inputPath, outputPath, manifestPath, fileName, vlm);
         blenderStdout = result.stdout || "";
         blenderStderr = result.stderr || "";
       } catch (berr) {

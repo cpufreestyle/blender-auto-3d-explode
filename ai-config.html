@@ -699,6 +699,12 @@
                     <span>🪟 生成模型后自动用 Blender 打开预览（默认关闭，避免每次都弹出 Blender 窗口；需要时勾选开启）</span>
                 </label>
             </div>
+            <div class="form-group checkbox-group">
+                <label class="checkbox-inline">
+                    <input type="checkbox" id="semantic-label">
+                    <span>🏷️ 拆解时用 AI 视觉模型标注部件语义名称（把每个部件离屏渲染成图，调用上方「图片转3D 的视觉模型」所见即用的 provider/model 识别部件；需对应服务商已配置 API Key，默认关闭）</span>
+                </label>
+            </div>
         </div>
 
         <div class="card">
@@ -839,6 +845,8 @@
                 }
                 const openBlenderEl = document.getElementById('open-in-blender');
                 if (openBlenderEl) openBlenderEl.checked = config.openInBlender === true;
+                const semanticEl = document.getElementById('semantic-label');
+                if (semanticEl) semanticEl.checked = config.semanticLabel === true;
                 updateConfigReminder(config);
             } catch (err) {
                 console.log('No saved config');
@@ -925,7 +933,8 @@
                         mode: 'MAIN_SITE'
                     }
                 },
-                openInBlender: document.getElementById('open-in-blender').checked
+                openInBlender: document.getElementById('open-in-blender').checked,
+                semanticLabel: document.getElementById('semantic-label').checked
             };
             
             try {

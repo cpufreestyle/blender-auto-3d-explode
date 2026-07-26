@@ -730,7 +730,191 @@ def split_quest3_hybrid(model_center, model_size):
         log(f"  补充后: {result_count} 个部件")
 
 
-def compute_manifest(is_quest3=False):
+# ───────────────────────────────────────────────────────────
+# VLM 部件语义标注（可选）
+# 把每个部件离屏渲染成 PNG，用多模态视觉模型（OpenAI / Kimi / StepFun / Claude）
+# 在一次请求里发送多张图，让模型一次性标注所有部件的语义名称，写入 manifest
+# 的 display_name（前端已优先展示 display_name）。
+# 仅当显式传入 --vlm-provider 且环境变量 VLM_API_KEY 存在时触发；否则完全不
+# 触碰网络，行为与原先一致。任何失败都会回退到几何/模板名称，绝不阻断拆解。
+# ───────────────────────────────────────────────────────────
+
+def render_part_pngs(meshes, tmp_dir, size=384, engine="BLENDER_WORKBENCH"):
+    """把每个部件单独离屏渲染成 PNG，返回 [(obj, png_path), ...]"""
+    scene = bpy.context.scene
+    old_engine = scene.render.engine
+    old_filepath = scene.render.filepath
+    old_res_x = scene.render.resolution_x
+    old_res_y = scene.render.resolution_y
+    old_camera = scene.camera
+
+    scene.render.engine = engine
+    scene.render.resolution_x = size
+    scene.render.resolution_y = size
+    scene.render.image_settings.file_format = 'PNG'
+    scene.render.film_transparent = True  # 透明背景，部件孤立清晰
+
+    cam = bpy.data.cameras.new("__vlm_cam__")
+    cam_obj = bpy.data.objects.new("__vlm_cam__", cam)
+    scene.collection.objects.link(cam_obj)
+    scene.camera = cam_obj
+    cam_obj.rotation_mode = 'QUATERNION'
+
+    results = []
+    try:
+        for obj in meshes:
+            for o in meshes:
+                o.hide_render = (o is not obj)
+            bbox = obj.bound_box
+            coords = [obj.matrix_world @ Vector(v[:]) for v in bbox]
+            center = sum(coords, Vector()) / len(coords)
+            xs = [c.x for c in coords]; ys = [c.y for c in coords]; zs = [c.z for c in coords]
+            max_dim = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs)) or 1.0
+            dist = max_dim * 2.2
+            cam_obj.location = (center.x, center.y - dist, center.z + max_dim * 0.3)
+            cam_obj.rotation_quaternion = (center - cam_obj.location).to_track_quat('-Z', 'Y')
+            png_path = os.path.join(tmp_dir, f"__vlm_part_{len(results):03d}.png")
+            scene.render.filepath = png_path
+            try:
+                bpy.ops.render.render(write_still=True)
+            except Exception as e:
+                log(f"    ⚠️ 部件渲染失败 ({obj.name}): {e}")
+                continue
+            if os.path.exists(png_path):
+                results.append((obj, png_path))
+            else:
+                log(f"    ⚠️ 部件渲染未产出文件 ({obj.name})")
+    finally:
+        for o in meshes:
+            o.hide_render = False
+        scene.render.engine = old_engine
+        scene.render.filepath = old_filepath
+        scene.render.resolution_x = old_res_x
+        scene.render.resolution_y = old_res_y
+        scene.camera = old_camera
+        try:
+            bpy.data.cameras.remove(cam)
+            bpy.data.objects.remove(cam_obj)
+        except Exception:
+            pass
+    return results
+
+
+def call_vlm_vision_multi(provider, key, model, png_paths, part_labels):
+    """调用多模态 VLM，对多张部件图一次性标注语义名称。
+
+    返回 dict: {部件在 part_labels 中的序号: 语义名}（仅含成功识别的）。
+    支持 openai 兼容（openai/kimi/stepfun）与 anthropic（Claude）多图输入。
+    """
+    import base64
+    import urllib.request
+    import re
+
+    images = []
+    for p in png_paths:
+        with open(p, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        images.append({"b64": b64, "mime": "image/png"})
+
+    label_list = "\n".join(f"  图{i + 1}: {lab}" for i, lab in enumerate(part_labels))
+    prompt = (
+        "你是一个 3D 模型部件识别专家。下面是某个 3D 模型拆解后的各个部件图片，"
+        "按以下编号对应：\n"
+        f"{label_list}\n\n"
+        "请识别每个部件最可能是什么（如：螺丝、外壳、齿轮、电池、主板、透镜、支架、"
+        "按键、接口、风扇、线缆、盖板、转轴等）。\n"
+        "只输出一个 JSON 数组，元素格式为 {\"idx\": 图编号(从1开始), \"name\": \"简短中文部件名\"}，"
+        "不要任何解释文字或代码块标记。"
+    )
+
+    VLM_PROVIDERS = {
+        "openai": {"base_url": "https://api.openai.com/v1", "kind": "openai"},
+        "kimi": {"base_url": "https://api.moonshot.cn/v1", "kind": "openai"},
+        "stepfun": {"base_url": "https://api.stepfun.com/v1", "kind": "openai"},
+        "anthropic": {"base_url": "https://api.anthropic.com/v1", "kind": "anthropic"},
+    }
+    prov = VLM_PROVIDERS.get(provider)
+    if not prov:
+        raise ValueError(f"不支持的 VLM provider: {provider}")
+
+    if prov["kind"] == "anthropic":
+        content = [{"type": "text", "text": prompt}]
+        for im in images:
+            content.append({"type": "image", "source": {"type": "base64", "media_type": im["mime"], "data": im["b64"]}})
+        payload = {"model": model, "max_tokens": 2048, "messages": [{"role": "user", "content": content}]}
+        req = urllib.request.Request(
+            prov["base_url"] + "/messages",
+            data=json.dumps(payload).encode(),
+            headers={"x-api-key": key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
+        )
+    else:
+        content = [{"type": "text", "text": prompt}]
+        for im in images:
+            content.append({"type": "image_url", "image_url": {"url": f"data:{im['mime']};base64,{im['b64']}"}})
+        payload = {"model": model, "messages": [{"role": "user", "content": content}]}
+        req = urllib.request.Request(
+            prov["base_url"] + "/chat/completions",
+            data=json.dumps(payload).encode(),
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        )
+
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        raise RuntimeError(f"VLM 请求失败: {e}")
+
+    if prov["kind"] == "anthropic":
+        text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+    else:
+        text = data["choices"][0]["message"]["content"]
+
+    m = re.search(r"\[.*\]", text, re.DOTALL)
+    if not m:
+        raise ValueError("VLM 未返回可解析的 JSON 数组")
+    arr = json.loads(m.group(0))
+    result = {}
+    for item in arr:
+        idx = int(item.get("idx", 0)) - 1
+        name = str(item.get("name", "")).strip()
+        if 0 <= idx < len(part_labels) and name:
+            result[idx] = name
+    return result
+
+
+def semantic_label_parts(vlm_provider, vlm_model, part_objs):
+    """对部件做 VLM 语义标注，返回 {obj: semantic_name}。失败返回空 dict（回退原名称）。"""
+    if not vlm_provider:
+        return {}
+    key = os.environ.get("VLM_API_KEY", "")
+    if not key:
+        log("  ⚠️ 未设置环境变量 VLM_API_KEY，跳过 VLM 语义标注")
+        return {}
+    import tempfile
+    import shutil
+    tmp_dir = tempfile.mkdtemp(prefix="vlm_parts_")
+    try:
+        rendered = render_part_pngs(part_objs, tmp_dir)
+        if not rendered:
+            return {}
+        png_paths = [p for _, p in rendered]
+        part_labels = [f"部件{idx + 1}" for idx in range(len(rendered))]
+        log(f"  🤖 VLM 语义标注中（{vlm_provider}/{vlm_model}，{len(rendered)} 个部件图）...")
+        mapping = call_vlm_vision_multi(vlm_provider, key, vlm_model, png_paths, part_labels)
+        result = {}
+        for i, (obj, _) in enumerate(rendered):
+            if i in mapping:
+                result[obj] = mapping[i]
+        log(f"  ✅ VLM 标注成功 {len(result)}/{len(rendered)} 个部件")
+        return result
+    except Exception as e:
+        log(f"  ⚠️ VLM 语义标注失败（回退几何/模板名称）: {e}")
+        return {}
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def compute_manifest(is_quest3=False, vlm_provider=None, vlm_model=None):
     """计算每个部件的元数据"""
     meshes = get_mesh_objects()
     manifest = {"parts": []}
@@ -803,6 +987,12 @@ def compute_manifest(is_quest3=False):
     # 按距离中心降序排列（外层先拆）
     parts_info.sort(key=lambda p: p["distance_from_center"], reverse=True)
 
+    # VLM 语义标注（可选）：仅当传入 vlm_provider 且环境变量 VLM_API_KEY 存在时触发；
+    # 返回 {mesh_obj: 语义名}，失败为空 dict，调用方回退到几何/模板名称。
+    semantic = {}
+    if vlm_provider:
+        semantic = semantic_label_parts(vlm_provider, vlm_model, meshes)
+
     # 命名：Quest 3 模型使用 Quest 3 名称；其他模型使用通用编号+方向
     if is_quest3:
         model_center_list = [center.x, center.y, center.z]
@@ -810,11 +1000,17 @@ def compute_manifest(is_quest3=False):
         for i, p in enumerate(parts_info):
             p["name"] = f"Part_{i+1:03d}"
             p["display_name"] = quest3_names[i]
-            log(f"  部件 {i+1}: {quest3_names[i]} (中心: {p['center']}, 距离: {p['distance_from_center']})")
+            if meshes[i] in semantic:
+                p["display_name"] = semantic[meshes[i]]
+                p["semantic_source"] = "vlm"
+            log(f"  部件 {i+1}: {p['display_name']} (中心: {p['center']}, 距离: {p['distance_from_center']})")
     else:
         for i, p in enumerate(parts_info):
             p["name"] = f"Part_{i+1:03d}"
             p["display_name"] = f"部件{i+1}·{p['direction']}"
+            if meshes[i] in semantic:
+                p["display_name"] = semantic[meshes[i]]
+                p["semantic_source"] = "vlm"
             log(f"  部件 {i+1}: {p['display_name']} (中心: {p['center']}, 距离: {p['distance_from_center']})")
 
     manifest["parts"] = parts_info
@@ -838,6 +1034,8 @@ def parse_args():
     output_path = None
     manifest_path = None
     original_filename = None
+    vlm_provider = None
+    vlm_model = None
 
     i = 0
     while i < len(script_args):
@@ -854,6 +1052,12 @@ def parse_args():
         elif arg == '--original-filename' and i + 1 < len(script_args):
             original_filename = script_args[i + 1]
             i += 2
+        elif arg == '--vlm-provider' and i + 1 < len(script_args):
+            vlm_provider = script_args[i + 1]
+            i += 2
+        elif arg == '--vlm-model' and i + 1 < len(script_args):
+            vlm_model = script_args[i + 1]
+            i += 2
         else:
             i += 1
 
@@ -864,7 +1068,7 @@ def parse_args():
     if not manifest_path:
         raise ValueError(f"缺少 --manifest 参数")
 
-    return input_path, output_path, manifest_path, original_filename
+    return input_path, output_path, manifest_path, original_filename, vlm_provider, vlm_model
 
 
 def main():
@@ -875,7 +1079,9 @@ def main():
     log("=" * 60)
 
     try:
-        input_path, output_path, manifest_path, original_filename = parse_args()
+        input_path, output_path, manifest_path, original_filename, vlm_provider, vlm_model = parse_args()
+        if vlm_provider:
+            log(f"  VLM 语义标注: provider={vlm_provider} model={vlm_model or '(默认)'}（需环境变量 VLM_API_KEY）")
         log(f"  输入: {input_path}")
         log(f"  输出: {output_path}")
         log(f"  清单: {manifest_path}")
@@ -970,7 +1176,7 @@ def main():
 
         # 7. 计算清单
         log("\n7️⃣ 计算部件元数据...")
-        manifest = compute_manifest(is_quest3=is_q3)
+        manifest = compute_manifest(is_quest3=is_q3, vlm_provider=vlm_provider, vlm_model=vlm_model)
         log(f"  总部件数: {manifest['total_parts']}")
 
         # 8. 导出 GLB
