@@ -9,12 +9,12 @@
 ### macOS
 1. 双击 `start.command` 文件
 2. 首次运行会自动安装依赖
-3. 浏览器自动打开 http://localhost:3001
+3. 浏览器自动打开 <http://localhost:3001>
 
 ### Windows
 1. 双击 `start.bat` 文件
 2. 首次运行会自动安装依赖
-3. 浏览器自动打开 http://localhost:3001
+3. 浏览器自动打开 <http://localhost:3001>
 
 ### 命令行方式
 ```bash

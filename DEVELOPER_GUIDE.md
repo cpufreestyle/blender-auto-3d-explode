@@ -129,7 +129,7 @@ bash scripts/setup_triposr.sh
 | `removeBg` | 用 rembg 自动抠图 | false |
 | `device` | `auto` / `cpu` / `cuda` | auto |
 
-**说明：** 纯离线推理，运行时无需任何云端 API/Token；权重首次从 HuggingFace 自动下载（约数百 MB，慢可设 `HF_ENDPOINT=https://hf-mirror.com`）；CPU 上单张推理可能需数分钟，server 端超时已放宽到 15 分钟、前端 20 分钟；`blender_image_to_3d.py` 仍保留但 local 模式已不再调用它。
+**说明：** 纯离线推理，运行时无需任何云端 API/Token；权重首次从 HuggingFace 自动下载（约数百 MB，慢可设 `HF_ENDPOINT=https://hf-mirror.com`）；CPU> 上单张推理可能需数分钟，server 端超时已放宽到 15 分钟、前端 20 分钟；`blender_image_to_3d.py` 仍保留但 local 模式已不再调用它。
 
 **本地 MCP 服务端 `scripts/mcp_server.py`** 通过 TCP 连接 addon（默认 `localhost:9876`），把上述能力暴露为 **16 个 MCP 工具**（含 `execute_code` 逃生通道）。它通过 `.mcp.json` 的 `blender-fusion` 入口被 IDE 加载，与 stock `blender` 服务端并存。
 
@@ -304,7 +304,7 @@ test(explode): 补充爆炸动画测试
 
 ## 📁 文件组织结构
 
-```
+```text
 quest3-exploded/
 ├── 📂 src/                    # 前端源代码
 │   ├── quest3-data.js       # Quest 3 配置文件

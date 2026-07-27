@@ -69,7 +69,7 @@ node server.js
 
 ## 📦 项目结构
 
-```
+```text
 ├── index.html          # 主页面（3D 拆解预览）
 ├── ai-config.html      # AI 模型配置页
 ├── main.js             # Three.js 场景 & 拆解逻辑

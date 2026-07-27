@@ -208,13 +208,13 @@ npx vite
    npm i -g vercel
    ```
 
-2. 登录并部署：
+1. 登录并部署：
    ```bash
    cd blender-auto-3d-explode
    vercel
    ```
 
-3. 按提示选择 scope、项目名称，确认部署。
+1. 按提示选择 scope、项目名称，确认部署。
 
 项目已包含 `vercel.json`，静态文件会自动识别。
 
@@ -290,12 +290,12 @@ cat blender_output/test_output.txt
 blender --background --python blender_api_server.py -- --port 8000
 
 # 2. 远程控制
-curl -X POST <http://localhost:8000/api/create> \
+curl -X POST http://localhost:8000/api/create \
   -H "Content-Type: application/json" \
   -d '{"type":"cube","name":"MyCube","location":[0,0,0],"size":2.0}'
 
 # 3. 查看所有物体
-curl <http://localhost:8000/api/objects>
+curl http://localhost:8000/api/objects
 ```
 
 #### 方法 3：Quest 3 爆炸视图

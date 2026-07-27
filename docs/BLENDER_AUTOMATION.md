@@ -53,12 +53,12 @@ Watchdog 监听检测到变化
    /Applications/Blender.app/Contents/MacOS/Blender --version
    ```
 
-2. ✅ Python 3.7+
+1. ✅ Python 3.7+
    ```bash
    python3 --version
    ```
 
-3. ✅ 安装依赖
+1. ✅ 安装依赖
    ```bash
    pip3 install watchdog
    ```
@@ -199,14 +199,14 @@ print(f"✅ 创建了 {len(parts)} 个部件并设置爆炸动画")
    KeyError: 'bpy_prop_collection[key]: key "Transmission" not found'
    ```
 
-2. **自动修复代码**
+1. **自动修复代码**
    ```python
    # 在 create_materials() 函数中添加检查
    if 'Transmission' in bsdf.inputs:
        bsdf.inputs['Transmission'].default_value = 0.95
    ```
 
-3. **保存并重新执行**
+2. **保存并重新执行**
    - 保存修复后的脚本
    - Watchdog 自动检测
    - Blender 重新执行
@@ -269,7 +269,7 @@ print(f"✅ 从配置创建了 {len(config['parts'])} 个部件")
 #### 1. 创建物体
 
 ```bash
-curl -X POST <http://localhost:8000/api/create> \
+curl -X POST http://localhost:8000/api/create \
   -H "Content-Type: application/json" \
   -d '{"type":"cube","name":"MyCube","location":[0,0,0],"size":2.0}'
 ```
@@ -277,7 +277,7 @@ curl -X POST <http://localhost:8000/api/create> \
 #### 2. 应用材质
 
 ```bash
-curl -X POST <http://localhost:8000/api/material> \
+curl -X POST http://localhost:8000/api/material \
   -H "Content-Type: application/json" \
   -d '{"name":"MyCube","color":[0.8,0.2,0.2,1.0],"metallic":0.3}'
 ```
@@ -285,7 +285,7 @@ curl -X POST <http://localhost:8000/api/material> \
 #### 3. 添加动画
 
 ```bash
-curl -X POST <http://localhost:8000/api/animation> \
+curl -X POST http://localhost:8000/api/animation \
   -H "Content-Type: application/json" \
   -d '{"object":"MyCube","property":"location","start_value":[0,0,0],"end_value":[5,0,0],"start_frame":1,"end_frame":100}'
 ```
@@ -293,7 +293,7 @@ curl -X POST <http://localhost:8000/api/animation> \
 #### 4. 查看所有物体
 
 ```bash
-curl <http://localhost:8000/api/objects>
+curl http://localhost:8000/api/objects
 ```
 
 ---

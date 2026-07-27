@@ -172,22 +172,22 @@ blender --background --python blender_api_server.py -- --port 8000
 
 ```bash
 # 1. 创建立方体
-curl -X POST <http://localhost:8000/api/create> \
+curl -X POST http://localhost:8000/api/create \
   -H "Content-Type: application/json" \
   -d '{"type":"cube","name":"MyCube","location":[0,0,0],"size":3.0}'
 
 # 2. 设置金色材质
-curl -X POST <http://localhost:8000/api/material> \
+curl -X POST http://localhost:8000/api/material \
   -H "Content-Type: application/json" \
   -d '{"name":"MyCube","color":[1,0.84,0,1],"metallic":1}'
 
 # 3. 添加移动动画
-curl -X POST <http://localhost:8000/api/animation> \
+curl -X POST http://localhost:8000/api/animation \
   -H "Content-Type: application/json" \
   -d '{"object":"MyCube","property":"location","start_value":[0,0,0],"end_value":[5,0,0],"start_frame":1,"end_frame":100}'
 
 # 4. 查看所有物体
-curl <http://localhost:8000/api/objects>
+curl http://localhost:8000/api/objects
 ```
 
 ---

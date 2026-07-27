@@ -65,11 +65,11 @@ https://quest3-exploded.vercel.app
    # 启动 HTTPS 隧道
    ngrok http 8080
 
-   # 会生成类似 <https://xxxx-xx-xx-xx-xx.ngrok-free.app> 的地址
+   # 会生成类似 https://xxxx-xx-xx-xx-xx.ngrok-free.app 的地址
    # 在手机上访问这个 HTTPS 地址
    ```
 
-2. **使用 localtunnel**
+1. **使用 localtunnel**
    ```bash
    npm install -g localtunnel
    lt --port 8080 --print-requests
@@ -82,14 +82,14 @@ https://quest3-exploded.vercel.app
    chrome://flags/#unsafely-treat-insecure-origin-as-secure
    ```
 
-2. 启用该标志
+1. 启用该标志
 
-3. 添加你的本地地址：
+2. 添加你的本地地址：
 ```text
    http://192.168.1.113:8080
    ```
 
-4. 重启 Chrome
+1. 重启 Chrome
 
 **注意**：不推荐，仅用于开发测试
 
@@ -125,7 +125,7 @@ https://quest3-exploded.vercel.app
    chrome://flags/#webxr
    ```
 
-2. 检查状态：
+1. 检查状态：
    - `WebXR Device API` → **Enabled**
    - `WebXR Incubations` → **Enabled**
 
@@ -242,7 +242,7 @@ Google Play → Chrome → 更新
    电脑打开 Chrome → chrome://inspect
    ```
 
-2. **查看控制台**
+1. **查看控制台**
 ```text
    应该看到：
    ✅ WebXR AR supported: true

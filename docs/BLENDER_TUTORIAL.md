@@ -48,9 +48,9 @@
    /Users/a1-6/quest3-exploded/models/Quest3.glb
    ```
 
-3. 点击 **"Import glTF"**
+1. 点击 **"Import glTF"**
 
-4. **等待加载**（8.2 MB，可能需要几秒）
+2. **等待加载**（8.2 MB，可能需要几秒）
 
 ### 导入后检查
 

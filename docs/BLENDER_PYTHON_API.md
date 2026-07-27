@@ -89,23 +89,23 @@ blender --background --python blender_api_server.py -- --port 8000
 
 ```bash
 # 查看 API 文档
-curl <http://localhost:8000/>
+curl http://localhost:8000/
 
 # 获取所有物体
-curl <http://localhost:8000/api/objects>
+curl http://localhost:8000/api/objects
 
 # 创建立方体
-curl -X POST <http://localhost:8000/api/create> \
+curl -X POST http://localhost:8000/api/create \
   -H "Content-Type: application/json" \
   -d '{"type":"cube","name":"MyCube","location":[0,0,0],"size":2.0}'
 
 # 应用材质
-curl -X POST <http://localhost:8000/api/material> \
+curl -X POST http://localhost:8000/api/material \
   -H "Content-Type: application/json" \
   -d '{"name":"MyCube","color":[0.8,0.2,0.2,1.0],"metallic":0.3}'
 
 # 清空场景
-curl -X POST <http://localhost:8000/api/clear>
+curl -X POST http://localhost:8000/api/clear
 ```
 
 ---
@@ -420,17 +420,17 @@ blender --background --python blender_control.py -- --config config.json
 blender --background --python blender_api_server.py -- --port 8000
 
 # 2. 创建物体
-curl -X POST <http://localhost:8000/api/create> \
+curl -X POST http://localhost:8000/api/create \
   -H "Content-Type: application/json" \
   -d '{"type":"sphere","name":"Ball","location":[0,0,2],"radius":1.5}'
 
 # 3. 设置颜色
-curl -X POST <http://localhost:8000/api/material> \
+curl -X POST http://localhost:8000/api/material \
   -H "Content-Type: application/json" \
   -d '{"name":"Ball","color":[0,1,0,1]}'
 
 # 4. 添加动画
-curl -X POST <http://localhost:8000/api/animation> \
+curl -X POST http://localhost:8000/api/animation \
   -H "Content-Type: application/json" \
   -d '{"object":"Ball","property":"location","start_value":[0,0,2],"end_value":[5,0,2],"start_frame":1,"end_frame":100}'
 ```
