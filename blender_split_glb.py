@@ -800,6 +800,16 @@ def render_part_pngs(meshes, tmp_dir, size=384, engine="BLENDER_WORKBENCH"):
     return results
 
 
+# 支持的 VLM provider 及其默认模型（--vlm-model 未指定时使用 default_model）。
+# key 一律从环境变量 VLM_API_KEY 读取（绝不进命令行，避免 ps 泄露）。
+VLM_PROVIDERS = {
+    "openai":    {"base_url": "https://api.openai.com/v1",    "kind": "openai",    "default_model": "gpt-4o"},
+    "kimi":      {"base_url": "https://api.moonshot.cn/v1",   "kind": "openai",    "default_model": "moonshot-v1-8k"},
+    "stepfun":   {"base_url": "https://api.stepfun.com/v1",   "kind": "openai",    "default_model": "step-3.7-flash"},
+    "anthropic": {"base_url": "https://api.anthropic.com/v1", "kind": "anthropic", "default_model": "claude-3-5-sonnet-20241022"},
+}
+
+
 def call_vlm_vision_multi(provider, key, model, png_paths, part_labels):
     """调用多模态 VLM，对多张部件图一次性标注语义名称。
 
@@ -827,12 +837,6 @@ def call_vlm_vision_multi(provider, key, model, png_paths, part_labels):
         "不要任何解释文字或代码块标记。"
     )
 
-    VLM_PROVIDERS = {
-        "openai": {"base_url": "https://api.openai.com/v1", "kind": "openai"},
-        "kimi": {"base_url": "https://api.moonshot.cn/v1", "kind": "openai"},
-        "stepfun": {"base_url": "https://api.stepfun.com/v1", "kind": "openai"},
-        "anthropic": {"base_url": "https://api.anthropic.com/v1", "kind": "anthropic"},
-    }
     prov = VLM_PROVIDERS.get(provider)
     if not prov:
         raise ValueError(f"不支持的 VLM provider: {provider}")
@@ -891,6 +895,15 @@ def semantic_label_parts(vlm_provider, vlm_model, part_objs):
     key = os.environ.get("VLM_API_KEY", "")
     if not key:
         log("  ⚠️ 未设置环境变量 VLM_API_KEY，跳过 VLM 语义标注")
+        return {}
+    prov = VLM_PROVIDERS.get(vlm_provider)
+    if not prov:
+        log(f"  ⚠️ 不支持的 VLM provider: {vlm_provider}，跳过 VLM 语义标注")
+        return {}
+    # 未显式传 --vlm-model 时回退到该 provider 的默认模型，使「--vlm-provider + VLM_API_KEY」即可独立工作
+    vlm_model = vlm_model or prov.get("default_model")
+    if not vlm_model:
+        log(f"  ⚠️ provider {vlm_provider} 无默认模型且未指定 --vlm-model，跳过 VLM 语义标注")
         return {}
     import tempfile
     import shutil
