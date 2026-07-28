@@ -1,5 +1,5 @@
 import * as THREE from "./vendor/three.module.js";
-import { OrbitControls } from "./vendor/OrbitControls.js";
+import { OrbitControls } from "./vendor/OrbitControls.js?v=3.2.4";
 import { RoundedBoxGeometry } from "./vendor/RoundedBoxGeometry.js";
 import { partInfo } from "./src/quest3-data.js";
 import { defaultStepGroups } from "./src/quest3-steps.js";
@@ -2636,7 +2636,7 @@ function focusCurrentPart() {
 }
 
 // 鼠标移动控制炸开范围
-renderer.domElement.addEventListener("mousemove", e => {
+renderer?.domElement?.addEventListener("mousemove", e => {
   if (!mouseControlEnabled) return;
 
   stopExplodeLoop(); // 鼠标接管，停止循环播放
@@ -2661,7 +2661,7 @@ renderer.domElement.addEventListener("mousemove", e => {
 });
 
 // 鼠标离开画布时，保持当前炸开程度
-renderer.domElement.addEventListener("mouseleave", () => {
+renderer?.domElement?.addEventListener("mouseleave", () => {
   if (mouseControlEnabled) {
     // 可选：鼠标离开时暂停控制
     // mouseControlEnabled = false;
