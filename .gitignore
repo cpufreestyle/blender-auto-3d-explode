@@ -91,8 +91,7 @@ models/basketball.glb
 models/red_sphere.glb
 models/sample_robot.urdf
 
-# 独立工具脚本 (体积过大，非核心功能)
-blender_ai_paint.py
+# 注意: blender_ai_paint.py 是 server.js 调用的核心 AI 绘画生成脚本，必须纳入版本控制
 
 # 工作笔记/临时文档 (仅保留核心文档)
 docs/BUG_REPORT.md

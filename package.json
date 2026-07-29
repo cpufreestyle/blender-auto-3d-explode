@@ -1,6 +1,6 @@
 {
   "name": "blender-auto-3d-explode",
-  "version": "3.2.4",
+  "version": "3.2.6",
   "description": "Blender 自动拆解三维模型并自动做拆解教学 - 预览。基于 Three.js 构建的交互式 3D 拆解教学工具，支持鼠标拖拽旋转、滚轮缩放、滑块控制拆解程度。",
   "main": "main.js",
   "scripts": {
@@ -10,6 +10,7 @@
     "test": "node tests/unit-test.mjs && node tests/provider-test.mjs",
     "test:unit": "node tests/unit-test.mjs",
     "test:provider": "node tests/provider-test.mjs",
+    "test:py": "python3 -m unittest discover -s tests -p 'ai_paint_test.py'",
     "test:e2e": "node tests/e2e-test.mjs",
     "test:all": "npm run test && npm run test:e2e",
     "lint": "npx eslint main.js server.js src/ tests/ --fix",
