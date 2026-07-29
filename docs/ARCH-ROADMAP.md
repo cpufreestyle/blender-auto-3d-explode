@@ -13,23 +13,26 @@
 - release 流程曾手动 `gh` 导致误标 Latest（已纠正为 v3.2.3；后续统一走 `scripts/create_release.sh`）。
 
 ## Now — Sprint 1（已承诺）
+
 | ID | 任务 | MoSCoW | 状态 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | N1 | 统一 release 流程：发布走 `scripts/create_release.sh`（自带 `--latest`+工作区校验），弃用手敲 `gh` | Must | ✅ 已纠正 Latest→v3.2.3；脚本待后续增强 |
 | N2 | `package.json` 版本号对齐到 `v3.2.3` 并推送 | Must | ✅ `84c9cbd` |
 | N3 | 抽离图片转3D 三厂商公共逻辑（`pollTask` / `requireProviderKey`） | Must | ✅ `4bfd0db`（去重 ~66 行） |
 
 ## Next — Sprint 2–3（已规划）
+
 | ID | 任务 | MoSCoW | 依赖 | 状态 |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | NE1 | `server.js` 模块化拆分：云端图片转3D 厂商函数抽至 `src/providers/image-to-3d.js`（纯函数，返回 `{glbBuffer, manifest}`）；`server.js` 降至 ~1530 行 | Should | N3 | ✅ 已完成 |
 | NE2 | 复用 `src/server-utils.js`：移除并行实现，`server.js` 仅引入 `getCORSHeaders`/`cleanupOldTempFiles`/`MAX_FILE_SIZE` | Should | 无 | ✅ 已完成 |
 | NE3 | 统一请求体解析：`src/body.js` 的 `readBody(req,{maxSize})` 按 Content-Type 分发 JSON/multipart，复用 `parseMultipartBuffer`，取代三套旧解析器 | Should | NE2 | ✅ 已完成 |
 | NE4 | 配置 schema 化 + 模型单一来源：`src/provider-models.js` 抽模型清单，server 与 `ai-config.html` 共享；`handleAIConfigPost` 增加校验 | Should | 无 | ✅ `7c32679` |
 
 ## Later — Sprint 4+（方向性）
+
 | ID | 任务 | MoSCoW | 状态 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | L1 | 统一路由/中间件 + 错误响应 + 结构化日志（`wrap(handler)` 收敛 try/catch 与 `console.log`） | Could | ✅ `src/logger.js` + `wrap`/`respondError` 中间件 + 进程级异常守卫；`console.*` 重定向为结构化日志 |
 | L2 | `main.js` 前端模块化（按 3D 视图/上传/配置面板/VLM 流程拆 ES module） | Could | 🟡 试点×4：① 几何体拆分纯函数迁入 `src/geometry-split.js`；② 材质/乐高外观系统迁入 `src/lego-materials.js`（`currentModelStyle`/`applyModelStyle` 保留 main.js）；③ 「配置面板 + Blender 健康检测」迁入 `src/panels/config-panel.js`；④ 「AI 绘画 / 图片转 3D 面板」迁入 `src/panels/ai-paint-panel.js`（依赖注入 `loadCustomModel`/`showStatus`，行为不变）。`main.js` 持续减负、测试全绿；仅剩 3D 视图 + 上传面板因与 scene/camera/renderer/动画循环强耦合 + 此环境无法跑 Three.js 预览，放最后单独做 |
 | L3 | 提升测试覆盖：provider 生成/预检函数单测（当前只能 HTTP 端到端） | Could | ✅ `tests/provider-test.mjs`（mock fetch，22 项全绿，无需真实 Key） |
