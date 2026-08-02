@@ -2852,8 +2852,20 @@ function setupUpload() {
               "info",
             );
           } else {
-            showStatus("🔧 Blender 正在拆解模型... (已上传)", "info");
+            showStatus("🔧 Blender 正在拆解模型... (已上传，等待后端处理)", "info");
           }
+        }
+      });
+
+      // 下载进度：Blender 边生成边返回时，进度条会随响应体增长而推进，
+      // 避免长耗时（数十秒）时用户误以为卡死。
+      xhr.addEventListener("progress", e => {
+        if (e.lengthComputable && e.total > 0) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          showStatus(`⏳ Blender 拆解中... ${pct}%`, "info");
+        } else if (e.loaded > 0) {
+          // 无 Content-Length 时（分块流式），仅显示已接收大小
+          showStatus(`⏳ Blender 拆解中... 已接收 ${(e.loaded / 1024 / 1024).toFixed(1)} MB`, "info");
         }
       });
 
@@ -2906,7 +2918,11 @@ function setupUpload() {
             manifest,
           });
         } catch (err) {
-          console.warn("Blender 响应解析失败:", err.message);
+          console.error("Blender 响应解析失败:", err);
+          showStatus(
+            `⚠️ Blender 响应解析失败，回退到 JS 拆解：${err.message || err}`,
+            "warn",
+          );
           resolve(null);
         }
       });
