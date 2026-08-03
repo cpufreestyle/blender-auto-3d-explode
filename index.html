@@ -76,6 +76,12 @@
         <div class="ai-input-row">
           <input type="text" id="ai-paint-prompt" class="ai-input" placeholder="红色球体、机器人、超人..." />
           <button id="ai-paint-btn" class="btn btn-primary">✨生成</button>
+          <button id="text-to-3d-btn" class="btn btn-secondary" title="文生3D：有 Hyper3D Key 走云端，否则回退本地开源 Hunyuan3D-2">🌐文生3D</button>
+          <select id="text-to-3d-mode" class="ai-select" title="文生3D 提供方">
+            <option value="auto" selected>🌐 自动（有Key云端/否则本地）</option>
+            <option value="cloud">☁️ 云端 Hyper3D（需Key）</option>
+            <option value="local">🖥️ 本地 Hunyuan3D-2（免费·需GPU）</option>
+          </select>
         </div>
         <div class="ai-upload-row">
           <div id="ai-paint-dropzone" class="mini-dropzone">

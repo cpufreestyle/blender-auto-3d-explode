@@ -200,3 +200,70 @@ export async function runHyper3DImageTo3D(cfg, body, imageBase64) {
   const glbBuffer = await downloadBuffer(glbItem.url);
   return { glbBuffer, manifest: { total_parts: 0, parts: [], engine: "hyper3d" } };
 }
+
+/**
+ * Hyper3D(Rodin) text-to-3d：用自然语言提示词生成 3D 模型。
+ * 与 image-to-3d 共用 /api/v2/rodin 端点，只是以 prompt 字段替代 images 字段。
+ * 流程：创建任务 → 轮询 → 下载 GLB。返回 { glbBuffer, manifest }。
+ */
+export async function runHyper3DTextTo3D(cfg, prompt) {
+  const apiKey = requireProviderKey("Hyper3D(Rodin)", cfg, "HYPER3D_API_KEY");
+  const text = (prompt || "").toString().trim();
+  if (!text) {
+    const e = new Error("Hyper3D 文生3D 需要非空的文本提示词");
+    e.status = 400;
+    throw e;
+  }
+  const form = new FormData();
+  form.append("prompt", text);
+  form.append("tier", "Sketch");
+  form.append("mesh_mode", "Raw");
+  form.append("texture_mode", "high");
+  console.log(`  🌐 文生3D: 创建 Hyper3D Rodin 文本任务 (${text.length} 字)`);
+  const createRes = await fetch("https://hyperhuman.deemos.com/api/v2/rodin", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+  if (!createRes.ok) {
+    const t = await createRes.text();
+    throw new Error(`Hyper3D 创建任务失败 ${createRes.status}: ${t.slice(0, 400)}`);
+  }
+  const cd = await createRes.json();
+  const uuid = cd.uuid || (cd.data && cd.data.uuid);
+  const subKey = cd.subscription_key || (cd.data && cd.data.subscription_key);
+  if (!uuid || !subKey) throw new Error("Hyper3D 未返回任务标识 (uuid/subscription_key)");
+  const deadline = Date.now() + 10 * 60 * 1000;
+  await pollTask({
+    deadline,
+    timeoutMsg: "Hyper3D 任务超时（10 分钟）",
+    intervalMs: 5000,
+    checkStatus: async () => {
+      const pr = await fetch("https://hyperhuman.deemos.com/api/v2/status", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ subscription_key: subKey }),
+      });
+      if (!pr.ok) throw new Error(`Hyper3D 状态查询失败 ${pr.status}`);
+      const d = await pr.json();
+      const jobs = d.jobs || [];
+      if (jobs.some((j) => j.status === "Failed")) throw new Error("Hyper3D 生成失败");
+      return { done: jobs.length > 0 && jobs.every((j) => j.status === "Done") };
+    },
+  });
+  const dlRes = await fetch("https://hyperhuman.deemos.com/api/v2/download", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ task_uuid: uuid }),
+  });
+  if (!dlRes.ok) {
+    const t = await dlRes.text();
+    throw new Error(`Hyper3D 下载请求失败 ${dlRes.status}: ${t.slice(0, 400)}`);
+  }
+  const dlData = await dlRes.json();
+  const list = dlData.list || [];
+  const glbItem = list.find((i) => i.name && i.name.endsWith(".glb"));
+  if (!glbItem || !glbItem.url) throw new Error("Hyper3D 未返回 GLB 下载链接");
+  const glbBuffer = await downloadBuffer(glbItem.url);
+  return { glbBuffer, manifest: { total_parts: 0, parts: [], engine: "hyper3d-text", prompt: text } };
+}

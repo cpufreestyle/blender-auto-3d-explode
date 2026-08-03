@@ -29,6 +29,8 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
   const imgTo3DBake = document.getElementById("img-to-3d-bake");
   const imgTo3DModel = document.getElementById("img-to-3d-model");
   const imgTo3DModelCustom = document.getElementById("img-to-3d-model-custom");
+  const textTo3DBtn = document.getElementById("text-to-3d-btn");
+  const textTo3DMode = document.getElementById("text-to-3d-mode");
 
   // 当前上传的图片特征
   let uploadedImageFeatures = null;
@@ -426,21 +428,23 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
   }
 
   // 发送 AI 绘画请求
-  async function generateModel(prompt) {
+  async function generateModel(prompt, mode = "paint", textMode = "auto") {
     if (!prompt || !prompt.trim()) {
       showAIStatus("❌ 请输入提示词", "error");
       return;
     }
 
     prompt = prompt.trim();
-    console.log(`🎨 AI 绘画: "${prompt}"${uploadedImageFeatures ? " + 图片特征" : ""}`);
+    const isTextTo3D = mode === "text";
+    console.log(`🎨 ${isTextTo3D ? "文生3D" : "AI 绘画"}: "${prompt}"${uploadedImageFeatures ? " + 图片特征" : ""}`);
 
     // 禁用按钮，显示进度
     paintBtn.disabled = true;
+    textTo3DBtn.disabled = true;
     paintBtn.textContent = "⏳ 生成中...";
     const imgHint = uploadedImageFeatures ? "（含图片特征）" : "";
     showAIStatus(
-      `<span class="ai-paint-spinner"></span>正在生成 "${prompt}" ${imgHint}...（Blender 处理中，约10-30秒）`,
+      `<span class="ai-paint-spinner"></span>${isTextTo3D ? "🌐 文生3D" : "正在生成"} "${prompt}" ${imgHint}...（云端 Hyper3D 生成中，约1-3分钟）`,
       "info",
     );
 
@@ -494,10 +498,12 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
         );
         xhr.addEventListener("timeout", () => reject(new Error("请求超时（2分钟）")));
 
-        xhr.open("POST", `${BLENDER_SERVER_AI}/api/ai-paint`);
+        xhr.open("POST", `${BLENDER_SERVER_AI}/${isTextTo3D ? "api/text-to-3d" : "api/ai-paint"}`);
         xhr.setRequestHeader("Content-Type", "application/json");
         const payload = { prompt };
-        if (uploadedImageFeatures) {
+        if (isTextTo3D) {
+          payload.mode = textMode; // auto / cloud / local
+        } else if (uploadedImageFeatures) {
           payload.imageFeatures = uploadedImageFeatures;
         }
         xhr.send(JSON.stringify(payload));
@@ -543,6 +549,9 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
     } finally {
       paintBtn.disabled = false;
       paintBtn.textContent = "✨ 生成";
+      if (textTo3DBtn) {
+        textTo3DBtn.disabled = false;
+      }
     }
   }
 
@@ -578,6 +587,14 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
   paintBtn.addEventListener("click", () => {
     generateModel(promptInput.value);
   });
+
+  // 文生3D 按钮（Hyper3D Rodin / 本地 Hunyuan3D-2）
+  if (textTo3DBtn) {
+    textTo3DBtn.addEventListener("click", () => {
+      const mode = textTo3DMode ? textTo3DMode.value : "auto";
+      generateModel(promptInput.value, "text", mode);
+    });
+  }
 
   // 回车键提交
   promptInput.addEventListener("keydown", e => {
