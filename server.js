@@ -940,8 +940,9 @@ async function runLocalTextTo3D(prompt, res, startTime) {
 
   if (!fs.existsSync(outputPath)) {
     throw new Error(
-      "本地文生3D 未生成 GLB。请确认已安装 hy3dgen（pip install hy3dgen），" +
-      "且运行环境有 CUDA GPU（text-to-3D 不支持纯 CPU / Apple Silicon）。\n" +
+      "本地文生3D 未生成 GLB。请先准备环境：bash scripts/setup_hunyuan3d.sh" +
+      "（会自动检测 GPU 并安装匹配的 PyTorch + hy3dgen），" +
+      "且运行环境需有 NVIDIA CUDA GPU（text-to-3D 不支持纯 CPU / Apple Silicon）。\n" +
       `Hunyuan3D stderr: ${stderr.slice(0, 800)}`
     );
   }

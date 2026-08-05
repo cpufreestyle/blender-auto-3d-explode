@@ -17,6 +17,7 @@ import {
   runMeshyImageTo3D,
   runTripoImageTo3D,
   runHyper3DImageTo3D,
+  runHyper3DTextTo3D,
 } from "../src/providers/image-to-3d.js";
 
 // ===== 测试框架（与 unit-test.mjs 一致）=====
@@ -185,19 +186,53 @@ describe("runHyper3DImageTo3D 成功路径", async () => {
   }
 });
 
+describe("runHyper3DTextTo3D 成功路径（文生3D）", async () => {
+  installFetch(successResponder);
+  clearProviderEnv();
+  try {
+    const out = await runHyper3DTextTo3D({ apiKey: "test-key" }, "一架红色客机");
+    assert(out && typeof out === "object", "返回对象");
+    assert(Buffer.isBuffer(out.glbBuffer) || out.glbBuffer instanceof Uint8Array, "glbBuffer 为二进制");
+    assert(out.glbBuffer.length > 0, "glbBuffer 非空");
+    assertEqual(out.manifest.engine, "hyper3d-text", "manifest.engine = hyper3d-text");
+    assertEqual(out.manifest.prompt, "一架红色客机", "manifest.prompt 回显");
+  } catch (e) {
+    assert(false, "不应抛出异常: " + e.message);
+  } finally {
+    restoreFetch();
+  }
+});
+
+describe("runHyper3DTextTo3D 空提示词抛出 status=400", async () => {
+  clearProviderEnv();
+  let threw = false;
+  let err;
+  try {
+    await runHyper3DTextTo3D({ apiKey: "test-key" }, "   ");
+  } catch (e) {
+    threw = true;
+    err = e;
+  }
+  assert(threw, "空提示词应抛出异常");
+  if (threw) {
+    assertEqual(err.status, 400, "空提示词错误 status = 400");
+  }
+  restoreFetch();
+});
+
 describe("缺失 API Key 抛出 status=400", async () => {
   clearProviderEnv();
   const cases = [
-    ["runMeshyImageTo3D", "Meshy", "MESHY_API_KEY", runMeshyImageTo3D],
-    ["runTripoImageTo3D", "Tripo", "TRIPO_API_KEY", runTripoImageTo3D],
-    ["runHyper3DImageTo3D", "Hyper3D(Rodin)", "HYPER3D_API_KEY", runHyper3DImageTo3D],
+    ["runMeshyImageTo3D", "Meshy", "MESHY_API_KEY", runMeshyImageTo3D, [SAMPLE_BODY, SAMPLE_B64]],
+    ["runTripoImageTo3D", "Tripo", "TRIPO_API_KEY", runTripoImageTo3D, [SAMPLE_BODY, SAMPLE_B64]],
+    ["runHyper3DImageTo3D", "Hyper3D(Rodin)", "HYPER3D_API_KEY", runHyper3DImageTo3D, [SAMPLE_BODY, SAMPLE_B64]],
   ];
-  for (const [name, label, envVar, fn] of cases) {
+  for (const [name, label, envVar, fn, args] of cases) {
     delete process.env[envVar];
     let threw = false;
     let err;
     try {
-      await fn({}, SAMPLE_BODY, SAMPLE_B64);
+      await fn({}, ...args);
     } catch (e) {
       threw = true;
       err = e;
@@ -207,6 +242,21 @@ describe("缺失 API Key 抛出 status=400", async () => {
       assertEqual(err.status, 400, `${name} 错误 status = 400`);
       assert((err.message || "").includes(label), `${name} 错误信息包含标识 "${label}"`);
     }
+  }
+  // runHyper3DTextTo3D 接受 (cfg, prompt) 签名，单独测
+  delete process.env.HYPER3D_API_KEY;
+  let threwText = false;
+  let errText;
+  try {
+    await runHyper3DTextTo3D({}, "一架飞机");
+  } catch (e) {
+    threwText = true;
+    errText = e;
+  }
+  assert(threwText, "runHyper3DTextTo3D(无 Key) 应抛出异常");
+  if (threwText) {
+    assertEqual(errText.status, 400, "runHyper3DTextTo3D 错误 status = 400");
+    assert((errText.message || "").includes("Hyper3D(Rodin)"), "runHyper3DTextTo3D 错误信息包含标识");
   }
 });
 
