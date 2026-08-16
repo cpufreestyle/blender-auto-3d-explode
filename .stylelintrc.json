@@ -1,8 +1,6 @@
 {
   "extends": ["stylelint-config-standard"],
   "rules": {
-    "indentation": 2,
-    "string-quotes": "double",
     "at-rule-no-unknown": [
       true,
       {
@@ -15,7 +13,11 @@
       }
     ],
     "selector-class-pattern": null,
-    "no-empty-source": null
+    "no-empty-source": null,
+    "declaration-block-single-line-max-declarations": null,
+    "no-descending-specificity": null,
+    "property-no-vendor-prefix": null,
+    "declaration-block-no-duplicate-properties": [true, { "ignoreProperties": ["backdrop-filter", "-webkit-backdrop-filter"] }]
   },
   "ignoreFiles": [
     "node_modules/**/*",

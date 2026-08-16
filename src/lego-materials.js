@@ -5,7 +5,7 @@
 // 注意：样式状态 currentModelStyle 与切换逻辑 applyModelStyle 保留在 main.js（需改写该状态），
 //       本模块仅导出可变材质对象与取色函数，由 main.js 的 applyModelStyle 在切换时引用。
 
-import * as THREE from "../vendor/three.module.js";
+import * as THREE from "three";
 
 // ===== 材质（升级真实感）=====
 export const materials = {

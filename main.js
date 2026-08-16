@@ -1,6 +1,6 @@
-import * as THREE from "./vendor/three.module.js";
-import { OrbitControls } from "./vendor/OrbitControls.js?v=3.2.4";
-import { RoundedBoxGeometry } from "./vendor/RoundedBoxGeometry.js";
+import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { partInfo } from "./src/quest3-data.js";
 import { defaultStepGroups } from "./src/quest3-steps.js";
 import {
@@ -23,13 +23,13 @@ import {
 import { setupAIPaint } from "./src/panels/ai-paint-panel.js";
 // 副作用导入：确保 config-panel.js 加载并初始化 Blender 健康检测/配置高亮（不依赖 ai-paint 面板是否启用）
 import "./src/panels/config-panel.js";
+import { API_BASE } from "./src/config.js";
 
-// 动态导入 GLTFLoader（本地化 + Import Map 支持）
+// 动态导入 GLTFLoader（npm 包，webpack 自动 tree-shake）
 let GLTFLoader = null;
 async function loadGLTFLoader() {
   if (!GLTFLoader) {
-    // 直接使用 import，依赖 import map 解析 'three'
-    const module = await import("./vendor/GLTFLoader.js");
+    const module = await import("three/examples/jsm/loaders/GLTFLoader.js");
     GLTFLoader = module.GLTFLoader;
   }
   return GLTFLoader;
@@ -39,7 +39,7 @@ async function loadGLTFLoader() {
 let STLLoader = null;
 async function loadSTLLoader() {
   if (!STLLoader) {
-    const module = await import("./vendor/STLLoader.js");
+    const module = await import("three/examples/jsm/loaders/STLLoader.js");
     STLLoader = module.STLLoader;
   }
   return STLLoader;
@@ -94,14 +94,26 @@ scene.add(particlesMesh);
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
 camera.position.set(4, 2.5, 5);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// 移动端/一体机（Quest 3 等）GPU 为填充率瓶颈，限制 DPR 避免过度采样；桌面维持 2
+const isTouchDevice = navigator.maxTouchPoints > 0;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouchDevice ? 1.5 : 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 container.appendChild(renderer.domElement);
+
+// WebGL 上下文丢失/恢复处理（Quest 浏览器长时间运行或内存压力下常见）
+renderer.domElement.addEventListener("webglcontextlost", e => {
+  // preventDefault 允许 three.js 自动重建上下文并重新上传 GPU 资源
+  e.preventDefault();
+  showStatus("⚠️ GPU 上下文丢失，正在尝试恢复...", "error");
+});
+renderer.domElement.addEventListener("webglcontextrestored", () => {
+  showStatus("✅ GPU 上下文已恢复", "success");
+});
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -252,7 +264,7 @@ rimLight.angle = Math.PI / 5;
 rimLight.penumbra = 0.5;
 rimLight.decay = 2;
 rimLight.distance = 35;
-rimLight.castShadow = true;
+// 移除 rimLight.castShadow 以减少移动端 GPU 填充率消耗（仅保留 mainLight 投射阴影）
 scene.add(rimLight);
 
 // 补充底部反射光
@@ -491,17 +503,26 @@ let hasCustomModel = false;
  * 同时 dispose 几何体和材质以释放 GPU 内存
  */
 function clearCustomModelGroup() {
+  // material.dispose() 不会释放贴图的 GPU 资源，需先单独 dispose 所有纹理
+  const disposeMaterial = m => {
+    for (const value of Object.values(m)) {
+      if (value && value.isTexture) value.dispose();
+    }
+    m.dispose();
+  };
   while (customModelGroup.children.length > 0) {
     const child = customModelGroup.children[0];
-    // dispose 几何体和材质
-    if (child.geometry) child.geometry.dispose();
-    if (child.material) {
-      if (Array.isArray(child.material)) {
-        child.material.forEach(m => m.dispose());
-      } else {
-        child.material.dispose();
+    // traverse 覆盖嵌套的 Group/Mesh（GLTF 场景可能是多层结构）
+    child.traverse(node => {
+      if (node.geometry) node.geometry.dispose();
+      if (node.material) {
+        if (Array.isArray(node.material)) {
+          node.material.forEach(disposeMaterial);
+        } else {
+          disposeMaterial(node.material);
+        }
       }
-    }
+    });
     customModelGroup.remove(child);
   }
   customModelParts = [];
@@ -580,6 +601,54 @@ function calculateExplodePos(partCenter, index, totalParts) {
   }
   const initialDist = Math.max(distFromCenter * 3, 1.0);
   return explodeDir.multiplyScalar(initialDist);
+}
+
+/**
+ * 自定义模型加载后的统一收尾流程（消除三个 loader 中的重复代码）。
+ * 调用方在加载/拆分完成后调用此函数，传入差异化参数。
+ * @param {string} fileName
+ * @param {object} [opts]
+ * @param {string} [opts.modelType]   autoScaleModel 的类型标签
+ * @param {boolean} [opts.adjustExplode=true] 是否调用 adjustSmartExplodeDistances
+ * @param {boolean} [opts.applyStyle=true]    是否调用 applyModelStyle
+ */
+function finalizeCustomModelLoad(fileName, opts = {}) {
+  const { modelType, adjustExplode = true, applyStyle = true } = opts;
+
+  hasCustomModel = true;
+  questGroup.visible = false;
+  customModelGroup.visible = true;
+
+  if (applyStyle) applyModelStyle(currentModelStyle);
+
+  // 生成动态步骤
+  stepGroups = generateCustomStepGroups(customModelParts, fileName);
+  totalSteps = stepGroups.length;
+  currentStep = 0;
+  displayedStep = 0;
+  animatingStep = 0;
+
+  // 更新 UI
+  updateCustomModelUI(customModelParts.length, fileName);
+  updateStepUI();
+
+  // 自动缩放
+  autoScaleModel(modelType);
+
+  // 自动适配相机
+  fitCameraToModel(customModelGroup, false);
+
+  // 智能调整爆炸距离
+  if (adjustExplode) adjustSmartExplodeDistances();
+
+  // 装配分析（非阻塞）
+  maybeApplyAssemblySequence(fileName);
+
+  // 回到合体状态
+  goToStep(0);
+  isExploded = false;
+  explodeBtn.classList.remove("exploded");
+  explodeBtn.textContent = "💥 爆炸";
 }
 
 // ===== 模型自动拆分系统 =====
@@ -740,7 +809,7 @@ async function runAssemblyAnalysis() {
     if (!resp.ok || !data.success) {
       resultEl.innerHTML =
         `⚠️ 装配分析不可用：<br>${data.error || resp.status}<br><br>` +
-        `请确认 Blender 已启动且 MCP addon 已连接（侧栏 BlenderMCP → Connect to MCP server）。`;
+        "请确认 Blender 已启动且 MCP addon 已连接（侧栏 BlenderMCP → Connect to MCP server）。";
       return;
     }
 
@@ -749,18 +818,18 @@ async function runAssemblyAnalysis() {
     const level = pr.level || "—";
     const color = score == null ? "#888" : score >= 80 ? "#2e7d32" : score >= 55 ? "#f9a825" : "#c62828";
 
-    const recs = Array.isArray(pr.recommendations) && pr.recommendations.length
-      ? pr.recommendations.map(r => `<li>${r}</li>`).join("")
-      : "<li>无明显制造风险</li>";
+    const recs = Array.isArray(pr.recommendations) && pr.recommendations.length ?
+      pr.recommendations.map(r => `<li>${r}</li>`).join("") :
+      "<li>无明显制造风险</li>";
 
     const bd = pr.breakdown || {};
-    const bdRows = Object.keys(bd).length
-      ? `<table class="asm-table"><tr><th>扣分项</th><th>分值</th></tr>` +
+    const bdRows = Object.keys(bd).length ?
+      "<table class=\"asm-table\"><tr><th>扣分项</th><th>分值</th></tr>" +
         Object.entries(bd)
           .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`)
           .join("") +
-        `</table>`
-      : "";
+        "</table>" :
+      "";
 
     resultEl.innerHTML = `
       <div class="asm-score">
@@ -1363,42 +1432,12 @@ async function loadSTLModel(arrayBuffer, fileName) {
       customModelParts[0].mesh.name = fileName;
     }
 
-    // 隐藏默认模型，显示自定义模型
-    questGroup.visible = false;
-    customModelGroup.visible = true;
-    hasCustomModel = true;
-
-    // 生成动态步骤
-    stepGroups = generateCustomStepGroups(customModelParts, fileName);
-    totalSteps = stepGroups.length;
-    currentStep = 0;
-    displayedStep = 0;
-    animatingStep = 0;
-
-    // 更新 UI
-    updateCustomModelUI(1, fileName);
-    if (typeof updateStepUI === "function") updateStepUI();
+    // 统一收尾：隐藏默认模型、生成步骤、适配相机、回到合体
+    finalizeCustomModelLoad(fileName, { modelType: "STL", adjustExplode: false });
     showStatus(
       "✅ STL 模型加载完成（单部件）\n💡 提示: 启动 Blender 后端可获得自动拆解",
       "success",
     );
-
-    // 若 Blender MCP 可用，尝试用装配分析优化拆解顺序（非阻塞）
-    maybeApplyAssemblySequence(fileName);
-
-    // ========== 自动放大微小的模型 ==========
-    autoScaleModel("STL");
-
-    // 自动适配相机
-    fitCameraToModel(customModelGroup, false);
-
-    // 默认合体状态（不自动爆炸）
-    goToStep(0);
-    isExploded = false;
-    if (typeof explodeBtn !== "undefined") {
-      explodeBtn.classList.remove("exploded");
-      explodeBtn.textContent = "💥 爆炸";
-    }
 
     console.log(`✅ STL 模型加载完成：${fileName}`);
   } catch (err) {
@@ -1650,49 +1689,14 @@ async function loadURDFModel(urdfText, fileName) {
       });
     }
 
-    hasCustomModel = true;
-
-    // 隐藏默认模型
-    questGroup.visible = false;
-    customModelGroup.visible = true;
-
-    // 套用当前外观风格（乐高 / 原生）
-    applyModelStyle(currentModelStyle);
-
-    // 生成动态步骤
-    stepGroups = generateCustomStepGroups(customModelParts, fileName);
-    totalSteps = stepGroups.length;
-    currentStep = 0;
-    displayedStep = 0;
-    animatingStep = 0;
-
-    // 更新 UI
-    updateCustomModelUI(partCount, fileName);
-    updateStepUI();
+    // 统一收尾：隐藏默认模型、生成步骤、适配相机、回到合体
+    finalizeCustomModelLoad(fileName, { modelType: "URDF", adjustExplode: true });
 
     const meshNote =
       partCount > 0 && splitParts[0]?.mesh?.userData?.meshFile ?
         `\n⚠️ 注意: URDF 引用的 mesh 文件 (${splitParts[0].mesh.userData.meshFile}) 需单独上传\n当前使用占位几何体` :
         "";
     showStatus(`✅ URDF 解析完成：${partCount} 个 link（部件）${meshNote}`, "success");
-
-    // 若 Blender MCP 可用，尝试用装配分析优化拆解顺序（非阻塞）
-    maybeApplyAssemblySequence(fileName);
-
-    // ========== 自动放大微小的模型 ==========
-    autoScaleModel("URDF");
-
-    // 自动适配相机
-    fitCameraToModel(customModelGroup, false);
-
-    // ========== 智能调整爆炸距离 ==========
-    adjustSmartExplodeDistances();
-
-    // 默认合体状态（不自动爆炸）
-    goToStep(0);
-    isExploded = false;
-    explodeBtn.classList.remove("exploded");
-    explodeBtn.textContent = "💥 爆炸";
 
     console.log(`✅ URDF 模型加载完成：${partCount} 个部件`);
   } catch (err) {
@@ -1887,39 +1891,9 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
       });
     }
 
-    hasCustomModel = true;
-
-    // ========== 生成动态步骤 ==========
-    stepGroups = generateCustomStepGroups(customModelParts, fileName);
-    totalSteps = stepGroups.length;
-
-    // 重置步骤状态
-    currentStep = 0;
-    displayedStep = 0;
-    animatingStep = 0;
-
-    // 更新 UI
-    updateCustomModelUI(partCount, fileName);
-    updateStepUI();
+    // 统一收尾：隐藏默认模型、生成步骤、适配相机、回到合体
+    finalizeCustomModelLoad(fileName, { adjustExplode: true });
     showStatus(`✅ 成功加载：${fileName}\n自动拆分为 ${partCount} 个部件`, "success");
-
-    // ========== 自动放大微小的模型 ==========
-    autoScaleModel();
-
-    // 自动适配相机
-    fitCameraToModel(customModelGroup, false);
-
-    // ========== 智能调整爆炸距离 ==========
-    adjustSmartExplodeDistances();
-
-    // 若 Blender MCP 可用，尝试用装配分析优化拆解顺序（非阻塞）
-    maybeApplyAssemblySequence(fileName);
-
-    // 默认合体状态（不自动爆炸）
-    goToStep(0);
-    isExploded = false;
-    explodeBtn.classList.remove("exploded");
-    explodeBtn.textContent = "💥 爆炸";
 
     console.log(`✅ 自定义模型加载完成：${partCount} 个部件（自动拆分，${groupCount} 个步骤组）`);
   } catch (err) {
@@ -1937,8 +1911,6 @@ function updateCustomModelUI(partCount, fileName) {
   if (countEl) countEl.textContent = partCount;
 
   const uploadSection = document.querySelector(".panel");
-  // 通用查找逻辑，适应新旧 HTML 结构
-  const uploadSectionAlt = document.querySelector("details.panel");
   if (uploadSection) {
     const fileNameEl = document.getElementById("uploaded-file-name");
     if (fileNameEl) fileNameEl.textContent = `当前模型：${fileName}`;
@@ -2507,7 +2479,7 @@ if (generatedSelect && generatedLoadBtn) {
     })
     .catch(() => { /* 忽略：无生成库时不展示 */ });
 
-  generatedLoadBtn.addEventListener("click", async () => {
+  generatedLoadBtn.addEventListener("click", async() => {
     const url = generatedSelect.value;
     if (!url) return;
     try {
@@ -2660,13 +2632,7 @@ renderer?.domElement?.addEventListener("mousemove", e => {
   updateStepUI();
 });
 
-// 鼠标离开画布时，保持当前炸开程度
-renderer?.domElement?.addEventListener("mouseleave", () => {
-  if (mouseControlEnabled) {
-    // 可选：鼠标离开时暂停控制
-    // mouseControlEnabled = false;
-  }
-});
+// 鼠标离开画布时，保持当前炸开程度（无需额外处理）
 
 // 双击恢复按钮控制
 explodeBtn.addEventListener("dblclick", () => {
@@ -2728,20 +2694,20 @@ function updateExplodedView(now) {
   if (!needsExplodeUpdate) return;
 
   // 整体炸开模式下，所有部件使用同一因子；否则按分步/鼠标因子
-  const globalFactor = explodeAllMode
-    ? explodeAnimFactor
-    : (mouseControlEnabled ? mouseFactor : currentStep / totalSteps);
+  const globalFactor = explodeAllMode ?
+    explodeAnimFactor :
+    (mouseControlEnabled ? mouseFactor : currentStep / totalSteps);
   axisMat.opacity = globalFactor * 0.5;
 
   // 统一的部件更新函数（避免重复代码）
   const updatePart = part => {
-    const partFactor = explodeAllMode
-      ? explodeAnimFactor
-      : smoothStep(
-          part.stepIndex - 1,
-          part.stepIndex,
-          mouseControlEnabled ? mouseFactor * totalSteps : currentStep
-        );
+    const partFactor = explodeAllMode ?
+      explodeAnimFactor :
+      smoothStep(
+        part.stepIndex - 1,
+        part.stepIndex,
+        mouseControlEnabled ? mouseFactor * totalSteps : currentStep,
+      );
 
     part.mesh.position.lerpVectors(part.homePos, part.explodePos, partFactor);
     part.mesh.rotation.x = THREE.MathUtils.lerp(part.homeRot.x, part.explodeRot.x, partFactor);
@@ -2825,8 +2791,8 @@ function setupUpload() {
     return;
   }
 
-  // ── Blender 后端配置 ──
-  const BLENDER_SERVER = "http://localhost:3001";
+  // ── Blender 后端配置（从 src/config.js 统一读取） ──
+  const BLENDER_SERVER = API_BASE;
 
   /**
    * 尝试调用 Blender 后端拆解 GLB

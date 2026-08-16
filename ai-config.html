@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="api-base" content="http://localhost:3001">
     <title>AI 模型配置 - Quest 3 3D 拆解</title>
     <style>
         * {
@@ -725,9 +726,9 @@
     </div>
     
     <script>
-        // 后端 API 地址（与 main.js 保持一致，指向 server.js 端口 3001）
+        // 后端 API 地址（与 src/config.js 保持一致；修改时请同步）
         // 因为页面可能从 8080 静态服务器打开，必须用绝对地址才能命中真正的 API 服务
-        const API_BASE = "http://localhost:3001";
+        const API_BASE = document.querySelector('meta[name="api-base"]')?.content || "http://localhost:3001";
 
         // 记录上一次选中的「文本 LLM」提供商，避免图片转3D 入口项覆盖它
         let lastTextProvider = 'openai';

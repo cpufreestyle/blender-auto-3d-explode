@@ -22,7 +22,7 @@ const boundary = "----quest3split" + Date.now();
 const head =
   `--${boundary}\r\n` +
   `Content-Disposition: form-data; name="file"; filename="${path.basename(modelPath)}"\r\n` +
-  `Content-Type: model/gltf-binary\r\n\r\n`;
+  "Content-Type: model/gltf-binary\r\n\r\n";
 const tail = `\r\n--${boundary}--\r\n`;
 const body = Buffer.concat([Buffer.from(head, "utf-8"), data, Buffer.from(tail, "utf-8")]);
 
@@ -59,7 +59,7 @@ const req = http.request(
       res.destroy();
       process.exit(0);
     });
-  }
+  },
 );
 req.on("error", (e) => {
   console.error("请求错误:", e.message);

@@ -2,9 +2,10 @@
 // 仅依赖 DOM + fetch + 注入的共享函数（loadCustomModel / showStatus），无 3D 场景强耦合。
 import { base64ToUtf8 } from "../utils.js";
 import { fetchConfigAndHighlight } from "./config-panel.js";
+import { API_BASE } from "../config.js";
 
-// 后端 AI 服务地址（仅本面板使用）
-const BLENDER_SERVER_AI = "http://localhost:3001";
+// 后端 AI 服务地址（从统一配置读取）
+const BLENDER_SERVER_AI = API_BASE;
 // 存储已生成的模型 { id, prompt, arrayBuffer, manifest, icon, parts }
 let aiPaintGallery = [];
 

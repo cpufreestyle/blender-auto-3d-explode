@@ -37,7 +37,9 @@ Thumbs.db
 *.swo
 .catpaw/
 .agents/
+.codely-cli/
 skills-lock.json
+CODELY.md
 
 # Logs
 npm-debug.log*

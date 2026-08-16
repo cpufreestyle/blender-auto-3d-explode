@@ -3,16 +3,16 @@
   margin-top: 20px !important;
   margin-bottom: 20px !important;
   padding: 24px !important;
-  background: linear-gradient(135deg, rgba(74, 158, 255, 0.15), rgba(143, 122, 255, 0.15)) !important;
-  border: 2px solid rgba(74, 158, 255, 0.5) !important;
+  background: linear-gradient(135deg, rgb(74 158 255 / 15%), rgb(143 122 255 / 15%)) !important;
+  border: 2px solid rgb(74 158 255 / 50%) !important;
   border-radius: 16px !important;
-  box-shadow: 0 8px 32px rgba(74, 158, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 8px 32px rgb(74 158 255 / 30%), inset 0 1px 0 rgb(255 255 255 / 10%) !important;
   animation: glow-pulse 3s ease-in-out infinite;
 }
 
 @keyframes glow-pulse {
-  0%, 100% { box-shadow: 0 8px 32px rgba(74, 158, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1); }
-  50% { box-shadow: 0 8px 40px rgba(74, 158, 255, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.15); }
+  0%, 100% { box-shadow: 0 8px 32px rgb(74 158 255 / 30%), inset 0 1px 0 rgb(255 255 255 / 10%); }
+  50% { box-shadow: 0 8px 40px rgb(74 158 255 / 50%), inset 0 1px 0 rgb(255 255 255 / 15%); }
 }
 
 .upload-header {
@@ -23,7 +23,7 @@
   font-weight: 700 !important;
   color: #4a9eff !important;
   margin-bottom: 8px !important;
-  text-shadow: 0 0 12px rgba(74, 158, 255, 0.6) !important;
+  text-shadow: 0 0 12px rgb(74 158 255 / 60%) !important;
 }
 
 .upload-formats {
@@ -34,21 +34,21 @@
 }
 
 .drop-zone {
-  border: 3px dashed rgba(74, 158, 255, 0.6) !important;
+  border: 3px dashed rgb(74 158 255 / 60%) !important;
   border-radius: 12px !important;
   padding: 40px 20px !important;
   text-align: center !important;
   cursor: pointer !important;
   transition: all 0.3s ease !important;
   margin-bottom: 16px !important;
-  background: rgba(74, 158, 255, 0.08) !important;
+  background: rgb(74 158 255 / 8%) !important;
 }
 
 .drop-zone:hover {
   border-color: #4a9eff !important;
-  background: rgba(74, 158, 255, 0.15) !important;
+  background: rgb(74 158 255 / 15%) !important;
   transform: translateY(-3px) !important;
-  box-shadow: 0 8px 24px rgba(74, 158, 255, 0.4) !important;
+  box-shadow: 0 8px 24px rgb(74 158 255 / 40%) !important;
 }
 
 .drop-zone-text {
@@ -61,7 +61,7 @@
   font-size: 48px !important;
   margin-bottom: 12px !important;
   opacity: 0.9 !important;
-  filter: drop-shadow(0 0 12px rgba(74, 158, 255, 0.6)) !important;
+  filter: drop-shadow(0 0 12px rgb(74 158 255 / 60%)) !important;
 }
 
 .upload-btn {
@@ -72,11 +72,11 @@
   font-weight: 600 !important;
   background: linear-gradient(135deg, #4a9eff, #8f7aff) !important;
   border: none !important;
-  color: #ffffff !important;
+  color: #fff !important;
 }
 
 .upload-btn:hover {
   background: linear-gradient(135deg, #3a8eef, #7f6aef) !important;
-  box-shadow: 0 6px 20px rgba(74, 158, 255, 0.5) !important;
+  box-shadow: 0 6px 20px rgb(74 158 255 / 50%) !important;
   transform: translateY(-2px) !important;
 }

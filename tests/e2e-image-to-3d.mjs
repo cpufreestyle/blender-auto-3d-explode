@@ -52,7 +52,7 @@ function postImageTo3D(dataUrl) {
           const buf = Buffer.concat(chunks);
           resolve({ status: res.statusCode, headers: res.headers, buf });
         });
-      }
+      },
     );
     req.on("error", reject);
     req.on("timeout", () => { req.destroy(); reject(new Error("POST timeout")); });

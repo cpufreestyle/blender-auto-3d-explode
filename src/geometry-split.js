@@ -4,7 +4,7 @@
 // 不引用 main.js 的共享状态（scene/camera/parts/questGroup 等），因此可独立复用与测试。
 // 与 main.js 共用同一个 ../vendor/three.module.js 实例（ESM 按解析路径缓存，材质/几何类型一致）。
 
-import * as THREE from "../vendor/three.module.js";
+import * as THREE from "three";
 import { UnionFind, generatePartName as _generatePartName } from "./utils.js";
 
 // 从几何体中提取指定面，创建新的非索引几何体

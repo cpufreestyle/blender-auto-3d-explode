@@ -1,54 +1,43 @@
-const path = require('path');
-const HtmlWebpackPlugin = require('html-webpack-plugin');
-const TerserPlugin = require('terser-webpack-plugin');
-const CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
-const CompressionPlugin = require('compression-webpack-plugin');
-const BundleAnalyzerPlugin = require('webpack-bundle-analyzer').BundleAnalyzerPlugin;
+import path from "node:path";
+import HtmlWebpackPlugin from "html-webpack-plugin";
+import TerserPlugin from "terser-webpack-plugin";
+import CssMinimizerPlugin from "css-minimizer-webpack-plugin";
+import CompressionPlugin from "compression-webpack-plugin";
+import CopyPlugin from "copy-webpack-plugin";
+import { BundleAnalyzerPlugin } from "webpack-bundle-analyzer";
 
-module.exports = (env, argv) => {
-  const isProduction = argv.mode === 'production';
-  const isDevelopment = !isProduction;
+// 剥离 index.html 中的源码开发脚本标签（dist 中由 HtmlWebpackPlugin 注入带 hash 的产物）
+const stripDevScriptPlugin = {
+  apply(compiler) {
+    compiler.hooks.compilation.tap("StripDevScript", compilation => {
+      HtmlWebpackPlugin.getHooks(compilation).beforeEmit.tap("StripDevScript", data => {
+        data.html = data.html.replace(/<script[^>]*src="[^"]*main\.js[^"]*"[^>]*><\/script>/g, "");
+        return data;
+      });
+    });
+  }
+};
+
+export default (env = {}, argv) => {
+  const isProduction = argv.mode === "production";
+  const isAnalyze = Boolean(env.ANALYZE);
 
   return {
     entry: {
-      main: './main.js',
-      quest3: './src/quest3-data.js',
-      steps: './src/quest3-steps.js'
+      main: "./main.js"
     },
     output: {
-      path: path.resolve(__dirname, 'dist'),
-      filename: isProduction ? '[name].[contenthash].js' : '[name].js',
+      path: path.resolve(import.meta.dirname, "dist"),
+      filename: isProduction ? "[name].[contenthash].js" : "[name].js",
       clean: true,
-      publicPath: '/'
+      publicPath: "/"
     },
     resolve: {
-      extensions: ['.js', '.mjs'],
-      alias: {
-        three: path.resolve(__dirname, 'vendor/three.module.js'),
-        vendor: path.resolve(__dirname, 'vendor')
-      }
-    },
-    module: {
-      rules: [
-        {
-          test: /\.js$/,
-          exclude: /node_modules/,
-          use: {
-            loader: 'babel-loader',
-            options: {
-              presets: ['@babel/preset-env']
-            }
-          }
-        },
-        {
-          test: /\.css$/,
-          use: ['style-loader', 'css-loader']
-        }
-      ]
+      extensions: [".js", ".mjs"]
     },
     plugins: [
       new HtmlWebpackPlugin({
-        template: './index.html',
+        template: "./index.html",
         minify: isProduction ? {
           removeComments: true,
           collapseWhitespace: true,
@@ -62,8 +51,22 @@ module.exports = (env, argv) => {
           minifyURLs: true
         } : false
       }),
-      ...(isProduction ? [new BundleAnalyzerPlugin()] : []),
-      ...(isProduction ? [new CompressionPlugin()] : [])
+      stripDevScriptPlugin,
+      // index.html 直接引用的静态资源（CSS 为 <link> 引用，不经 webpack 模块图）
+      new CopyPlugin({
+        patterns: [
+          { from: "style.css", to: "style.css" },
+          { from: "ai-config.html", to: "ai-config.html" }
+        ]
+      }),
+      ...(isProduction ? [new CompressionPlugin()] : []),
+      ...(isAnalyze
+        ? [new BundleAnalyzerPlugin({
+            analyzerMode: "static",
+            openAnalyzer: false,
+            reportFilename: "report.html"
+          })]
+        : [])
     ],
     optimization: {
       minimize: isProduction,
@@ -79,22 +82,18 @@ module.exports = (env, argv) => {
         new CssMinimizerPlugin()
       ],
       splitChunks: {
-        chunks: 'all',
+        chunks: "all",
         cacheGroups: {
-          vendor: {
-            test: /[\\/]node_modules[\\/]/,
-            name: 'vendors',
-            chunks: 'all'
-          },
           three: {
-            test: /[\\/]vendor[\\/]/,
-            name: 'three',
-            chunks: 'all'
+            test: /[\\/]node_modules[\\/]three[\\/]/,
+            name: "three",
+            chunks: "all",
+            priority: 10
           }
         }
       }
     },
-    devtool: isProduction ? 'source-map' : 'eval-source-map',
+    devtool: isProduction ? "nosources-source-map" : "eval-source-map",
     devServer: {
       port: 3000,
       open: true,
@@ -105,7 +104,7 @@ module.exports = (env, argv) => {
     performance: {
       maxAssetSize: 1024 * 1024,
       maxEntrypointSize: 1024 * 1024,
-      hints: isProduction ? 'warning' : false
+      hints: isProduction ? "warning" : false
     }
   };
 };

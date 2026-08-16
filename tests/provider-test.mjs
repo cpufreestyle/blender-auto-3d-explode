@@ -70,9 +70,9 @@ function jsonResponse(obj, status = 200) {
   return {
     ok: status < 400,
     status,
-    text: async () => text,
-    json: async () => obj,
-    arrayBuffer: async () => new Uint8Array(Buffer.from(text)).buffer,
+    text: async() => text,
+    json: async() => obj,
+    arrayBuffer: async() => new Uint8Array(Buffer.from(text)).buffer,
   };
 }
 
@@ -80,15 +80,15 @@ function glbResponse(status = 200) {
   return {
     ok: status < 400,
     status,
-    text: async () => "glb-bytes",
-    json: async () => ({}),
-    arrayBuffer: async () => new Uint8Array(GLB_BYTES).buffer,
+    text: async() => "glb-bytes",
+    json: async() => ({}),
+    arrayBuffer: async() => new Uint8Array(GLB_BYTES).buffer,
   };
 }
 
 // 安装一个根据 URL 返回响应的 fetch 实现
 function installFetch(responder) {
-  globalThis.fetch = async (url, opts) => responder(url, opts || {});
+  globalThis.fetch = async(url, opts) => responder(url, opts || {});
 }
 
 function restoreFetch() {
@@ -138,7 +138,7 @@ console.log("═".repeat(60));
 console.log("  🧪 单元测试 — 图片转3D 提供商（mock fetch）");
 console.log("═".repeat(60));
 
-describe("runMeshyImageTo3D 成功路径", async () => {
+describe("runMeshyImageTo3D 成功路径", async() => {
   installFetch(successResponder);
   clearProviderEnv();
   try {
@@ -154,7 +154,7 @@ describe("runMeshyImageTo3D 成功路径", async () => {
   }
 });
 
-describe("runTripoImageTo3D 成功路径", async () => {
+describe("runTripoImageTo3D 成功路径", async() => {
   installFetch(successResponder);
   clearProviderEnv();
   try {
@@ -170,7 +170,7 @@ describe("runTripoImageTo3D 成功路径", async () => {
   }
 });
 
-describe("runHyper3DImageTo3D 成功路径", async () => {
+describe("runHyper3DImageTo3D 成功路径", async() => {
   installFetch(successResponder);
   clearProviderEnv();
   try {
@@ -186,7 +186,7 @@ describe("runHyper3DImageTo3D 成功路径", async () => {
   }
 });
 
-describe("runHyper3DTextTo3D 成功路径（文生3D）", async () => {
+describe("runHyper3DTextTo3D 成功路径（文生3D）", async() => {
   installFetch(successResponder);
   clearProviderEnv();
   try {
@@ -203,7 +203,7 @@ describe("runHyper3DTextTo3D 成功路径（文生3D）", async () => {
   }
 });
 
-describe("runHyper3DTextTo3D 空提示词抛出 status=400", async () => {
+describe("runHyper3DTextTo3D 空提示词抛出 status=400", async() => {
   clearProviderEnv();
   let threw = false;
   let err;
@@ -220,7 +220,7 @@ describe("runHyper3DTextTo3D 空提示词抛出 status=400", async () => {
   restoreFetch();
 });
 
-describe("缺失 API Key 抛出 status=400", async () => {
+describe("缺失 API Key 抛出 status=400", async() => {
   clearProviderEnv();
   const cases = [
     ["runMeshyImageTo3D", "Meshy", "MESHY_API_KEY", runMeshyImageTo3D, [SAMPLE_BODY, SAMPLE_B64]],
@@ -260,7 +260,7 @@ describe("缺失 API Key 抛出 status=400", async () => {
   }
 });
 
-describe("任务失败状态正确上抛（Meshy FAILED）", async () => {
+describe("任务失败状态正确上抛（Meshy FAILED）", async() => {
   installFetch((url) => {
     if (url === "https://api.meshy.ai/openapi/v1/image-to-3d")
       return jsonResponse({ result: "task-fail-1" });

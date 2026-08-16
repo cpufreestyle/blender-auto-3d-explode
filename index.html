@@ -3,8 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="api-base" content="http://localhost:3001" />
   <title>Blender 3D 拆解教学</title>
   <link rel="stylesheet" href="style.css" />
+  <!-- dev 模式（npx serve .）裸导入解析：源码 import "three"，映射到本地 vendor 副本。
+       webpack 构建产物自包含，不依赖此映射；修改时需与 package.json 的 three 版本保持一致。 -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/vendor/three.module.js",
+        "three/examples/jsm/controls/": "/vendor/",
+        "three/examples/jsm/geometries/": "/vendor/",
+        "three/examples/jsm/loaders/": "/vendor/"
+      }
+    }
+  </script>
 </head>
 <body>
   <div id="canvas-container">
@@ -316,7 +329,8 @@
   <!-- 首次使用：检测是否已配置，未配置则弹出模型配置 -->
   <script>
     (function () {
-      const API_BASE = "http://localhost:3001";
+      // 与 src/config.js 保持一致；修改时请同步
+      const API_BASE = document.querySelector('meta[name="api-base"]')?.content || "http://localhost:3001";
       const overlay = document.getElementById('first-config-modal');
       if (!overlay) return;
       const show = () => overlay.classList.remove('hidden');
