@@ -2,12 +2,16 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
+
+permissions:
+  contents: read
 
 jobs:
   frontend:
+    name: Frontend — Lint, Test & Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,18 +22,35 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install
-        run: npm ci || npm install
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Lint
-        run: npm run lint || true
+      - name: Lint JavaScript
+        run: npm run lint
+
+      - name: Lint CSS
+        run: npm run lint:css
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build project
+        run: npm run build
+
+      - name: Security audit
+        run: npm audit
         continue-on-error: true
 
-      - name: Build
-        run: npm run build || true
-        continue-on-error: true
+      - name: Upload build artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: dist/
+          if-no-files-found: error
 
   python:
+    name: Python — Lint & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,12 +63,9 @@ jobs:
       - name: Lint Python
         run: |
           pip install ruff
-          ruff check *.py --line-length 200 || true
-        continue-on-error: true
+          ruff check *.py --line-length 200
 
       - name: Run tests
         run: |
-          if [ -d tests ]; then
-            pip install pytest
-            pytest tests/ -v || true
-          fi
+          pip install pytest
+          pytest tests/ -v
