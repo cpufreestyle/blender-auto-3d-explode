@@ -3109,6 +3109,9 @@ let arSupported = false;
 let arHitTestSource = null;
 let arModelPlaced = false;
 let arEnding = false; // 防止 onAREnd 重入
+let arRenderer = null; // AR 专用渲染器（结束时释放 WebGL 上下文）
+let arScene = null; // AR 独立场景
+let arQuestGroup = null; // 模型的 AR 克隆（几何体/材质与主场景共享，禁止 dispose）
 
 // 检测 WebXR AR 支持
 async function checkARSupport() {
@@ -3172,7 +3175,7 @@ async function startAR() {
     }
 
     // 设置 AR 渲染器
-    const arRenderer = new THREE.WebGLRenderer({
+    arRenderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
       logarithmicDepthBuffer: true,
@@ -3187,7 +3190,7 @@ async function startAR() {
     container.appendChild(arRenderer.domElement);
 
     // 创建 AR 场景
-    const arScene = new THREE.Scene();
+    arScene = new THREE.Scene();
 
     // 添加灯光
     const arAmbientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -3196,8 +3199,8 @@ async function startAR() {
     arDirLight.position.set(5, 10, 7);
     arScene.add(arDirLight);
 
-    // 创建 Quest 3 模型的 AR 副本
-    const arQuestGroup = questGroup.clone();
+    // 创建 Quest 3 模型的 AR 副本（clone 共享几何体/材质，结束时不可 dispose）
+    arQuestGroup = questGroup.clone();
     arScene.add(arQuestGroup);
 
     // 调整 AR 中的模型大小
@@ -3333,8 +3336,33 @@ function onAREnd() {
     console.error("结束 AR 会话时出错:", err);
   }
 
-  // 恢复普通渲染器
-  location.reload();
+  // 释放 AR 专用渲染资源（几何体/材质与主场景共享，此处只释放 WebGL 上下文）
+  if (arRenderer) {
+    arRenderer.setAnimationLoop(null);
+    arRenderer.dispose();
+    arRenderer.forceContextLoss();
+    arRenderer.domElement?.remove();
+    arRenderer = null;
+  }
+  arScene = null;
+  arQuestGroup = null;
+
+  // 恢复主渲染器画布（renderer 从未销毁，直接重新挂载即可，无需整页刷新）
+  container.appendChild(renderer.domElement);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+
+  // 恢复 UI
+  if (uiOverlay) uiOverlay.style.display = "";
+  if (arButton) {
+    arButton.textContent = "📱 AR 预览";
+    arButton.classList.remove("active");
+  }
+  updateARButton();
+
+  // 'end' 事件稍后会再次触发本函数，此时各资源已置空，幂等无副作用
+  arEnding = false;
 }
 
 // 初始化 AR
