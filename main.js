@@ -1,19 +1,20 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { partInfo } from "./src/quest3-data.js";
 import { defaultStepGroups } from "./src/quest3-steps.js";
 import {
   easeOutCubic,
   smoothStep,
   isQuest3Model,
   base64ToUtf8,
+  computeStepGroupCount,
+  sortPartsForDisassembly,
+  computeExplodeVector,
 } from "./src/utils.js";
 import {
   extractFacesToGeometry,
   splitByConnectedComponents,
   splitByMaterialGroups,
-  splitSpatially,
   generatePartName,
 } from "./src/geometry-split.js";
 import {
@@ -591,16 +592,8 @@ function adjustSmartExplodeDistances() {
  * @returns {THREE.Vector3} 爆炸位置
  */
 function calculateExplodePos(partCenter, index, totalParts) {
-  let explodeDir;
-  const distFromCenter = partCenter.length();
-  if (distFromCenter < 0.001) {
-    const angle = (index / totalParts) * Math.PI * 2;
-    explodeDir = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0);
-  } else {
-    explodeDir = partCenter.clone().normalize();
-  }
-  const initialDist = Math.max(distFromCenter * 3, 1.0);
-  return explodeDir.multiplyScalar(initialDist);
+  const vec = computeExplodeVector(partCenter, index, totalParts);
+  return new THREE.Vector3(vec.x, vec.y, vec.z);
 }
 
 /**
@@ -853,8 +846,7 @@ async function runAssemblyAnalysis() {
 // 为自定义模型生成动态步骤
 function generateCustomStepGroups(customParts, fileName) {
   const partCount = customParts.length;
-  // 步骤数：欢迎(1) + 部件分组 + 完成(1)，最多 8 步
-  const groupCount = Math.min(Math.max(Math.ceil(partCount / 3), 2), 6);
+  const groupCount = computeStepGroupCount(partCount);
 
   const groups = [];
 
@@ -869,27 +861,8 @@ function generateCustomStepGroups(customParts, fileName) {
 💡 点击"下一步"开始逐步拆解，或点击"爆炸视图"一键展开。`,
   });
 
-  // 部件拆解排序：优先使用 Blender MCP 装配分析给出的顺序，
-  // 否则回退到"按距离中心降序（外层先拆）"。
-  let sortedParts;
-  if (assemblySequenceOrder && assemblySequenceOrder.length) {
-    const orderIndex = new Map(assemblySequenceOrder.map((n, i) => [n, i]));
-    sortedParts = [...customParts].sort((a, b) => {
-      const ia = orderIndex.has(a.name) ? orderIndex.get(a.name) : Infinity;
-      const ib = orderIndex.has(b.name) ? orderIndex.get(b.name) : Infinity;
-      if (ia !== ib) return ia - ib; // MCP 顺序：索引小者先拆
-      // 未匹配的部件按距离中心降序回退
-      const distA = (a.partCenter || a.homePos).length();
-      const distB = (b.partCenter || b.homePos).length();
-      return distB - distA;
-    });
-  } else {
-    sortedParts = [...customParts].sort((a, b) => {
-      const distA = (a.partCenter || a.homePos).length();
-      const distB = (b.partCenter || b.homePos).length();
-      return distB - distA; // 距离远的先拆
-    });
-  }
+  // 部件拆解排序：优先使用 Blender MCP 装配分析给出的顺序
+  const sortedParts = sortPartsForDisassembly(customParts, assemblySequenceOrder);
 
   // 将部件分组到各步骤
   const partsPerGroup = Math.ceil(partCount / groupCount);
@@ -1932,7 +1905,7 @@ function updateCustomModelUI(partCount, fileName) {
   const partsGrid = document.querySelector(".parts-grid");
   if (partsGrid && customModelParts.length > 0) {
     partsGrid.innerHTML = "";
-    customModelParts.forEach((part, i) => {
+    customModelParts.forEach(part => {
       const item = document.createElement("div");
       item.className = "part-item";
       item.dataset.part = part.name;
@@ -2048,7 +2021,6 @@ let stepGroups = defaultStepGroups;
 function updateToolsList(step) {
   if (!toolsListEl) return;
 
-  const stepIndex = stepGroups.indexOf(step);
   const tools = step.tools || [];
 
   if (tools.length === 0) {
@@ -2060,7 +2032,6 @@ function updateToolsList(step) {
 
 // defaultStepGroups 已从 ./src/quest3-steps.js 导入
 let totalSteps = stepGroups.length;
-const partStepMap = new Map();
 
 // 给每个部件分配步骤序号（默认最后一步）
 parts.forEach(part => {
@@ -2124,14 +2095,10 @@ const depthSlider = document.getElementById("explode-depth");
 const depthValueEl = document.getElementById("depth-value");
 const timelineSlider = document.getElementById("timeline-slider");
 const timelineStepEl = document.getElementById("timeline-step");
-const timelineTotalEl = document.getElementById("timeline-total");
 const timelinePlayBtn = document.getElementById("timeline-play");
 const timelineResetBtn = document.getElementById("timeline-reset");
 const timelineSpeedSelect = document.getElementById("timeline-speed");
 const toolsListEl = document.getElementById("tools-list");
-const partTooltip = document.getElementById("part-tooltip");
-const tooltipTitle = document.querySelector(".tooltip-title");
-const tooltipContent = document.querySelector(".tooltip-content");
 
 console.log("UI elements:", {
   prevBtn: !!prevBtn,
@@ -2177,42 +2144,6 @@ function highlightPart(partName) {
     }
   } else {
     highlightedPart = null;
-  }
-}
-
-// ===== 部件信息卡片 =====
-const raycaster = new THREE.Raycaster();
-const mouse = new THREE.Vector2();
-let hoveredPart = null;
-
-// partInfo 已从 ./src/quest3-data.js 导入
-
-// 显示工具提示
-function showTooltip(partName, x, y) {
-  if (!partTooltip || !tooltipTitle || !tooltipContent) return;
-
-  const info = partInfo[partName];
-  if (!info) return;
-
-  tooltipTitle.textContent = info.name;
-  tooltipContent.innerHTML = `
-    <div style="margin-bottom: 6px;"><strong>材质:</strong> ${info.material}</div>
-    <div style="margin-bottom: 6px;"><strong>重量:</strong> ${info.weight}</div>
-    <div style="margin-bottom: 6px;"><strong>功能:</strong> ${info.function}</div>
-    <div style="margin-bottom: 6px;"><strong>规格:</strong> ${info.specs}</div>
-    <div style="color: #8f7aff; font-style: italic; margin-top: 8px;">💡 ${info.funFact}</div>
-  `;
-
-  // 定位工具提示
-  partTooltip.style.left = `${x + 15}px`;
-  partTooltip.style.top = `${y + 15}px`;
-  partTooltip.classList.remove("hidden");
-}
-
-// 隐藏工具提示
-function hideTooltip() {
-  if (partTooltip) {
-    partTooltip.classList.add("hidden");
   }
 }
 
@@ -2618,11 +2549,9 @@ renderer?.domElement?.addEventListener("mousemove", e => {
   if (!el) return; // 渲染器/画布尚未就绪（预览或 WebGL 不可用时）时安全跳过
   const rect = el.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
-  const x = (e.clientX - rect.left) / rect.width;
   const y = (e.clientY - rect.top) / rect.height;
 
   // 使用鼠标Y轴位置控制炸开范围：鼠标越往下，炸开越大
-  // 加上鼠标X轴影响，让控制更有趣
   mouseFactor = Math.max(0.1, y * 1.2); // 最小保持 0.1 的炸开
   explodeAnimFactor = mouseFactor; // 同步整体炸开因子，供后续动画续接
 

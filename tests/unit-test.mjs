@@ -20,14 +20,25 @@ import {
   base64ToUtf8,
   formatBytes,
   validateGLBHeader,
+  computeStepGroupCount,
+  sortPartsForDisassembly,
+  computeExplodeVector,
 } from "../src/utils.js";
 
 import {
   sanitizeFilename,
   parseMultipartBuffer,
   getCORSHeaders,
+  cleanupOldTempFiles,
+  isAllowedExtension,
+  findBlenderCandidates,
+  createBlenderJobQueue,
   MAX_PARTS,
   MAX_BOUNDARY_LENGTH,
+  MAX_FILE_SIZE,
+  MAX_HEADER_SIZE,
+  TEMP_FILE_TTL_MS,
+  ALLOWED_EXTENSIONS,
 } from "../src/server-utils.js";
 
 // Buffer is a global in Node.js
@@ -388,6 +399,295 @@ describe("安全常量", () => {
   assertEqual(MAX_BOUNDARY_LENGTH, 200, "MAX_BOUNDARY_LENGTH = 200");
   assert(MAX_PARTS > 0, "MAX_PARTS > 0");
   assert(MAX_BOUNDARY_LENGTH > 0, "MAX_BOUNDARY_LENGTH > 0");
+  assertEqual(MAX_FILE_SIZE, 150 * 1024 * 1024, "MAX_FILE_SIZE = 150MB");
+  assertEqual(MAX_HEADER_SIZE, 8192, "MAX_HEADER_SIZE = 8192");
+  assertEqual(TEMP_FILE_TTL_MS, 3600000, "TEMP_FILE_TTL_MS = 1小时");
+  assert(ALLOWED_EXTENSIONS.includes(".glb"), "ALLOWED_EXTENSIONS 包含 .glb");
+  assert(ALLOWED_EXTENSIONS.includes(".gltf"), "ALLOWED_EXTENSIONS 包含 .gltf");
+  assert(ALLOWED_EXTENSIONS.includes(".stl"), "ALLOWED_EXTENSIONS 包含 .stl");
+  assert(ALLOWED_EXTENSIONS.includes(".obj"), "ALLOWED_EXTENSIONS 包含 .obj");
+});
+
+// ── isAllowedExtension ──
+describe("isAllowedExtension 文件扩展名校验", () => {
+  assert(isAllowedExtension(".glb"), ".glb 允许");
+  assert(isAllowedExtension(".gltf"), ".gltf 允许");
+  assert(isAllowedExtension(".stl"), ".stl 允许");
+  assert(isAllowedExtension(".obj"), ".obj 允许");
+  assert(isAllowedExtension(".GLB"), ".GLB 大写允许（大小写不敏感）");
+  assert(isAllowedExtension(".Glb"), ".Glb 混合大小写允许");
+  assert(!isAllowedExtension(".exe"), ".exe 不允许");
+  assert(!isAllowedExtension(".js"), ".js 不允许");
+  assert(!isAllowedExtension(".py"), ".py 不允许");
+  assert(!isAllowedExtension(""), "空字符串不允许");
+  assert(!isAllowedExtension(null), "null 不允许");
+  assert(!isAllowedExtension(undefined), "undefined 不允许");
+  assert(!isAllowedExtension("glb"), "无点号不允许");
+});
+
+// ── findBlenderCandidates ──
+describe("findBlenderCandidates Blender 路径候选", () => {
+  // macOS
+  const macCandidates = findBlenderCandidates("darwin", "/Users/test");
+  assert(macCandidates.length >= 5, "macOS 至少有 5 个候选路径");
+  assert(macCandidates.includes("/Applications/Blender.app/Contents/MacOS/Blender"), "macOS 包含 Applications 路径");
+  assert(macCandidates.includes("/opt/homebrew/bin/blender"), "macOS 包含 Homebrew 路径");
+  assertEqual(macCandidates[macCandidates.length - 1], "blender", "macOS 最后是回退值 blender");
+  assert(
+    macCandidates.some(c => c.includes("/Users/test")),
+    "macOS 包含用户目录候选",
+  );
+
+  // Linux
+  const linuxCandidates = findBlenderCandidates("linux", "/home/test");
+  assert(linuxCandidates.length >= 5, "Linux 至少有 5 个候选路径");
+  assert(linuxCandidates.includes("/usr/bin/blender"), "Linux 包含 /usr/bin/blender");
+  assert(linuxCandidates.includes("/snap/bin/blender"), "Linux 包含 snap 路径");
+  assertEqual(linuxCandidates[linuxCandidates.length - 1], "blender", "Linux 最后是回退值 blender");
+
+  // Windows
+  const winCandidates = findBlenderCandidates("win32", "C:/Users/test", {
+    ProgramFiles: "C:/Program Files",
+    "ProgramFiles(x86)": "C:/Program Files (x86)",
+  });
+  assert(winCandidates.length >= 4, "Windows 至少有 4 个候选路径");
+  assertEqual(winCandidates[winCandidates.length - 1], "blender", "Windows 最后是回退值 blender");
+  assert(
+    winCandidates.some(c => c.includes("Blender Foundation")),
+    "Windows 包含 Program Files 路径",
+  );
+
+  // 未知平台只返回回退值
+  const unknownCandidates = findBlenderCandidates("freebsd", "/home/test");
+  assertEqual(unknownCandidates.length, 1, "未知平台只有回退值");
+  assertEqual(unknownCandidates[0], "blender", "未知平台回退值为 blender");
+});
+
+// ── createBlenderJobQueue ──
+describe("createBlenderJobQueue Blender 任务串行队列", () => {
+  // 基本功能：enqueue 返回 Promise
+  const queue = createBlenderJobQueue();
+  const order = [];
+
+  queue.enqueue(() => { order.push(1); return Promise.resolve(); });
+  queue.enqueue(() => { order.push(2); return Promise.resolve(); });
+  queue.enqueue(() => { order.push(3); return Promise.resolve(); });
+
+  // 同步任务立即执行，但需要等待 microtask 完成
+  // 这里先验证 enqueue 返回 Promise
+  const q2 = createBlenderJobQueue();
+  const p = q2.enqueue(() => Promise.resolve(42));
+  assert(p instanceof Promise, "enqueue 返回 Promise");
+
+  // 异常不破坏队列
+  const queue3 = createBlenderJobQueue();
+  const failP = queue3.enqueue(() => Promise.reject(new Error("test error")));
+  failP.catch(() => {}); // 吞掉 rejection
+  const nextP = queue3.enqueue(() => Promise.resolve("ok"));
+  assert(nextP instanceof Promise, "失败后队列仍可入队新任务");
+
+  // 独立队列互不干扰
+  const qA = createBlenderJobQueue();
+  const qB = createBlenderJobQueue();
+  assert(qA !== qB, "不同队列实例独立");
+  const pA = qA.enqueue(() => Promise.resolve("A"));
+  const pB = qB.enqueue(() => Promise.resolve("B"));
+  assert(pA instanceof Promise && pB instanceof Promise, "独立队列各自返回 Promise");
+});
+
+// ── cleanupOldTempFiles ──
+describe("cleanupOldTempFiles 临时文件清理", () => {
+  // Mock fs 模块
+  const mockFiles = {
+    "old1.tmp": { mtimeMs: Date.now() - 7200000 }, // 2小时前
+    "old2.tmp": { mtimeMs: Date.now() - 5000000 }, // 超过1小时
+    "new1.tmp": { mtimeMs: Date.now() - 60000 },   // 1分钟前
+    "new2.tmp": { mtimeMs: Date.now() - 1000 },     // 刚创建
+  };
+  const deleted = [];
+  const mockFs = {
+    readdirSync: () => Object.keys(mockFiles),
+    statSync: (filePath) => {
+      const name = filePath.split("/").pop();
+      return { mtimeMs: mockFiles[name].mtimeMs };
+    },
+    unlinkSync: (filePath) => { deleted.push(filePath.split("/").pop()); },
+  };
+  const mockPath = {
+    join: (dir, file) => `${dir}/${file}`,
+  };
+
+  const cleaned = cleanupOldTempFiles("/tmp/test", mockFs, mockPath, 3600000);
+  assertEqual(cleaned, 2, "清理了 2 个过期文件");
+  assert(deleted.includes("old1.tmp"), "删除了 old1.tmp");
+  assert(deleted.includes("old2.tmp"), "删除了 old2.tmp");
+  assert(!deleted.includes("new1.tmp"), "保留 new1.tmp");
+  assert(!deleted.includes("new2.tmp"), "保留 new2.tmp");
+
+  // 目录不存在时返回 0
+  const errorFs = {
+    readdirSync: () => { throw new Error("ENOENT"); },
+  };
+  const errorResult = cleanupOldTempFiles("/nonexistent", errorFs, mockPath);
+  assertEqual(errorResult, 0, "目录不存在时返回 0");
+
+  // 空目录
+  const emptyFs = {
+    readdirSync: () => [],
+  };
+  const emptyResult = cleanupOldTempFiles("/tmp/empty", emptyFs, mockPath);
+  assertEqual(emptyResult, 0, "空目录返回 0");
+});
+
+// ── parseMultipartBuffer 安全补充 ──
+describe("parseMultipartBuffer 安全边界", () => {
+  const boundary = "SafeBoundary";
+
+  // part 数量超限
+  let multiPartData = "";
+  for (let i = 0; i < MAX_PARTS + 1; i++) {
+    multiPartData +=
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="file"; filename="file${i}.glb"\r\n` +
+      "Content-Type: application/octet-stream\r\n" +
+      "\r\n" +
+      "data" +
+      "\r\n";
+  }
+  multiPartData += `--${boundary}--\r\n`;
+
+  let threw = false;
+  try {
+    parseMultipartBuffer(Buffer.from(multiPartData, "latin1"), `--${boundary}`);
+  } catch (e) {
+    threw = true;
+    assert(e.message.includes(String(MAX_PARTS)), "错误信息包含 MAX_PARTS 值");
+  }
+  assert(threw, "超过 MAX_PARTS 限制时抛出异常");
+
+  // 二进制内容包含 null 字节
+  const binaryContent = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]);
+  const binaryMultipart = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="binary.glb"\r\nContent-Type: model/gltf-binary\r\n\r\n`, "latin1"),
+    binaryContent,
+    Buffer.from(`\r\n--${boundary}--\r\n`, "latin1"),
+  ]);
+  const binaryResult = parseMultipartBuffer(binaryMultipart, `--${boundary}`);
+  assert(!!binaryResult, "二进制内容解析成功");
+  assertEqual(binaryResult.filename, "binary.glb", "二进制文件文件名正确");
+  assertEqual(binaryResult.data.length, 5, "二进制数据长度正确");
+});
+
+// ── sanitizeFilename 安全补充 ──
+describe("sanitizeFilename 安全边界补充", () => {
+  // 全部是危险字符
+  assertEqual(sanitizeFilename("../../../.."), "", "纯路径遍历字符返回空");
+  assertEqual(sanitizeFilename("\\\\\\\\"), "", "纯反斜杠返回空");
+
+  // 混合攻击
+  assertEqual(sanitizeFilename("..\\..\\..\\Windows\\system32"), "Windowssystem32", "复杂路径遍历被清除");
+  assertEqual(sanitizeFilename("\x00\x01\x02evil.glb"), "evil.glb", "前缀控制字符被移除");
+
+  // Unicode 保留
+  assertEqual(sanitizeFilename("模型文件.glb"), "模型文件.glb", "中文文件名保留");
+  assertEqual(sanitizeFilename("модель.glb"), "модель.glb", "俄文文件名保留");
+  assertEqual(sanitizeFilename("モデル.glb"), "モデル.glb", "日文文件名保留");
+});
+
+// ── computeStepGroupCount ──
+describe("computeStepGroupCount 步骤分组计算", () => {
+  assertEqual(computeStepGroupCount(0), 2, "0 个部件 → 最少 2 组");
+  assertEqual(computeStepGroupCount(1), 2, "1 个部件 → 最少 2 组");
+  assertEqual(computeStepGroupCount(3), 2, "3 个部件 → ceil(3/3)=1 → 最少 2 组");
+  assertEqual(computeStepGroupCount(4), 2, "4 个部件 → ceil(4/3)=2");
+  assertEqual(computeStepGroupCount(6), 2, "6 个部件 → ceil(6/3)=2");
+  assertEqual(computeStepGroupCount(7), 3, "7 个部件 → ceil(7/3)=3");
+  assertEqual(computeStepGroupCount(9), 3, "9 个部件 → ceil(9/3)=3");
+  assertEqual(computeStepGroupCount(15), 5, "15 个部件 → ceil(15/3)=5");
+  assertEqual(computeStepGroupCount(18), 6, "18 个部件 → 最多 6 组");
+  assertEqual(computeStepGroupCount(30), 6, "30 个部件 → 最多 6 组");
+  assertEqual(computeStepGroupCount(100), 6, "100 个部件 → 最多 6 组");
+});
+
+// ── sortPartsForDisassembly ──
+describe("sortPartsForDisassembly 部件排序", () => {
+  const makePart = (name, dist) => ({
+    name,
+    homePos: { length: () => dist },
+  });
+
+  // 无装配顺序：按距离降序
+  const parts = [
+    makePart("近", 1),
+    makePart("远", 5),
+    makePart("中", 3),
+  ];
+  const sorted = sortPartsForDisassembly(parts);
+  assertEqual(sorted[0].name, "远", "无顺序时最远的先拆");
+  assertEqual(sorted[1].name, "中", "中间第二");
+  assertEqual(sorted[2].name, "近", "最近的最后拆");
+
+  // 有装配顺序：按装配顺序排列
+  const ordered = sortPartsForDisassembly(parts, ["近", "中", "远"]);
+  assertEqual(ordered[0].name, "近", "装配顺序优先：第一个");
+  assertEqual(ordered[1].name, "中", "装配顺序优先：第二个");
+  assertEqual(ordered[2].name, "远", "装配顺序优先：第三个");
+
+  // 装配顺序部分匹配：未匹配的按距离降序
+  const partialOrder = sortPartsForDisassembly(parts, ["中"]);
+  assertEqual(partialOrder[0].name, "中", "部分匹配：匹配的在前");
+  assertEqual(partialOrder[1].name, "远", "部分匹配：未匹配按距离降序");
+  assertEqual(partialOrder[2].name, "近", "部分匹配：最近的最后");
+
+  // 空装配顺序回退到距离排序
+  const emptyOrder = sortPartsForDisassembly(parts, []);
+  assertEqual(emptyOrder[0].name, "远", "空装配顺序回退距离降序");
+
+  // 不修改原数组
+  const original = [makePart("a", 1), makePart("b", 2)];
+  const result = sortPartsForDisassembly(original);
+  assertEqual(original[0].name, "a", "原数组未被修改");
+  assert(result !== original, "返回新数组");
+
+  // 使用 partCenter 而非 homePos
+  const partsWithCenter = [
+    { name: "A", homePos: { length: () => 10 }, partCenter: { length: () => 1 } },
+    { name: "B", homePos: { length: () => 1 }, partCenter: { length: () => 10 } },
+  ];
+  const centerSorted = sortPartsForDisassembly(partsWithCenter);
+  assertEqual(centerSorted[0].name, "B", "优先使用 partCenter 的距离");
+});
+
+// ── computeExplodeVector ──
+describe("computeExplodeVector 爆炸方向计算", () => {
+  // 远离中心的部件：沿径向向外
+  const radial = computeExplodeVector({ x: 3, y: 0, z: 0 }, 0, 4);
+  assert(radial.x > 0, "右侧部件爆炸方向向右");
+  assertApprox(radial.y, 0, 1e-10, "右侧部件 y 方向无偏移");
+  assertApprox(radial.z, 0, 1e-10, "右侧部件 z 方向无偏移");
+  assert(radial.x >= 1.0, "爆炸距离至少为 1.0");
+
+  // 中心部件（距离 < 0.001）：均匀角度分布
+  const center0 = computeExplodeVector({ x: 0, y: 0, z: 0 }, 0, 4);
+  const center1 = computeExplodeVector({ x: 0, y: 0, z: 0 }, 1, 4);
+  const center2 = computeExplodeVector({ x: 0, y: 0, z: 0 }, 2, 4);
+  assert(center0.x !== center1.x || center0.y !== center1.y, "不同索引的中心部件方向不同");
+  assertApprox(Math.sqrt(center0.x ** 2 + center0.y ** 2), 1.0, 1e-10, "中心部件爆炸距离 = 1.0");
+  assertApprox(Math.sqrt(center1.x ** 2 + center1.y ** 2), 1.0, 1e-10, "中心部件爆炸距离 = 1.0");
+
+  // 距离 * 3 > 1.0 时，使用实际距离 * 3
+  const farPart = computeExplodeVector({ x: 0, y: 2, z: 0 }, 0, 1);
+  assertApprox(farPart.y, 6.0, 1e-10, "距离2*3=6 的爆炸距离");
+
+  // 负方向
+  const negPart = computeExplodeVector({ x: -4, y: 0, z: 0 }, 0, 1);
+  assert(negPart.x < 0, "左侧部件爆炸方向向左");
+
+  // 三维方向
+  const diagPart = computeExplodeVector({ x: 1, y: 1, z: 1 }, 0, 1);
+  assert(diagPart.x > 0 && diagPart.y > 0 && diagPart.z > 0, "对角线部件沿对角线爆炸");
+  const dist = Math.sqrt(diagPart.x ** 2 + diagPart.y ** 2 + diagPart.z ** 2);
+  assertApprox(dist, Math.sqrt(3) * 3, 1e-10, "对角线爆炸距离 = sqrt(3) * 3");
 });
 
 // ===== 结果汇总 =====

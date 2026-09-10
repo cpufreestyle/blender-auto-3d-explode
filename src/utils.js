@@ -166,6 +166,80 @@ export function formatBytes(bytes) {
 
 // ===== GLB 二进制校验 =====
 
+// ===== 拆解步骤计算（从 main.js 提取）=====
+
+/**
+ * 根据部件数量计算步骤分组数（纯函数）
+ * 步骤数：欢迎(1) + 部件分组 + 完成(1)，最多 8 步
+ * @param {number} partCount - 部件数量
+ * @returns {number} 分组数（不含欢迎和完成步骤）
+ */
+export function computeStepGroupCount(partCount) {
+  return Math.min(Math.max(Math.ceil(partCount / 3), 2), 6);
+}
+
+/**
+ * 按离中心距离降序排列部件（外层先拆）
+ * 若有装配顺序，优先使用装配顺序
+ * @param {Array<{name: string, homePos: {length: () => number}, partCenter?: {length: () => number}}>} parts
+ * @param {string[]} [assemblyOrder] - 可选的装配顺序（名称数组）
+ * @returns {Array} 排序后的部件数组
+ */
+export function sortPartsForDisassembly(parts, assemblyOrder) {
+  if (assemblyOrder && assemblyOrder.length) {
+    const orderIndex = new Map(assemblyOrder.map((n, i) => [n, i]));
+    return [...parts].sort((a, b) => {
+      const ia = orderIndex.has(a.name) ? orderIndex.get(a.name) : Infinity;
+      const ib = orderIndex.has(b.name) ? orderIndex.get(b.name) : Infinity;
+      if (ia !== ib) return ia - ib;
+      const distA = (a.partCenter || a.homePos).length();
+      const distB = (b.partCenter || b.homePos).length();
+      return distB - distA;
+    });
+  }
+  return [...parts].sort((a, b) => {
+    const distA = (a.partCenter || a.homePos).length();
+    const distB = (b.partCenter || b.homePos).length();
+    return distB - distA;
+  });
+}
+
+/**
+ * 计算爆炸方向（纯数学，无 THREE 依赖）
+ * 当部件离中心太近时，按均匀角度分布；否则沿径向向外
+ * @param {{x: number, y: number, z: number}} partCenter
+ * @param {number} index
+ * @param {number} totalParts
+ * @returns {{x: number, y: number, z: number}} 爆炸位移向量
+ */
+export function computeExplodeVector(partCenter, index, totalParts) {
+  const distFromCenter = Math.sqrt(
+    partCenter.x ** 2 + partCenter.y ** 2 + partCenter.z ** 2,
+  );
+  let dirX, dirY, dirZ;
+
+  if (distFromCenter < 0.001) {
+    const angle = (index / totalParts) * Math.PI * 2;
+    dirX = Math.cos(angle);
+    dirY = Math.sin(angle);
+    dirZ = 0;
+  } else {
+    const inv = 1 / distFromCenter;
+    dirX = partCenter.x * inv;
+    dirY = partCenter.y * inv;
+    dirZ = partCenter.z * inv;
+  }
+
+  const initialDist = Math.max(distFromCenter * 3, 1.0);
+  return {
+    x: dirX * initialDist,
+    y: dirY * initialDist,
+    z: dirZ * initialDist,
+  };
+}
+
+// ===== GLB 二进制校验 =====
+
 /**
  * 验证 GLB 二进制数据头部
  * @param {Uint8Array|Buffer} buffer - GLB 二进制数据

@@ -26,6 +26,10 @@ import fs from "fs";
 import {
   getCORSHeaders,
   cleanupOldTempFiles,
+  findBlenderCandidates,
+  createBlenderJobQueue,
+  isAllowedExtension,
+  ALLOWED_EXTENSIONS,
   MAX_FILE_SIZE,
 } from "./src/server-utils.js";
 import { readBody } from "./src/body.js";
@@ -72,41 +76,7 @@ cleanupOldTempFiles(UPLOAD_DIR, fs, path);
  * 检测顺序：环境变量 > macOS > Linux > Windows > PATH
  */
 function findBlender() {
-  const platform = os.platform();
-  const candidates = [];
-
-  if (platform === "darwin") {
-    // macOS — /Applications, ~/Applications, Homebrew
-    candidates.push(
-      "/Applications/Blender.app/Contents/MacOS/Blender",
-      "/Applications/Blender.app/Contents/MacOS/blender",
-      path.join(os.homedir(), "Applications/Blender.app/Contents/MacOS/Blender"),
-      "/opt/homebrew/bin/blender",
-      "/usr/local/bin/blender"
-    );
-  } else if (platform === "linux") {
-    candidates.push(
-      "/usr/bin/blender",
-      "/usr/local/bin/blender",
-      "/snap/bin/blender",
-      "/opt/blender/blender",
-      path.join(os.homedir(), ".local/bin/blender")
-    );
-  } else if (platform === "win32") {
-    // Windows — Program Files, scoop, chocolatey
-    const programFiles = process.env["ProgramFiles"] || "C:\\Program Files";
-    const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
-    candidates.push(
-      path.join(programFiles, "Blender Foundation", "Blender", "blender.exe"),
-      path.join(programFilesX86, "Blender Foundation", "Blender", "blender.exe"),
-      path.join(os.homedir(), "scoop", "apps", "blender", "current", "blender.exe"),
-      path.join("C:\\", "ProgramData", "chocolatey", "bin", "blender.exe")
-    );
-  }
-
-  // 最后回退到 PATH 中的 blender
-  candidates.push("blender");
-
+  const candidates = findBlenderCandidates(os.platform(), os.homedir(), process.env);
   for (const c of candidates) {
     try {
       if (c === "blender") return c; // 依赖 PATH 解析
@@ -129,23 +99,11 @@ function findBlender() {
 // 注：常驻的 Blender MCP 宿主（用户自行启动、监听 9876）不在此管理范围内，保留不动。
 
 let activeBlenderChild = null;          // 本服务器当前持有的 Blender 子进程（GUI）
-let blenderJobChain = Promise.resolve(); // 后台任务串行队列
+const blenderJobQueue = createBlenderJobQueue();
 
 /** 后台 Blender 任务串行器：保证任意时刻只有一个 --background Blender 在跑 */
 function enqueueBlenderJob(task) {
-  const run = blenderJobChain.then(task, task);
-  blenderJobChain = run.catch(() => {}); // 吞掉异常，避免队列断裂
-  return run;
-}
-
-/** 结束上一个由本服务器拉起的 Blender（GUI 打开前调用，避免窗口堆叠） */
-function killTrackedBlender() {
-  const prev = activeBlenderChild;
-  activeBlenderChild = null;
-  if (!prev) return;
-  try { prev.kill("SIGTERM"); } catch {}
-  const pid = prev.pid;
-  setTimeout(() => { try { process.kill(pid, "SIGKILL"); } catch {} }, 3000);
+  return blenderJobQueue.enqueue(task);
 }
 
 /**
@@ -344,7 +302,7 @@ function saveGeneratedModel(glbBuffer, baseName) {
 /**
  * 用 Blender GUI 打开指定 GLB（fire-and-forget，不阻塞响应）
  * 每次调用都会拉起一个新的 Blender 窗口；新窗口就绪后，自动关闭上一个窗口。
- * 配合全局单飞守卫（activeBlenderChild / killTrackedBlender），保证本服务器最多只弹出一个 Blender 窗口。
+ * 配合全局单飞守卫（activeBlenderChild 跟踪 + 旧窗口延迟关闭），保证本服务器最多只弹出一个 Blender 窗口。
  */
 function openInBlender(glbPath) {
   const platform = os.platform();
@@ -1447,8 +1405,8 @@ async function handleSplit(req, res) {
 
     const fileName = file.filename;
     const ext = path.extname(fileName).toLowerCase();
-    if (![".glb", ".gltf", ".stl", ".obj"].includes(ext)) {
-      sendJSON(res, 400, { error: `不支持的格式: ${ext}，支持 .glb / .gltf / .stl / .obj` });
+    if (!isAllowedExtension(ext)) {
+      sendJSON(res, 400, { error: `不支持的格式: ${ext}，支持 ${ALLOWED_EXTENSIONS.join(" / ")}` });
       return;
     }
 

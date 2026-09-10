@@ -10,6 +10,9 @@ export const MAX_BOUNDARY_LENGTH = 200; // boundary 最大长度
 export const MAX_HEADER_SIZE = 8192; // 单个 multipart part header 最大大小
 export const TEMP_FILE_TTL_MS = 60 * 60 * 1000; // 临时文件存活时间：1 小时
 
+// 支持拆解的文件扩展名
+export const ALLOWED_EXTENSIONS = [".glb", ".gltf", ".stl", ".obj"];
+
 // ── CORS 头设置 ──────────────────────────────────────
 
 /**
@@ -118,6 +121,77 @@ export function parseMultipartBuffer(buffer, boundary) {
   }
 
   return parts.length > 0 ? parts[0] : null;
+}
+
+// ── 文件扩展名校验 ────────────────────────────────────
+
+/**
+ * 检查文件扩展名是否在允许拆解的白名单中
+ * @param {string} ext - 扩展名（含 .，如 ".glb"）
+ * @returns {boolean}
+ */
+export function isAllowedExtension(ext) {
+  return ALLOWED_EXTENSIONS.includes((ext || "").toLowerCase());
+}
+
+// ── Blender 路径候选 ──────────────────────────────────
+
+/**
+ * 根据平台返回 Blender 候选路径列表（纯函数，不含 fs 检测）
+ * @param {string} platform - os.platform() 返回值
+ * @param {string} homeDir - os.homedir() 返回值
+ * @param {object} [env] - process.env（Windows 用）
+ * @returns {string[]} 候选路径，最后一个是回退值 "blender"
+ */
+export function findBlenderCandidates(platform, homeDir, env = {}) {
+  const candidates = [];
+  const pathJoin = (...parts) => parts.join("/").replace(/\/+/g, "/");
+
+  if (platform === "darwin") {
+    candidates.push(
+      "/Applications/Blender.app/Contents/MacOS/Blender",
+      "/Applications/Blender.app/Contents/MacOS/blender",
+      pathJoin(homeDir, "Applications/Blender.app/Contents/MacOS/Blender"),
+      "/opt/homebrew/bin/blender",
+      "/usr/local/bin/blender",
+    );
+  } else if (platform === "linux") {
+    candidates.push(
+      "/usr/bin/blender",
+      "/usr/local/bin/blender",
+      "/snap/bin/blender",
+      "/opt/blender/blender",
+      pathJoin(homeDir, ".local/bin/blender"),
+    );
+  } else if (platform === "win32") {
+    const programFiles = env["ProgramFiles"] || "C:\\Program Files";
+    const programFilesX86 = env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+    candidates.push(
+      pathJoin(programFiles, "Blender Foundation", "Blender", "blender.exe"),
+      pathJoin(programFilesX86, "Blender Foundation", "Blender", "blender.exe"),
+      pathJoin(homeDir, "scoop", "apps", "blender", "current", "blender.exe"),
+      "C:/ProgramData/chocolatey/bin/blender.exe",
+    );
+  }
+  candidates.push("blender");
+  return candidates;
+}
+
+// ── Blender 单飞守卫（纯逻辑）──────────────────────────
+
+/**
+ * 创建后台任务串行队列（纯函数工厂，不依赖外部状态）
+ * @returns {{ enqueue: (task: () => Promise) => Promise }}
+ */
+export function createBlenderJobQueue() {
+  let chain = Promise.resolve();
+  return {
+    enqueue(task) {
+      const run = chain.then(task, task);
+      chain = run.catch(() => {}); // 吞掉异常，避免队列断裂
+      return run;
+    },
+  };
 }
 
 // ── 临时文件清理 ──────────────────────────────────────
