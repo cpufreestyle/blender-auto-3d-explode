@@ -1,6 +1,6 @@
 #!/bin/bash
 # 自动启动脚本 - 在独立 Terminal.app 中运行
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/../.."
 
 LOG="$(pwd)/startup_log.txt"
 echo "=== 启动时间: $(date) ===" > "$LOG"

@@ -1,5 +1,5 @@
 #!/bin/bash
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/../.."
 
 # Kill old
 lsof -ti :3001 | xargs kill -9 2>/dev/null

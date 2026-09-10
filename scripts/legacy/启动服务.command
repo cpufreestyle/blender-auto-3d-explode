@@ -1,6 +1,6 @@
 #!/bin/bash
 # 双击运行或在终端执行: open 启动服务.command
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/../.."
 
 echo "═══════════════════════════════════════════"
 echo "  🚀 启动 Blender 自动生成拆解3D系统"
