@@ -47,7 +47,7 @@ import os
 import sys
 import json
 import socket
-import threading
+import tempfile
 import urllib.request
 import urllib.error
 
