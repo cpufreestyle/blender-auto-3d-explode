@@ -1585,6 +1585,155 @@ async function handleAssemblyAnalysis(req, res, url) {
   }
 }
 
+// ── 全自动闭环：云端生成 → 导入 Blender 实时场景 → 读回 ──────────
+
+// 记录最近一次由本服务器导入 Blender 的对象名，供「读回」默认使用。
+let lastImportedObject = null;
+
+/**
+ * 等待 Blender MCP addon(9876) 就绪；autoLaunch 为真时先尝试拉起 Blender GUI。
+ * @returns {Promise<boolean>} 是否就绪
+ */
+async function waitForBlenderAddon({ autoLaunch = true, timeoutMs = 30_000 } = {}) {
+  const probe = async () => {
+    try {
+      await callBlenderMcp("get_addon_status", {}, 2000);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (await probe()) return true;
+  if (!autoLaunch) return false;
+  try {
+    launchBlenderApp();
+  } catch {
+    /* 拉不起来就继续轮询 */
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 1500));
+    if (await probe()) return true;
+  }
+  return false;
+}
+
+/**
+ * POST /api/gen-to-blender
+ * Body: { image: "data:image/...;base64,...", deploy?: "tripo"|"meshy"|"hyper3d", name?, autoLaunch? }
+ * 全自动：云端生成 GLB → 落盘 → 导入 Blender 实时场景 → 返回导入对象与场景信息。
+ */
+async function handleGenToBlender(req, res) {
+  const startTime = Date.now();
+  try {
+    const body = await readBody(req, { maxSize: 25 * 1024 * 1024 });
+    const imageDataUrl = body.image;
+    if (!imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
+      sendJSON(res, 400, { success: false, error: "缺少有效的图片数据（image 字段应为 data URL）" });
+      return;
+    }
+    const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/.exec(imageDataUrl);
+    if (!match) {
+      sendJSON(res, 400, { success: false, error: "图片 data URL 格式错误" });
+      return;
+    }
+    const imageBase64 = match[2];
+    const mode = body.deploy || "tripo";
+
+    // 1. 云端生成 GLB（复用既有 provider 实现）
+    let out;
+    if (mode === "meshy") out = await runMeshyImageTo3D(AI_CONFIG.providers?.meshy, body, imageBase64);
+    else if (mode === "hyper3d") out = await runHyper3DImageTo3D(AI_CONFIG.providers?.hyper3d, body, imageBase64);
+    else out = await runTripoImageTo3D(AI_CONFIG.providers?.tripo, body, imageBase64);
+
+    // 2. 落盘（持久化，便于后续拆解/复现）
+    const savedPath = saveGeneratedModel(out.glbBuffer, `${mode}-to-blender`);
+    // 供前端直接取回展示的相对 URL（静态服务托管 models/generated/）
+    const modelUrl = "/" + path.relative(__dirname, savedPath).split(path.sep).join("/");
+
+    // 3. 确保 Blender MCP addon 就绪（必要时自动拉起 Blender GUI）
+    const ready = await waitForBlenderAddon({ autoLaunch: body.autoLaunch !== false });
+    if (!ready) {
+      sendJSON(res, 502, {
+        success: false,
+        savedPath,
+        modelUrl,
+        error:
+          "Blender MCP addon 未就绪（9876 未监听）。请打开 Blender 并在侧栏点击「Connect to MCP server」后重试。",
+      });
+      return;
+    }
+
+    // 4. 导入 Blender 实时场景
+    const name = body.name || `${mode}_model`;
+    const imported = await callBlenderMcp("import_glb_from_file", { filepath: savedPath, name }, 120_000);
+    if (!imported || imported.succeed === false) {
+      sendJSON(res, 502, { success: false, savedPath, error: (imported && imported.error) || "导入 Blender 失败" });
+      return;
+    }
+    lastImportedObject = imported.name || name;
+
+    // 5. 回传场景信息
+    let scene = null;
+    try {
+      scene = await callBlenderMcp("get_scene_info", {}, 10_000);
+    } catch {
+      /* 非致命：场景信息拿不到也视为导入成功 */
+    }
+
+    sendJSON(res, 200, {
+      success: true,
+      elapsed: ((Date.now() - startTime) / 1000).toFixed(2),
+      savedPath,
+      modelUrl,
+      imported,
+      scene,
+    });
+  } catch (err) {
+    sendJSON(res, err.status || 500, { success: false, error: err.message });
+  }
+}
+
+/**
+ * GET /api/blender/export?name=<对象名>
+ * 从 Blender 实时场景导出指定对象为 GLB（默认导出最近一次导入的对象），二进制回传。
+ */
+async function handleBlenderExport(req, res, url) {
+  const name = url.searchParams.get("name") || lastImportedObject;
+  if (!name) {
+    sendJSON(res, 400, { success: false, error: "缺少 name，且尚无已导入对象可回退" });
+    return;
+  }
+  const exportPath = path.join(UPLOAD_DIR, `export-${Date.now()}.glb`);
+  try {
+    const result = await callBlenderMcp("export_object_glb", { name, filepath: exportPath }, 120_000);
+    if (!result || result.succeed === false) {
+      sendJSON(res, 502, { success: false, error: (result && result.error) || "从 Blender 导出失败" });
+      return;
+    }
+    if (!fs.existsSync(exportPath)) {
+      sendJSON(res, 502, { success: false, error: "导出文件不存在" });
+      return;
+    }
+    const buf = fs.readFileSync(exportPath);
+    res.writeHead(200, {
+      "Content-Type": "application/octet-stream",
+      "Content-Length": buf.length,
+      "X-Object-Name": encodeURIComponent(name),
+      ...getCORSHeaders(),
+    });
+    res.end(buf);
+  } catch (err) {
+    sendJSON(res, 502, { success: false, error: err.message });
+  } finally {
+    try {
+      fs.unlinkSync(exportPath);
+    } catch {
+      /* 文件不存在则忽略 */
+    }
+  }
+}
+
 // ── 创建 HTTP 服务器 ──────────────────────────────────
 
 const server = http.createServer(
@@ -1621,6 +1770,10 @@ const server = http.createServer(
     await handleAITest(req, res);
   } else if (req.method === "POST" && url.pathname === "/api/test-provider") {
     await handleProviderTest(req, res);
+  } else if (req.method === "POST" && url.pathname === "/api/gen-to-blender") {
+    await handleGenToBlender(req, res);
+  } else if (req.method === "GET" && url.pathname === "/api/blender/export") {
+    await handleBlenderExport(req, res, url);
   } else if (req.method === "GET" && url.pathname === "/api/assembly/sequence") {
     await handleAssemblySequence(req, res, url);
   } else if (req.method === "GET" && url.pathname === "/api/assembly/analysis") {
@@ -1709,6 +1862,8 @@ server.listen(PORT, () => {
   console.log("    POST /api/split    — 拆解 GLB（二进制响应）");
   console.log("    POST /api/ai-paint — AI 绘画（生成3D模型）");
   console.log("    POST /api/image-to-3d — 图片转3D（本地 TripoSR / Replicate / Meshy / Tripo / Hyper3D）");
+  console.log("    POST /api/gen-to-blender   — 云端生成 → 自动导入 Blender 实时场景");
+  console.log("    GET  /api/blender/export   — 从 Blender 导出对象 GLB（读回）");
   console.log("    GET  /api/assembly/sequence — 装配拆解顺序（Blender MCP）");
   console.log("    GET  /api/assembly/analysis — 装配/干涉/可制造性分析（Blender MCP）\n");
 

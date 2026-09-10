@@ -290,8 +290,9 @@ class BlenderMCPServer:
             "get_assembly_sequence": self.get_assembly_sequence,
             "get_blender_info": self.get_blender_info,
             "get_addon_status": self.get_addon_status,
-            # --- generic GLB import bridge for external 3D generation MCP tools ---
+            # --- generic GLB import/export bridge for external 3D generation MCP tools ---
             "import_glb_from_file": self.import_glb_from_file,
+            "export_object_glb": self.export_object_glb,
         }
 
         # Add Polyhaven handlers only if enabled
@@ -1950,6 +1951,39 @@ class BlenderMCPServer:
                 if bbox:
                     result["world_bounding_box"] = bbox
             return {"succeed": True, **result}
+        except Exception as e:
+            return {"succeed": False, "error": str(e)}
+
+    def export_object_glb(self, name=None, filepath=None):
+        """Export a single object (by name) as GLB to a local filepath.
+
+        Used by the web app to read a model back out of the live Blender scene
+        (e.g., right after it was imported from Tripo) so the browser can render it.
+        """
+        import os
+        if not filepath:
+            return {"succeed": False, "error": "filepath is required"}
+        obj = None
+        if name:
+            obj = bpy.data.objects.get(name)
+            if obj is None:
+                return {"succeed": False, "error": f"object not found: {name}"}
+        else:
+            meshes = [o for o in bpy.context.scene.objects if o.type == "MESH"]
+            if len(meshes) == 1:
+                obj = meshes[0]
+            else:
+                return {"succeed": False, "error": "name required (scene has multiple meshes)"}
+        try:
+            for o in list(bpy.context.selected_objects):
+                o.select_set(False)
+            bpy.context.view_layer.objects.active = obj
+            obj.select_set(True)
+            bpy.ops.export_scene.gltf(filepath=filepath, export_format="GLB", use_selection=True)
+            size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+            if size <= 0:
+                return {"succeed": False, "error": "export produced an empty file"}
+            return {"succeed": True, "name": obj.name, "filepath": filepath, "size": size}
         except Exception as e:
             return {"succeed": False, "error": str(e)}
 

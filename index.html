@@ -130,6 +130,11 @@
           <input id="img-to-3d-model-custom" class="ai-input ai-input-sm hidden" placeholder="owner/name" />
           <span class="ai-to3d-hint">需先上传参考图</span>
         </div>
+        <div class="ai-to3d-row">
+          <button id="gen-to-blender-btn" class="btn btn-secondary" title="云端生成后自动导入 Blender 实时场景（需 Blender 已连接 MCP）">📤 生成并发送到 Blender</button>
+          <button id="blender-readback-btn" class="btn btn-secondary" title="从 Blender 读回最近导入的对象并在网页显示">📥 从 Blender 读回</button>
+          <span class="ai-to3d-hint">全自动：生成 → 导入 Blender → 读回</span>
+        </div>
         <div class="ai-presets">
           <button class="chip" data-prompt="红色球体">🔴球体</button>
           <button class="chip" data-prompt="篮球">🏀篮球</button>

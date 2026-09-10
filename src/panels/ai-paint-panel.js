@@ -32,6 +32,8 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
   const imgTo3DModelCustom = document.getElementById("img-to-3d-model-custom");
   const textTo3DBtn = document.getElementById("text-to-3d-btn");
   const textTo3DMode = document.getElementById("text-to-3d-mode");
+  const genToBlenderBtn = document.getElementById("gen-to-blender-btn");
+  const blenderReadbackBtn = document.getElementById("blender-readback-btn");
 
   // 当前上传的图片特征
   let uploadedImageFeatures = null;
@@ -427,6 +429,105 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
       }
     }
   }
+
+  // 全自动：云端生成 → 导入 Blender 实时场景 → 同时在网页展示
+  async function genToBlender() {
+    if (!uploadedImageDataUrl) {
+      showAIStatus("❌ 请先上传一张参考图（拖入或点击上方区域）", "error");
+      return;
+    }
+    const deploy = imgTo3DDeploy ? imgTo3DDeploy.value : "tripo";
+    const providerLabel =
+      { meshy: "Meshy AI", tripo: "Tripo", hyper3d: "Hyper3D(Rodin)" }[deploy] || deploy;
+    if (genToBlenderBtn) {
+      genToBlenderBtn.disabled = true;
+      genToBlenderBtn.textContent = "⏳ 生成并导入中...";
+    }
+    showAIStatus(
+      `<span class="ai-paint-spinner"></span>正在用 ${providerLabel} 生成，并自动导入 Blender 实时场景...（约 1-3 分钟）`,
+      "info",
+    );
+    try {
+      const resp = await fetch(`${BLENDER_SERVER_AI}/api/gen-to-blender`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: uploadedImageDataUrl, deploy }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        // 即便导入失败，只要已生成模型也展示到网页，避免白跑一趟
+        if (data.modelUrl) {
+          try {
+            const ab = await (await fetch(`${BLENDER_SERVER_AI}${data.modelUrl}`)).arrayBuffer();
+            await loadCustomModel(ab, "生成→Blender", null);
+          } catch {
+            /* 展示失败不致命 */
+          }
+        }
+        throw new Error(data.error || `服务器错误 ${resp.status}`);
+      }
+      const objName = (data.imported && data.imported.name) || "模型";
+      const objCount = (data.scene && data.scene.object_count) || "?";
+      showAIStatus(
+        `✅ 已生成并导入 Blender！对象「${objName}」\n场景共 ${objCount} 个对象（${data.elapsed}s）。可点「📥 从 Blender 读回」拉回网页。`,
+        "success",
+      );
+      showStatus(`✅ 已发送到 Blender：${objName}`, "success");
+      if (data.modelUrl) {
+        try {
+          const ab = await (await fetch(`${BLENDER_SERVER_AI}${data.modelUrl}`)).arrayBuffer();
+          await loadCustomModel(ab, `Blender: ${objName}`, null);
+        } catch {
+          /* 展示失败不致命 */
+        }
+      }
+    } catch (err) {
+      console.error("生成并发送到 Blender 失败:", err);
+      showAIStatus(`❌ ${err.message}`, "error");
+    } finally {
+      if (genToBlenderBtn) {
+        genToBlenderBtn.disabled = false;
+        genToBlenderBtn.textContent = "📤 生成并发送到 Blender";
+      }
+    }
+  }
+
+  // 从 Blender 读回最近导入的对象（二进制 GLB）并显示到网页
+  async function blenderReadback() {
+    if (blenderReadbackBtn) {
+      blenderReadbackBtn.disabled = true;
+      blenderReadbackBtn.textContent = "⏳ 读取中...";
+    }
+    showAIStatus(`<span class="ai-paint-spinner"></span>正在从 Blender 读回对象...`, "info");
+    try {
+      const resp = await fetch(`${BLENDER_SERVER_AI}/api/blender/export`);
+      if (!resp.ok) {
+        let msg = `服务器错误 ${resp.status}`;
+        try {
+          msg = (await resp.json()).error || msg;
+        } catch {
+          /* 非 JSON 响应 */
+        }
+        throw new Error(msg);
+      }
+      const objName = decodeURIComponent(resp.headers.get("X-Object-Name") || "blender_object");
+      const arrayBuffer = await resp.arrayBuffer();
+      showAIStatus(`✅ 已从 Blender 读回「${objName}」，正在加载到场景...`, "success");
+      await loadCustomModel(arrayBuffer, `Blender: ${objName}`, null);
+      showStatus(`✅ 从 Blender 读回：${objName}`, "success");
+    } catch (err) {
+      console.error("从 Blender 读回失败:", err);
+      showAIStatus(`❌ 读回失败：${err.message}`, "error");
+    } finally {
+      if (blenderReadbackBtn) {
+        blenderReadbackBtn.disabled = false;
+        blenderReadbackBtn.textContent = "📥 从 Blender 读回";
+      }
+    }
+  }
+
+  if (genToBlenderBtn) genToBlenderBtn.addEventListener("click", genToBlender);
+  if (blenderReadbackBtn) blenderReadbackBtn.addEventListener("click", blenderReadback);
 
   // 发送 AI 绘画请求
   async function generateModel(prompt, mode = "paint", textMode = "auto") {
