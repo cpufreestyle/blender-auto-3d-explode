@@ -1,4 +1,37 @@
-import * as THREE from "three";
+import {
+  ACESFilmicToneMapping,
+  AmbientLight,
+  Box3,
+  BoxGeometry,
+  BufferAttribute,
+  BufferGeometry,
+  CatmullRomCurve3,
+  CircleGeometry,
+  Color,
+  CylinderGeometry,
+  DirectionalLight,
+  Euler,
+  Fog,
+  GridHelper,
+  Group,
+  MathUtils,
+  Matrix4,
+  Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  PCFSoftShadowMap,
+  PerspectiveCamera,
+  Points,
+  PointsMaterial,
+  Quaternion,
+  Scene,
+  SphereGeometry,
+  SpotLight,
+  TOUCH,
+  TubeGeometry,
+  Vector3,
+  WebGLRenderer,
+} from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { defaultStepGroups } from "./src/quest3-steps.js";
@@ -9,18 +42,19 @@ import {
   base64ToUtf8,
   computeStepGroupCount,
   sortPartsForDisassembly,
-  computeExplodeVector,
 } from "./src/utils.js";
+import {
+  calculateExplodePos,
+  calculateSmartExplodeDist,
+  mergeGeometries,
+} from "./src/explode-geometry.js";
 import {
   extractFacesToGeometry,
   splitByConnectedComponents,
   splitByMaterialGroups,
   generatePartName,
 } from "./src/geometry-split.js";
-import {
-  materials,
-  getLegoMaterialForMesh,
-} from "./src/lego-materials.js";
+import { materials, getLegoMaterialForMesh } from "./src/lego-materials.js";
 import { setupAIPaint } from "./src/panels/ai-paint-panel.js";
 // 副作用导入：确保 config-panel.js 加载并初始化 Blender 健康检测/配置高亮（不依赖 ai-paint 面板是否启用）
 import "./src/panels/config-panel.js";
@@ -62,19 +96,19 @@ try {
 
 // ===== 场景初始化 =====
 const container = document.getElementById("canvas-container");
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0c12);
-scene.fog = new THREE.Fog(0x0a0c12, 10, 40);
+const scene = new Scene();
+scene.background = new Color(0x0a0c12);
+scene.fog = new Fog(0x0a0c12, 10, 40);
 
 // 添加背景网格（装饰性）
-const gridHelper = new THREE.GridHelper(30, 30, 0x1a1b23, 0x1a1b23);
+const gridHelper = new GridHelper(30, 30, 0x1a1b23, 0x1a1b23);
 gridHelper.position.y = -1.5;
 gridHelper.material.opacity = 0.3;
 gridHelper.material.transparent = true;
 scene.add(gridHelper);
 
 // 添加环境粒子（增强空间感）
-const particlesGeometry = new THREE.BufferGeometry();
+const particlesGeometry = new BufferGeometry();
 const particlesCount = 500;
 const posArray = new Float32Array(particlesCount * 3);
 
@@ -82,27 +116,31 @@ for (let i = 0; i < particlesCount * 3; i++) {
   posArray[i] = (Math.random() - 0.5) * 30;
 }
 
-particlesGeometry.setAttribute("position", new THREE.BufferAttribute(posArray, 3));
-const particlesMaterial = new THREE.PointsMaterial({
+particlesGeometry.setAttribute("position", new BufferAttribute(posArray, 3));
+const particlesMaterial = new PointsMaterial({
   size: 0.02,
   color: 0x4a9eff,
   transparent: true,
   opacity: 0.4,
 });
-const particlesMesh = new THREE.Points(particlesGeometry, particlesMaterial);
+const particlesMesh = new Points(particlesGeometry, particlesMaterial);
 scene.add(particlesMesh);
 
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+const camera = new PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
 camera.position.set(4, 2.5, 5);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+const renderer = new WebGLRenderer({
+  antialias: true,
+  alpha: true,
+  powerPreference: "high-performance",
+});
 renderer.setSize(window.innerWidth, window.innerHeight);
 // 移动端/一体机（Quest 3 等）GPU 为填充率瓶颈，限制 DPR 避免过度采样；桌面维持 2
 const isTouchDevice = navigator.maxTouchPoints > 0;
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouchDevice ? 1.5 : 2));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.type = PCFSoftShadowMap;
+renderer.toneMapping = ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 container.appendChild(renderer.domElement);
 
@@ -128,9 +166,9 @@ controls.target.set(0, 0.15, 0);
 // ===== 自动适配相机到模型 =====
 function fitCameraToModel(modelGroup, smooth = true) {
   // 计算包围盒
-  const box = new THREE.Box3().setFromObject(modelGroup);
-  const center = box.getCenter(new THREE.Vector3());
-  const size = new THREE.Vector3();
+  const box = new Box3().setFromObject(modelGroup);
+  const center = box.getCenter(new Vector3());
+  const size = new Vector3();
   box.getSize(size);
 
   // 计算最大尺寸
@@ -144,11 +182,11 @@ function fitCameraToModel(modelGroup, smooth = true) {
   cameraDistance = Math.max(0.8, Math.min(cameraDistance, 20));
 
   // 设置相机目标位置
-  const targetPos = new THREE.Vector3(center.x, center.y + size.y * 0.3, center.z);
+  const targetPos = new Vector3(center.x, center.y + size.y * 0.3, center.z);
   controls.target.copy(targetPos);
 
   // 计算新的相机位置（保持当前角度）
-  const direction = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+  const direction = new Vector3().subVectors(camera.position, controls.target).normalize();
   const newCameraPos = targetPos.clone().add(direction.multiplyScalar(cameraDistance));
 
   if (smooth) {
@@ -186,67 +224,11 @@ function fitCameraToModel(modelGroup, smooth = true) {
   });
 }
 
-// ===== 智能爆炸距离计算 =====
-function calculateSmartExplodeDist(modelGroup, explodeDir) {
-  // 1. 获取当前模型包围盒
-  const box = new THREE.Box3().setFromObject(modelGroup);
-  const center = box.getCenter(new THREE.Vector3());
-  const size = new THREE.Vector3();
-  box.getSize(size);
-  const maxDim = Math.max(size.x, size.y, size.z);
-
-  // 2. 计算相机相关信息
-  const fov = camera.fov * (Math.PI / 180);
-  const distToCamera = camera.position.distanceTo(center);
-
-  // 3. 计算视野边界
-  // 在爆炸方向上的最大可见距离（基于 FOV 和相机距离）
-  // 留 40% 的边距，确保部件不会太靠近屏幕边缘
-  const maxVisibleDist = distToCamera * Math.tan(fov / 2) * 0.6;
-
-  // 4. 计算从相机到中心的方向
-  const toCamera = new THREE.Vector3().subVectors(camera.position, center).normalize();
-
-  // 5. 计算爆炸方向与相机方向的夹角
-  const angleWithCamera = explodeDir.angleTo(toCamera);
-
-  // 6. 如果爆炸方向朝向相机，需要更小的爆炸距离
-  let angleFactor = 1.0;
-  if (angleWithCamera < Math.PI / 4) {
-    // 朝向相机爆炸，需要减小距离
-    angleFactor = 0.5 + angleWithCamera / (Math.PI / 2);
-  }
-
-  // 7. 计算建议的爆炸距离
-  // 基础距离：模型尺寸的 40%（明显但不夸张）
-  let suggestedDist = maxDim * 0.4;
-
-  // 确保最小可见性
-  suggestedDist = Math.max(suggestedDist, 1.0);
-
-  // 确保不会飞出屏幕
-  suggestedDist = Math.min(suggestedDist, maxVisibleDist * angleFactor);
-
-  // 确保不会太小
-  suggestedDist = Math.max(suggestedDist, 0.8);
-
-  console.log("🧮 智能爆炸距离计算:", {
-    modelSize: maxDim.toFixed(2),
-    distToCamera: distToCamera.toFixed(2),
-    maxVisibleDist: maxVisibleDist.toFixed(2),
-    angleWithCamera: ((angleWithCamera * 180) / Math.PI).toFixed(1) + "°",
-    angleFactor: angleFactor.toFixed(2),
-    suggestedDist: suggestedDist.toFixed(2),
-  });
-
-  return suggestedDist;
-}
-
 // ===== 增强灯光系统 =====
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
+const ambientLight = new AmbientLight(0xffffff, 0.45);
 scene.add(ambientLight);
 
-const mainLight = new THREE.DirectionalLight(0xffffff, 1.5);
+const mainLight = new DirectionalLight(0xffffff, 1.5);
 mainLight.position.set(6, 10, 7);
 mainLight.castShadow = true;
 mainLight.shadow.mapSize.set(2048, 2048);
@@ -255,11 +237,11 @@ mainLight.shadow.camera.near = 0.5;
 mainLight.shadow.camera.far = 30;
 scene.add(mainLight);
 
-const fillLight = new THREE.DirectionalLight(0x99bbff, 0.6);
+const fillLight = new DirectionalLight(0x99bbff, 0.6);
 fillLight.position.set(-6, 4, -5);
 scene.add(fillLight);
 
-const rimLight = new THREE.SpotLight(0xffffff, 1.8);
+const rimLight = new SpotLight(0xffffff, 1.8);
 rimLight.position.set(0, 8, -7);
 rimLight.angle = Math.PI / 5;
 rimLight.penumbra = 0.5;
@@ -269,7 +251,7 @@ rimLight.distance = 35;
 scene.add(rimLight);
 
 // 补充底部反射光
-const bottomLight = new THREE.DirectionalLight(0x334466, 0.3);
+const bottomLight = new DirectionalLight(0x334466, 0.3);
 bottomLight.position.set(0, -5, 0);
 scene.add(bottomLight);
 
@@ -279,16 +261,14 @@ scene.add(bottomLight);
 // 乐高风格：亮色塑料质感、无金属、轻微自发光，营造积木玩具观感（不改几何体）
 let currentModelStyle = "native"; // 'native' | 'lego'
 
-
-
 // 应用模型外观风格：'native' | 'lego'
 function applyModelStyle(style) {
   currentModelStyle = style;
   const setLego = style === "lego";
   const groups = [questGroup];
   if (typeof customModelGroup !== "undefined") groups.push(customModelGroup);
-  groups.forEach((group) => {
-    group.traverse((child) => {
+  groups.forEach(group => {
+    group.traverse(child => {
       if (!child.isMesh) return;
       if (child.userData._nativeMaterial === undefined) {
         child.userData._nativeMaterial = child.material;
@@ -299,7 +279,7 @@ function applyModelStyle(style) {
 }
 
 // ===== Quest 3 简化模型构建 =====
-const questGroup = new THREE.Group();
+const questGroup = new Group();
 scene.add(questGroup);
 
 const parts = []; // 存储所有可拆解部件
@@ -320,10 +300,10 @@ function createPart({
   questGroup.add(mesh);
   parts.push({
     mesh,
-    homePos: new THREE.Vector3(...homePos),
-    explodePos: new THREE.Vector3(...explodePos),
-    homeRot: new THREE.Euler(...homeRot),
-    explodeRot: new THREE.Euler(...explodeRot),
+    homePos: new Vector3(...homePos),
+    explodePos: new Vector3(...explodePos),
+    homeRot: new Euler(...homeRot),
+    explodeRot: new Euler(...explodeRot),
     name: name,
   });
   return mesh;
@@ -331,7 +311,7 @@ function createPart({
 
 // 1. 主机身（中部黑色主体）
 const bodyGeo = new RoundedBoxGeometry(2.2, 1.15, 1.0, 4, 0.12);
-const bodyMesh = new THREE.Mesh(bodyGeo, materials.body);
+const bodyMesh = new Mesh(bodyGeo, materials.body);
 createPart({
   mesh: bodyMesh,
   homePos: [0, 0, 0],
@@ -341,7 +321,7 @@ createPart({
 
 // 2. 前面板（白色外壳）
 const frontGeo = new RoundedBoxGeometry(2.3, 1.25, 0.25, 4, 0.1);
-const frontMesh = new THREE.Mesh(frontGeo, materials.frontPlate);
+const frontMesh = new Mesh(frontGeo, materials.frontPlate);
 createPart({
   mesh: frontMesh,
   homePos: [0, 0, 0.55],
@@ -351,7 +331,7 @@ createPart({
 
 // 3. 后面罩/泡沫垫
 const foamGeo = new RoundedBoxGeometry(2.0, 0.95, 0.18, 4, 0.08);
-const foamMesh = new THREE.Mesh(foamGeo, materials.foam);
+const foamMesh = new Mesh(foamGeo, materials.foam);
 createPart({
   mesh: foamMesh,
   homePos: [0, 0, -0.55],
@@ -360,9 +340,9 @@ createPart({
 });
 
 // 4. 左右透镜模组
-const barrelGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.45, 32);
+const barrelGeo = new CylinderGeometry(0.32, 0.32, 0.45, 32);
 barrelGeo.rotateX(Math.PI / 2);
-const leftBarrel = new THREE.Mesh(barrelGeo, materials.lensBarrel);
+const leftBarrel = new Mesh(barrelGeo, materials.lensBarrel);
 createPart({
   mesh: leftBarrel,
   homePos: [-0.52, 0.05, -0.12],
@@ -370,7 +350,7 @@ createPart({
   name: "左透镜模组",
 });
 
-const rightBarrel = new THREE.Mesh(barrelGeo.clone(), materials.lensBarrel);
+const rightBarrel = new Mesh(barrelGeo.clone(), materials.lensBarrel);
 createPart({
   mesh: rightBarrel,
   homePos: [0.52, 0.05, -0.12],
@@ -379,9 +359,9 @@ createPart({
 });
 
 // 5. 透镜玻璃片
-const glassGeo = new THREE.CylinderGeometry(0.26, 0.26, 0.04, 32);
+const glassGeo = new CylinderGeometry(0.26, 0.26, 0.04, 32);
 glassGeo.rotateX(Math.PI / 2);
-const leftGlass = new THREE.Mesh(glassGeo, materials.lensGlass);
+const leftGlass = new Mesh(glassGeo, materials.lensGlass);
 createPart({
   mesh: leftGlass,
   homePos: [-0.52, 0.05, -0.34],
@@ -389,7 +369,7 @@ createPart({
   name: "左透镜",
 });
 
-const rightGlass = new THREE.Mesh(glassGeo.clone(), materials.lensGlass);
+const rightGlass = new Mesh(glassGeo.clone(), materials.lensGlass);
 createPart({
   mesh: rightGlass,
   homePos: [0.52, 0.05, -0.34],
@@ -398,8 +378,8 @@ createPart({
 });
 
 // 6. 显示屏/主板
-const pcbGeo = new THREE.BoxGeometry(1.6, 0.7, 0.06);
-const pcbMesh = new THREE.Mesh(pcbGeo, materials.pcb);
+const pcbGeo = new BoxGeometry(1.6, 0.7, 0.06);
+const pcbMesh = new Mesh(pcbGeo, materials.pcb);
 createPart({
   mesh: pcbMesh,
   homePos: [0, 0.05, -0.05],
@@ -408,10 +388,10 @@ createPart({
 });
 
 // 7. 前置摄像头（左右两颗 + 中间一颗）
-const camGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.08, 24);
+const camGeo = new CylinderGeometry(0.09, 0.09, 0.08, 24);
 camGeo.rotateX(Math.PI / 2);
 
-const leftCam = new THREE.Mesh(camGeo, materials.camera);
+const leftCam = new Mesh(camGeo, materials.camera);
 createPart({
   mesh: leftCam,
   homePos: [-0.75, 0.18, 0.68],
@@ -419,7 +399,7 @@ createPart({
   name: "左摄像头",
 });
 
-const rightCam = new THREE.Mesh(camGeo.clone(), materials.camera);
+const rightCam = new Mesh(camGeo.clone(), materials.camera);
 createPart({
   mesh: rightCam,
   homePos: [0.75, 0.18, 0.68],
@@ -427,7 +407,7 @@ createPart({
   name: "右摄像头",
 });
 
-const centerCam = new THREE.Mesh(camGeo.clone(), materials.camera);
+const centerCam = new Mesh(camGeo.clone(), materials.camera);
 createPart({
   mesh: centerCam,
   homePos: [0, 0.28, 0.68],
@@ -436,9 +416,9 @@ createPart({
 });
 
 // 摄像头镜头小圆点
-const lensDotGeo = new THREE.CircleGeometry(0.055, 24);
+const lensDotGeo = new CircleGeometry(0.055, 24);
 function addCamLens(parent, zOffset) {
-  const dot = new THREE.Mesh(lensDotGeo, materials.sensor);
+  const dot = new Mesh(lensDotGeo, materials.sensor);
   dot.position.z = zOffset;
   parent.add(dot);
 }
@@ -447,7 +427,7 @@ addCamLens(rightCam, 0.045);
 addCamLens(centerCam, 0.045);
 
 // 8. 下侧摄像头/传感器
-const bottomCam = new THREE.Mesh(camGeo.clone(), materials.camera);
+const bottomCam = new Mesh(camGeo.clone(), materials.camera);
 createPart({
   mesh: bottomCam,
   homePos: [0, -0.35, 0.6],
@@ -458,7 +438,7 @@ addCamLens(bottomCam, 0.045);
 
 // 9. 头带臂（左右）
 const armGeo = new RoundedBoxGeometry(0.25, 0.7, 0.18, 2, 0.04);
-const leftArm = new THREE.Mesh(armGeo, materials.strapArm);
+const leftArm = new Mesh(armGeo, materials.strapArm);
 createPart({
   mesh: leftArm,
   homePos: [-1.25, 0, 0],
@@ -466,7 +446,7 @@ createPart({
   name: "左头带臂",
 });
 
-const rightArm = new THREE.Mesh(armGeo.clone(), materials.strapArm);
+const rightArm = new Mesh(armGeo.clone(), materials.strapArm);
 createPart({
   mesh: rightArm,
   homePos: [1.25, 0, 0],
@@ -475,15 +455,15 @@ createPart({
 });
 
 // 10. 头带（简化弧线）
-const strapCurve = new THREE.CatmullRomCurve3([
-  new THREE.Vector3(-1.25, 0.25, -0.1),
-  new THREE.Vector3(-0.8, 1.4, -0.5),
-  new THREE.Vector3(0, 1.6, -0.6),
-  new THREE.Vector3(0.8, 1.4, -0.5),
-  new THREE.Vector3(1.25, 0.25, -0.1),
+const strapCurve = new CatmullRomCurve3([
+  new Vector3(-1.25, 0.25, -0.1),
+  new Vector3(-0.8, 1.4, -0.5),
+  new Vector3(0, 1.6, -0.6),
+  new Vector3(0.8, 1.4, -0.5),
+  new Vector3(1.25, 0.25, -0.1),
 ]);
-const strapGeo = new THREE.TubeGeometry(strapCurve, 32, 0.14, 12, false);
-const strapMesh = new THREE.Mesh(strapGeo, materials.strapArm);
+const strapGeo = new TubeGeometry(strapCurve, 32, 0.14, 12, false);
+const strapMesh = new Mesh(strapGeo, materials.strapArm);
 createPart({
   mesh: strapMesh,
   homePos: [0, 0, 0],
@@ -492,7 +472,7 @@ createPart({
 });
 
 // ===== 自定义模型处理 =====
-const customModelGroup = new THREE.Group();
+const customModelGroup = new Group();
 scene.add(customModelGroup);
 let customModelParts = []; // 存储自定义模型的部件
 let hasCustomModel = false;
@@ -540,8 +520,8 @@ function clearCustomModelGroup() {
  * @returns {number} 实际应用的缩放比例
  */
 function autoScaleModel(modelType = "模型") {
-  const autoBox = new THREE.Box3().setFromObject(customModelGroup);
-  const autoSize = new THREE.Vector3();
+  const autoBox = new Box3().setFromObject(customModelGroup);
+  const autoSize = new Vector3();
   autoBox.getSize(autoSize);
   const autoMaxDim = Math.max(autoSize.x, autoSize.y, autoSize.z);
 
@@ -577,23 +557,11 @@ function adjustSmartExplodeDistances() {
         }
       }
       explodeDir.normalize();
-      const smartDist = calculateSmartExplodeDist(customModelGroup, explodeDir);
+      const smartDist = calculateSmartExplodeDist(customModelGroup, explodeDir, camera);
       part.explodePos.copy(explodeDir.multiplyScalar(smartDist / groupScale));
     }
     console.log("✅ 爆炸距离已智能调整");
   });
-}
-
-/**
- * 为自定义部件计算爆炸方向和位置
- * @param {THREE.Vector3} partCenter - 部件中心
- * @param {number} index - 部件索引
- * @param {number} totalParts - 总部件数
- * @returns {THREE.Vector3} 爆炸位置
- */
-function calculateExplodePos(partCenter, index, totalParts) {
-  const vec = computeExplodeVector(partCenter, index, totalParts);
-  return new THREE.Vector3(vec.x, vec.y, vec.z);
 }
 
 /**
@@ -647,14 +615,6 @@ function finalizeCustomModelLoad(fileName, opts = {}) {
 // ===== 模型自动拆分系统 =====
 // 几何体拆分工具已抽到 ./src/geometry-split.js（extractFacesToGeometry / splitBy* / generatePartName）
 
-
-
-
-
-
-
-
-
 // 自动拆分编排器：收集 mesh，按材质和连通分量准确拆分
 function autoSplitModel(model) {
   // 第一步：收集所有 mesh 及其世界变换
@@ -683,9 +643,9 @@ function autoSplitModel(model) {
     const groupResults = splitByMaterialGroups(geometry);
     if (groupResults.length >= 2) {
       for (const gr of groupResults) {
-        const newMesh = new THREE.Mesh(
+        const newMesh = new Mesh(
           gr.geometry,
-          Array.isArray(material) ? material[gr.materialIndex] || material[0] : material,
+          Array.isArray(material) ? material[gr.materialIndex] || material[0] : material
         );
         newMesh.matrix.copy(mesh.matrixWorld);
         newMesh.matrixAutoUpdate = false;
@@ -698,7 +658,7 @@ function autoSplitModel(model) {
     const ccResults = splitByConnectedComponents(geometry);
     if (ccResults.length >= 2) {
       for (const ccGeo of ccResults) {
-        const newMesh = new THREE.Mesh(ccGeo, material);
+        const newMesh = new Mesh(ccGeo, material);
         newMesh.matrix.copy(mesh.matrixWorld);
         newMesh.matrixAutoUpdate = false;
         splitParts.push({ mesh: newMesh, name: "", isOriginal: false });
@@ -711,16 +671,16 @@ function autoSplitModel(model) {
   }
 
   // 计算整体包围盒用于命名
-  const bbox = new THREE.Box3();
+  const bbox = new Box3();
   for (const part of splitParts) {
-    const partBox = new THREE.Box3().setFromObject(part.mesh);
+    const partBox = new Box3().setFromObject(part.mesh);
     bbox.union(partBox);
   }
 
   // 为拆分后的部件命名
   return splitParts.map((part, i) => {
     if (!part.name) {
-      const pos = new THREE.Vector3();
+      const pos = new Vector3();
       part.mesh.getWorldPosition(pos);
       part.name = generatePartName(i, pos, bbox);
     }
@@ -772,10 +732,7 @@ async function maybeApplyAssemblySequence(fileName) {
   totalSteps = stepGroups.length;
   if (currentStep >= totalSteps) currentStep = totalSteps - 1;
   if (typeof updateStepUI === "function") updateStepUI();
-  showStatus(
-    `🔧 已根据 Blender 装配分析优化拆解顺序（匹配 ${overlap.length} 个部件）`,
-    "success",
-  );
+  showStatus(`🔧 已根据 Blender 装配分析优化拆解顺序（匹配 ${overlap.length} 个部件）`, "success");
 
   // 同一份 Blender 数据可用：自动拉取可制造性评分并展开面板
   const panel = document.getElementById("assembly-panel");
@@ -809,20 +766,22 @@ async function runAssemblyAnalysis() {
     const pr = data.production_readiness || {};
     const score = typeof pr.score === "number" ? pr.score : null;
     const level = pr.level || "—";
-    const color = score == null ? "#888" : score >= 80 ? "#2e7d32" : score >= 55 ? "#f9a825" : "#c62828";
+    const color =
+      score == null ? "#888" : score >= 80 ? "#2e7d32" : score >= 55 ? "#f9a825" : "#c62828";
 
-    const recs = Array.isArray(pr.recommendations) && pr.recommendations.length ?
-      pr.recommendations.map(r => `<li>${r}</li>`).join("") :
-      "<li>无明显制造风险</li>";
+    const recs =
+      Array.isArray(pr.recommendations) && pr.recommendations.length
+        ? pr.recommendations.map(r => `<li>${r}</li>`).join("")
+        : "<li>无明显制造风险</li>";
 
     const bd = pr.breakdown || {};
-    const bdRows = Object.keys(bd).length ?
-      "<table class=\"asm-table\"><tr><th>扣分项</th><th>分值</th></tr>" +
+    const bdRows = Object.keys(bd).length
+      ? '<table class="asm-table"><tr><th>扣分项</th><th>分值</th></tr>' +
         Object.entries(bd)
           .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`)
           .join("") +
-        "</table>" :
-      "";
+        "</table>"
+      : "";
 
     resultEl.innerHTML = `
       <div class="asm-score">
@@ -938,25 +897,25 @@ fetch("quest3_config.json")
  * 按距离升序贪心分配，确保全局最优近似。
  *
  * @param {Array} parts  - customModelParts 数组，每个元素含 partCenter
- * @param {THREE.Box3} modelBox - 已居中的模型包围盒
+ * @param {Box3} modelBox - 已居中的模型包围盒
  * @returns {string[]} 与 parts 等长的名称数组
  */
 function assignQuest3PartNames(parts, modelBox) {
   if (parts.length === 0) return [];
 
-  const size = modelBox.getSize(new THREE.Vector3());
-  const halfExtents = new THREE.Vector3(
+  const size = modelBox.getSize(new Vector3());
+  const halfExtents = new Vector3(
     Math.max(size.x / 2, 0.001),
     Math.max(size.y / 2, 0.001),
-    Math.max(size.z / 2, 0.001),
+    Math.max(size.z / 2, 0.001)
   );
 
   // 将每个部件的中心位置归一化到 [-1, 1]
   const normalizedCenters = parts.map(part => {
-    return new THREE.Vector3(
+    return new Vector3(
       part.partCenter.x / halfExtents.x,
       part.partCenter.y / halfExtents.y,
-      part.partCenter.z / halfExtents.z,
+      part.partCenter.z / halfExtents.z
     );
   });
 
@@ -1002,7 +961,7 @@ function assignQuest3PartNames(parts, modelBox) {
     parts.map((p, i) => ({
       name: assignments[i],
       center: p.partCenter.toArray().map(v => v.toFixed(2)),
-    })),
+    }))
   );
 
   return assignments;
@@ -1011,57 +970,21 @@ function assignQuest3PartNames(parts, modelBox) {
 // isQuest3Model 已从 src/utils.js 导入
 
 /**
- * 合并多个 BufferGeometry 为一个（手动拼接 position/normal/uv 属性）
- * @param {THREE.BufferGeometry[]} geometries
- * @returns {THREE.BufferGeometry}
- */
-function mergeGeometries(geometries) {
-  if (geometries.length === 0) return new THREE.BufferGeometry();
-  if (geometries.length === 1) return geometries[0].clone();
-
-  // 统一转为非索引几何体
-  const nonIndexed = geometries.map(g => (g.index ? g.toNonIndexed() : g));
-
-  // 确定要合并的属性
-  const attrNames = ["position", "normal", "uv"];
-  const activeAttrs = attrNames.filter(name => nonIndexed.every(g => g.attributes[name]));
-
-  // 计算总顶点数
-  let totalVerts = 0;
-  for (const g of nonIndexed) totalVerts += g.attributes.position.count;
-
-  const merged = new THREE.BufferGeometry();
-  for (const attrName of activeAttrs) {
-    const itemSize = nonIndexed[0].attributes[attrName].itemSize;
-    const array = new Float32Array(totalVerts * itemSize);
-    let offset = 0;
-    for (const g of nonIndexed) {
-      const data = g.attributes[attrName].array;
-      array.set(data, offset);
-      offset += data.length;
-    }
-    merged.setAttribute(attrName, new THREE.BufferAttribute(array, itemSize));
-  }
-
-  return merged;
-}
-
-/**
  * 将拆解后的多个部件按 Quest 3 原始 15 部位模板聚类合并
  * 把属于同一 Quest 3 区域的部件几何体合并为一个 mesh
  *
  * @param {Array} splitParts - autoSplitModel 返回的数组，每项含 mesh
- * @param {THREE.Box3} modelBox - 已居中的模型包围盒
+ * @param {Box3} modelBox - 已居中的模型包围盒
  * @returns {Array} 合并后的 splitParts（最多 15 个），每项已含 Quest 3 名称
  */
 function mergePartsToQuest3(splitParts, modelBox) {
   if (splitParts.length === 0) return splitParts;
 
-  const size = modelBox.getSize(new THREE.Vector3());
-  const halfExtents = new THREE.Vector3(
+  const size = modelBox.getSize(new Vector3());
+  const halfExtents = new Vector3(
     Math.max(size.x / 2, 0.001),
     Math.max(size.y / 2, 0.001),
-    Math.max(size.z / 2, 0.001),
+    Math.max(size.z / 2, 0.001)
   );
 
   // 为每个 splitPart 找最近的 Quest 3 模板
@@ -1069,8 +992,8 @@ function mergePartsToQuest3(splitParts, modelBox) {
   for (let p = 0; p < splitParts.length; p++) {
     const mesh = splitParts[p].mesh;
     mesh.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(mesh);
-    const center = box.getCenter(new THREE.Vector3());
+    const box = new Box3().setFromObject(mesh);
+    const center = box.getCenter(new Vector3());
 
     // 归一化到 [-1, 1]
     const nx = center.x / halfExtents.x;
@@ -1121,10 +1044,10 @@ function mergePartsToQuest3(splitParts, modelBox) {
       const mergedGeo = mergeGeometries(geometries);
       // 使用第一个 mesh 的材质
       const firstMesh = meshes[0];
-      const material = Array.isArray(firstMesh.material) ?
-        firstMesh.material[0] :
-        firstMesh.material;
-      const newMesh = new THREE.Mesh(mergedGeo, material);
+      const material = Array.isArray(firstMesh.material)
+        ? firstMesh.material[0]
+        : firstMesh.material;
+      const newMesh = new Mesh(mergedGeo, material);
       newMesh.position.set(0, 0, 0);
       newMesh.rotation.set(0, 0, 0);
       newMesh.scale.set(1, 1, 1);
@@ -1146,7 +1069,7 @@ function mergePartsToQuest3(splitParts, modelBox) {
  * 不经过"先拆后合"，而是对每个三角面计算其归一化中心，
  * 分配到最近的 Quest 3 模板区域，保证 15 个部位都有几何体。
  *
- * @param {THREE.Group} model - gltf.scene
+ * @param {Group} model - gltf.scene
  * @returns {Array} splitParts 数组，恰好 15 个（跳过完全空的）
  */
 function splitModelToQuest3Regions(model) {
@@ -1167,17 +1090,17 @@ function splitModelToQuest3Regions(model) {
   if (allGeometries.length === 0) return [];
 
   // 2. 计算整体包围盒，用于归一化
-  const bbox = new THREE.Box3();
+  const bbox = new Box3();
   for (const geo of allGeometries) {
     geo.computeBoundingBox();
     bbox.union(geo.boundingBox);
   }
-  const center = bbox.getCenter(new THREE.Vector3());
-  const size = bbox.getSize(new THREE.Vector3());
-  const halfExtents = new THREE.Vector3(
+  const center = bbox.getCenter(new Vector3());
+  const size = bbox.getSize(new Vector3());
+  const halfExtents = new Vector3(
     Math.max(size.x / 2, 0.001),
     Math.max(size.y / 2, 0.001),
-    Math.max(size.z / 2, 0.001),
+    Math.max(size.z / 2, 0.001)
   );
 
   // 3. 居中所有几何体
@@ -1192,8 +1115,8 @@ function splitModelToQuest3Regions(model) {
     material: null,
   }));
 
-  const tmpCenter = new THREE.Vector3();
-  const tmpV = new THREE.Vector3();
+  const tmpCenter = new Vector3();
+  const tmpV = new Vector3();
 
   for (let gi = 0; gi < allGeometries.length; gi++) {
     const geo = allGeometries[gi];
@@ -1267,10 +1190,10 @@ function splitModelToQuest3Regions(model) {
     const sourceFaces = templateFaces[bestSourceT].faces;
     sourceFaces.sort((a, b) => {
       const da = Math.sqrt(
-        (a.nx - emptyPos[0]) ** 2 + (a.ny - emptyPos[1]) ** 2 * 0.7 + (a.nz - emptyPos[2]) ** 2,
+        (a.nx - emptyPos[0]) ** 2 + (a.ny - emptyPos[1]) ** 2 * 0.7 + (a.nz - emptyPos[2]) ** 2
       );
       const db = Math.sqrt(
-        (b.nx - emptyPos[0]) ** 2 + (b.ny - emptyPos[1]) ** 2 * 0.7 + (b.nz - emptyPos[2]) ** 2,
+        (b.nx - emptyPos[0]) ** 2 + (b.ny - emptyPos[1]) ** 2 * 0.7 + (b.nz - emptyPos[2]) ** 2
       );
       return da - db;
     });
@@ -1278,7 +1201,7 @@ function splitModelToQuest3Regions(model) {
     // 借取最近的 15% 面（至少 5 个，最多 50%）
     const stealCount = Math.max(
       5,
-      Math.min(Math.floor(sourceFaces.length * 0.15), Math.floor(sourceFaces.length * 0.5)),
+      Math.min(Math.floor(sourceFaces.length * 0.15), Math.floor(sourceFaces.length * 0.5))
     );
     const stolenFaces = sourceFaces.splice(0, stealCount);
     templateFaces[t].faces = stolenFaces;
@@ -1287,7 +1210,7 @@ function splitModelToQuest3Regions(model) {
     }
 
     console.log(
-      `🔄 面重分配: "${QUEST3_PART_TEMPLATES[t].name}" 从 "${QUEST3_PART_TEMPLATES[bestSourceT].name}" 借取 ${stealCount} 个面`,
+      `🔄 面重分配: "${QUEST3_PART_TEMPLATES[t].name}" 从 "${QUEST3_PART_TEMPLATES[bestSourceT].name}" 借取 ${stealCount} 个面`
     );
   }
 
@@ -1319,8 +1242,8 @@ function splitModelToQuest3Regions(model) {
     if (geometries.length === 0) continue;
 
     const mergedGeo = geometries.length === 1 ? geometries[0] : mergeGeometries(geometries);
-    const material = tf.material || new THREE.MeshStandardMaterial({ color: 0x888888 });
-    const mesh = new THREE.Mesh(mergedGeo, material);
+    const material = tf.material || new MeshStandardMaterial({ color: 0x888888 });
+    const mesh = new Mesh(mergedGeo, material);
     mesh.position.set(0, 0, 0);
     mesh.rotation.set(0, 0, 0);
     mesh.scale.set(1, 1, 1);
@@ -1353,36 +1276,36 @@ async function loadSTLModel(arrayBuffer, fileName) {
     // 居中几何体
     geometry.computeBoundingBox();
     const box = geometry.boundingBox;
-    const center = box.getCenter(new THREE.Vector3());
+    const center = box.getCenter(new Vector3());
     geometry.translate(-center.x, -center.y, -center.z);
 
     // 计算缩放使模型适配视图
-    const size = box.getSize(new THREE.Vector3());
+    const size = box.getSize(new Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
     const scale = maxDim > 0 ? 2.0 / maxDim : 1.0;
     geometry.scale(scale, scale, scale);
 
     // 创建材质和 mesh
-    const material = new THREE.MeshStandardMaterial({
+    const material = new MeshStandardMaterial({
       color: 0x808080,
       metalness: 0.3,
       roughness: 0.7,
     });
-    const mesh = new THREE.Mesh(geometry, material);
+    const mesh = new Mesh(geometry, material);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.name = fileName;
 
     // 计算部件中心和爆炸方向
-    const partBox = new THREE.Box3().setFromObject(mesh);
-    const partCenter = partBox.getCenter(new THREE.Vector3());
+    const partBox = new Box3().setFromObject(mesh);
+    const partCenter = partBox.getCenter(new Vector3());
 
     customModelParts.push({
       mesh,
-      homePos: new THREE.Vector3(0, 0, 0),
-      explodePos: new THREE.Vector3(0, 2, 0),
-      homeRot: new THREE.Euler(0, 0, 0),
-      explodeRot: new THREE.Euler(0, 0, 0),
+      homePos: new Vector3(0, 0, 0),
+      explodePos: new Vector3(0, 2, 0),
+      homeRot: new Euler(0, 0, 0),
+      explodeRot: new Euler(0, 0, 0),
       name: fileName, // 稍后由命名步骤覆盖
       partCenter: partCenter.clone(),
       stepIndex: 1,
@@ -1393,7 +1316,7 @@ async function loadSTLModel(arrayBuffer, fileName) {
     // ========== 命名 ==========
     if (isQuest3Model(fileName)) {
       // Quest 3 模型：使用 Quest 3 原始部位名称
-      const stlBox = new THREE.Box3().setFromObject(mesh);
+      const stlBox = new Box3().setFromObject(mesh);
       const stlNames = assignQuest3PartNames(customModelParts, stlBox);
       customModelParts[0].name = stlNames[0];
       customModelParts[0].mesh.userData = { name: stlNames[0] };
@@ -1409,7 +1332,7 @@ async function loadSTLModel(arrayBuffer, fileName) {
     finalizeCustomModelLoad(fileName, { modelType: "STL", adjustExplode: false });
     showStatus(
       "✅ STL 模型加载完成（单部件）\n💡 提示: 启动 Blender 后端可获得自动拆解",
-      "success",
+      "success"
     );
 
     console.log(`✅ STL 模型加载完成：${fileName}`);
@@ -1446,12 +1369,10 @@ async function loadURDFModel(urdfText, fileName) {
       const parent = joint.querySelector("parent")?.getAttribute("link");
       const child = joint.querySelector("child")?.getAttribute("link");
       const origin = joint.querySelector("origin");
-      const originXYZ = origin?.getAttribute("xyz")?.trim().split(/\s+/)
-        .map(parseFloat) || [
+      const originXYZ = origin?.getAttribute("xyz")?.trim().split(/\s+/).map(parseFloat) || [
         0, 0, 0,
       ];
-      const originRPY = origin?.getAttribute("rpy")?.trim().split(/\s+/)
-        .map(parseFloat) || [
+      const originRPY = origin?.getAttribute("rpy")?.trim().split(/\s+/).map(parseFloat) || [
         0, 0, 0,
       ];
       const jointName = joint.getAttribute("name") || "joint";
@@ -1469,11 +1390,11 @@ async function loadURDFModel(urdfText, fileName) {
 
     // ── 辅助函数：从 xyz + rpy 构建 4×4 变换矩阵 ──
     function makeTransform(xyz, rpy) {
-      const m = new THREE.Matrix4();
-      const pos = new THREE.Vector3(xyz[0], xyz[1], xyz[2]);
-      const euler = new THREE.Euler(rpy[0], rpy[1], rpy[2], "ZYX");
-      const quat = new THREE.Quaternion().setFromEuler(euler);
-      m.compose(pos, quat, new THREE.Vector3(1, 1, 1));
+      const m = new Matrix4();
+      const pos = new Vector3(xyz[0], xyz[1], xyz[2]);
+      const euler = new Euler(rpy[0], rpy[1], rpy[2], "ZYX");
+      const quat = new Quaternion().setFromEuler(euler);
+      m.compose(pos, quat, new Vector3(1, 1, 1));
       return m;
     }
 
@@ -1482,13 +1403,13 @@ async function loadURDFModel(urdfText, fileName) {
     function computeLinkWorldMatrix(linkName) {
       if (linkWorldMatrix[linkName]) return linkWorldMatrix[linkName];
       if (!jointMap[linkName]) {
-        linkWorldMatrix[linkName] = new THREE.Matrix4();
+        linkWorldMatrix[linkName] = new Matrix4();
         return linkWorldMatrix[linkName];
       }
       const joint = jointMap[linkName];
       const parentWorld = computeLinkWorldMatrix(joint.parent);
       const jointTransform = makeTransform(joint.xyz, joint.rpy);
-      const world = new THREE.Matrix4().multiplyMatrices(parentWorld, jointTransform);
+      const world = new Matrix4().multiplyMatrices(parentWorld, jointTransform);
       linkWorldMatrix[linkName] = world;
       return world;
     }
@@ -1517,12 +1438,10 @@ async function loadURDFModel(urdfText, fileName) {
 
       // 获取 visual origin
       const visOrigin = visual?.querySelector("origin");
-      const visXYZ = visOrigin?.getAttribute("xyz")?.trim().split(/\s+/)
-        .map(parseFloat) || [
+      const visXYZ = visOrigin?.getAttribute("xyz")?.trim().split(/\s+/).map(parseFloat) || [
         0, 0, 0,
       ];
-      const visRPY = visOrigin?.getAttribute("rpy")?.trim().split(/\s+/)
-        .map(parseFloat) || [
+      const visRPY = visOrigin?.getAttribute("rpy")?.trim().split(/\s+/).map(parseFloat) || [
         0, 0, 0,
       ];
 
@@ -1534,42 +1453,41 @@ async function loadURDFModel(urdfText, fileName) {
       // 创建几何体
       let geometry;
       if (boxEl) {
-        const size = boxEl.getAttribute("size")?.trim().split(/\s+/)
-          .map(parseFloat) || [
+        const size = boxEl.getAttribute("size")?.trim().split(/\s+/).map(parseFloat) || [
           0.1, 0.1, 0.1,
         ];
-        geometry = new THREE.BoxGeometry(size[0] || 0.1, size[1] || 0.1, size[2] || 0.1);
+        geometry = new BoxGeometry(size[0] || 0.1, size[1] || 0.1, size[2] || 0.1);
       } else if (cylEl) {
         const radius = parseFloat(cylEl.getAttribute("radius")) || 0.05;
         const length = parseFloat(cylEl.getAttribute("length")) || 0.1;
-        geometry = new THREE.CylinderGeometry(radius, radius, length, 32);
+        geometry = new CylinderGeometry(radius, radius, length, 32);
         geometry.rotateX(Math.PI / 2); // URDF 圆柱沿 Z 轴
       } else if (sphereEl) {
         const radius = parseFloat(sphereEl.getAttribute("radius")) || 0.05;
-        geometry = new THREE.SphereGeometry(radius, 32, 24);
+        geometry = new SphereGeometry(radius, 32, 24);
       } else {
-        geometry = new THREE.BoxGeometry(0.08, 0.08, 0.08);
+        geometry = new BoxGeometry(0.08, 0.08, 0.08);
       }
 
       // 计算 visual 的世界变换矩阵 = link世界 × visual origin
-      const linkWorld = linkWorldMatrix[linkName] || new THREE.Matrix4();
+      const linkWorld = linkWorldMatrix[linkName] || new Matrix4();
       const visLocal = makeTransform(visXYZ, visRPY);
-      const visWorld = new THREE.Matrix4().multiplyMatrices(linkWorld, visLocal);
+      const visWorld = new Matrix4().multiplyMatrices(linkWorld, visLocal);
 
       // 烘焙世界变换到几何体（与 GLB 一致）
       geometry.applyMatrix4(visWorld);
 
       // 创建材质
       const hue = (partIndex * 137.5) % 360;
-      const color = new THREE.Color().setHSL(hue / 360, 0.6, 0.5);
-      const material = new THREE.MeshStandardMaterial({
+      const color = new Color().setHSL(hue / 360, 0.6, 0.5);
+      const material = new MeshStandardMaterial({
         color,
         metalness: 0.3,
         roughness: 0.6,
       });
 
       // mesh 归零（变换已烘焙到几何体）
-      const mesh = new THREE.Mesh(geometry, material);
+      const mesh = new Mesh(geometry, material);
       mesh.position.set(0, 0, 0);
       mesh.rotation.set(0, 0, 0);
       mesh.scale.set(1, 1, 1);
@@ -1583,12 +1501,12 @@ async function loadURDFModel(urdfText, fileName) {
     });
 
     // ========== 计算模型中心，将几何体居中 ==========
-    const modelBox = new THREE.Box3();
+    const modelBox = new Box3();
     for (const part of splitParts) {
-      const partBox = new THREE.Box3().setFromObject(part.mesh);
+      const partBox = new Box3().setFromObject(part.mesh);
       modelBox.union(partBox);
     }
-    const modelCenter = modelBox.getCenter(new THREE.Vector3());
+    const modelCenter = modelBox.getCenter(new Vector3());
 
     for (const part of splitParts) {
       part.mesh.geometry.translate(-modelCenter.x, -modelCenter.y, -modelCenter.z);
@@ -1609,18 +1527,18 @@ async function loadURDFModel(urdfText, fileName) {
       const mesh = splitParts[i].mesh;
 
       // 计算部件中心（相对于模型中心，即原点）
-      const partBox = new THREE.Box3().setFromObject(mesh);
-      const partCenter = partBox.getCenter(new THREE.Vector3());
+      const partBox = new Box3().setFromObject(mesh);
+      const partCenter = partBox.getCenter(new Vector3());
 
       // 爆炸方向：从模型中心指向部件中心
       const explodePos = calculateExplodePos(partCenter, i, splitParts.length);
 
       customModelParts.push({
         mesh,
-        homePos: new THREE.Vector3(0, 0, 0),
+        homePos: new Vector3(0, 0, 0),
         explodePos,
-        homeRot: new THREE.Euler(0, 0, 0),
-        explodeRot: new THREE.Euler(0, 0, 0),
+        homeRot: new Euler(0, 0, 0),
+        explodeRot: new Euler(0, 0, 0),
         name: splitParts[i].name,
         partCenter: partCenter.clone(),
         stepIndex: 1,
@@ -1638,9 +1556,9 @@ async function loadURDFModel(urdfText, fileName) {
     const partsPerGroup = Math.ceil(partCount / groupCount);
 
     // 重新计算包围盒（已居中）
-    const centeredBoxURDF = new THREE.Box3();
+    const centeredBoxURDF = new Box3();
     for (const part of customModelParts) {
-      centeredBoxURDF.union(new THREE.Box3().setFromObject(part.mesh));
+      centeredBoxURDF.union(new Box3().setFromObject(part.mesh));
     }
 
     // ========== 命名 ==========
@@ -1666,9 +1584,9 @@ async function loadURDFModel(urdfText, fileName) {
     finalizeCustomModelLoad(fileName, { modelType: "URDF", adjustExplode: true });
 
     const meshNote =
-      partCount > 0 && splitParts[0]?.mesh?.userData?.meshFile ?
-        `\n⚠️ 注意: URDF 引用的 mesh 文件 (${splitParts[0].mesh.userData.meshFile}) 需单独上传\n当前使用占位几何体` :
-        "";
+      partCount > 0 && splitParts[0]?.mesh?.userData?.meshFile
+        ? `\n⚠️ 注意: URDF 引用的 mesh 文件 (${splitParts[0].mesh.userData.meshFile}) 需单独上传\n当前使用占位几何体`
+        : "";
     showStatus(`✅ URDF 解析完成：${partCount} 个 link（部件）${meshNote}`, "success");
 
     console.log(`✅ URDF 模型加载完成：${partCount} 个部件`);
@@ -1731,12 +1649,12 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
       }
 
       // 计算模型中心，将几何体居中
-      const modelBox = new THREE.Box3();
+      const modelBox = new Box3();
       for (const part of splitParts) {
-        const partBox = new THREE.Box3().setFromObject(part.mesh);
+        const partBox = new Box3().setFromObject(part.mesh);
         modelBox.union(partBox);
       }
-      const modelCenter = modelBox.getCenter(new THREE.Vector3());
+      const modelCenter = modelBox.getCenter(new Vector3());
       for (const part of splitParts) {
         part.mesh.geometry.translate(-modelCenter.x, -modelCenter.y, -modelCenter.z);
       }
@@ -1747,18 +1665,18 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
       const mesh = splitParts[i].mesh;
 
       // 计算部件中心（相对于模型中心，即原点）
-      const partBox = new THREE.Box3().setFromObject(mesh);
-      const partCenter = partBox.getCenter(new THREE.Vector3());
+      const partBox = new Box3().setFromObject(mesh);
+      const partCenter = partBox.getCenter(new Vector3());
 
       // 爆炸方向：从模型中心指向部件中心
       const explodePos = calculateExplodePos(partCenter, i, splitParts.length);
 
       customModelParts.push({
         mesh,
-        homePos: new THREE.Vector3(0, 0, 0),
+        homePos: new Vector3(0, 0, 0),
         explodePos,
-        homeRot: new THREE.Euler(0, 0, 0),
-        explodeRot: new THREE.Euler(0, 0, 0),
+        homeRot: new Euler(0, 0, 0),
+        explodeRot: new Euler(0, 0, 0),
         name: "", // 稍后分配
         partCenter: partCenter.clone(),
         stepIndex: 1,
@@ -1786,7 +1704,7 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
         for (let i = 0; i < customModelParts.length; i++) {
           if (used.has(i)) continue;
           const d = customModelParts[i].partCenter.distanceTo(
-            new THREE.Vector3(targetCenter[0], targetCenter[1], targetCenter[2]),
+            new Vector3(targetCenter[0], targetCenter[1], targetCenter[2])
           );
           if (d < bestDist) {
             bestDist = d;
@@ -1814,9 +1732,9 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
     const partsPerGroup = Math.ceil(partCount / groupCount);
 
     // 重新计算包围盒（已居中）
-    const centeredBox = new THREE.Box3();
+    const centeredBox = new Box3();
     for (const part of customModelParts) {
-      centeredBox.union(new THREE.Box3().setFromObject(part.mesh));
+      centeredBox.union(new Box3().setFromObject(part.mesh));
     }
 
     // ========== 命名 ==========
@@ -2002,10 +1920,10 @@ function clearCustomModel() {
 }
 
 // ===== 中心轴线（拆解时显示）=====
-const axisGeo = new THREE.CylinderGeometry(0.01, 0.01, 4, 8);
+const axisGeo = new CylinderGeometry(0.01, 0.01, 4, 8);
 axisGeo.rotateX(Math.PI / 2);
-const axisMat = new THREE.MeshBasicMaterial({ color: 0x44464f, transparent: true, opacity: 0 });
-const axisLine = new THREE.Mesh(axisGeo, axisMat);
+const axisMat = new MeshBasicMaterial({ color: 0x44464f, transparent: true, opacity: 0 });
+const axisLine = new Mesh(axisGeo, axisMat);
 questGroup.add(axisLine);
 
 // quest3Specs 已从 ./src/quest3-data.js 导入
@@ -2024,7 +1942,7 @@ function updateToolsList(step) {
   const tools = step.tools || [];
 
   if (tools.length === 0) {
-    toolsListEl.innerHTML = "<div class=\"tools-none\">✅ 本步骤无需工具</div>";
+    toolsListEl.innerHTML = '<div class="tools-none">✅ 本步骤无需工具</div>';
   } else {
     toolsListEl.innerHTML = tools.map(tool => `<div class="tool-item">${tool}</div>`).join("");
   }
@@ -2055,7 +1973,7 @@ parts.forEach(part => {
 
 console.log(
   "部件步骤分配：",
-  parts.map(p => `${p.mesh.userData.name}->步骤${p.stepIndex}`),
+  parts.map(p => `${p.mesh.userData.name}->步骤${p.stepIndex}`)
 );
 
 // ===== 步骤控制 UI =====
@@ -2070,16 +1988,16 @@ const stepDuration = 600; // 每步动画时长（毫秒）
 let isAnimating = false;
 
 // ===== 一键爆炸/合体的平滑动画（所有部件同时炸开/合体）=====
-let explodeAnimActive = false;   // 是否正在播放爆炸/合体动画
-let explodeAnimFrom = 0;         // 起始全局炸开因子 (0=合体, 1=完全炸开)
-let explodeAnimTo = 0;           // 目标全局炸开因子
-let explodeAnimStart = 0;        // 动画开始时间戳
-let explodeAnimFactor = 0;       // 当前全局炸开因子
-let explodeAllMode = false;      // true 时所有部件按同一因子同时炸开（忽略分步）
-let explodeAnimDuration = 1100;  // 爆炸动画时长（毫秒，受循环速度档控制）
-let loopHoldMs = 900;            // 循环播放时炸开/合体之间的停留时间（毫秒）
-let explodeLoop = false;         // 爆炸/合体动画是否自动循环播放
-let explodeLoopTimer = null;     // 循环反向定时器，便于手动接管时取消
+let explodeAnimActive = false; // 是否正在播放爆炸/合体动画
+let explodeAnimFrom = 0; // 起始全局炸开因子 (0=合体, 1=完全炸开)
+let explodeAnimTo = 0; // 目标全局炸开因子
+let explodeAnimStart = 0; // 动画开始时间戳
+let explodeAnimFactor = 0; // 当前全局炸开因子
+let explodeAllMode = false; // true 时所有部件按同一因子同时炸开（忽略分步）
+let explodeAnimDuration = 1100; // 爆炸动画时长（毫秒，受循环速度档控制）
+let loopHoldMs = 900; // 循环播放时炸开/合体之间的停留时间（毫秒）
+let explodeLoop = false; // 爆炸/合体动画是否自动循环播放
+let explodeLoopTimer = null; // 循环反向定时器，便于手动接管时取消
 
 const prevBtn = document.getElementById("prev-step");
 const nextBtn = document.getElementById("next-step");
@@ -2114,7 +2032,7 @@ console.log("UI elements:", {
 // easeOutCubic 已从 src/utils.js 导入
 
 // 部件高亮相关
-const highlightEmissive = new THREE.Color(0x4a9eff);
+const highlightEmissive = new Color(0x4a9eff);
 const highlightScale = 1.08;
 let highlightedPart = null; // 当前高亮的部件
 
@@ -2197,7 +2115,7 @@ function exitMouseControl() {
 }
 
 function goToStep(newStep) {
-  newStep = THREE.MathUtils.clamp(newStep, 0, totalSteps);
+  newStep = MathUtils.clamp(newStep, 0, totalSteps);
   if (newStep === displayedStep || isAnimating) return;
 
   stopExplodeLoop(); // 手动分步控制接管，停止循环播放
@@ -2283,8 +2201,8 @@ if (isMobile) {
 
   // 触摸优化
   controls.touches = {
-    ONE: THREE.TOUCH.ROTATE,
-    TWO: THREE.TOUCH.DOLLY_PAN,
+    ONE: TOUCH.ROTATE,
+    TWO: TOUCH.DOLLY_PAN,
   };
 }
 
@@ -2408,9 +2326,11 @@ if (generatedSelect && generatedLoadBtn) {
         generatedSelect.appendChild(opt);
       });
     })
-    .catch(() => { /* 忽略：无生成库时不展示 */ });
+    .catch(() => {
+      /* 忽略：无生成库时不展示 */
+    });
 
-  generatedLoadBtn.addEventListener("click", async() => {
+  generatedLoadBtn.addEventListener("click", async () => {
     const url = generatedSelect.value;
     if (!url) return;
     try {
@@ -2513,7 +2433,7 @@ function focusCurrentPart() {
 
   // 平滑移动相机到部件位置
   const targetPos = part.mesh.position.clone();
-  const cameraOffset = new THREE.Vector3(2, 1.5, 2);
+  const cameraOffset = new Vector3(2, 1.5, 2);
   const newCameraPos = targetPos.clone().add(cameraOffset);
 
   // 简单的动画
@@ -2623,25 +2543,27 @@ function updateExplodedView(now) {
   if (!needsExplodeUpdate) return;
 
   // 整体炸开模式下，所有部件使用同一因子；否则按分步/鼠标因子
-  const globalFactor = explodeAllMode ?
-    explodeAnimFactor :
-    (mouseControlEnabled ? mouseFactor : currentStep / totalSteps);
+  const globalFactor = explodeAllMode
+    ? explodeAnimFactor
+    : mouseControlEnabled
+      ? mouseFactor
+      : currentStep / totalSteps;
   axisMat.opacity = globalFactor * 0.5;
 
   // 统一的部件更新函数（避免重复代码）
   const updatePart = part => {
-    const partFactor = explodeAllMode ?
-      explodeAnimFactor :
-      smoothStep(
-        part.stepIndex - 1,
-        part.stepIndex,
-        mouseControlEnabled ? mouseFactor * totalSteps : currentStep,
-      );
+    const partFactor = explodeAllMode
+      ? explodeAnimFactor
+      : smoothStep(
+          part.stepIndex - 1,
+          part.stepIndex,
+          mouseControlEnabled ? mouseFactor * totalSteps : currentStep
+        );
 
     part.mesh.position.lerpVectors(part.homePos, part.explodePos, partFactor);
-    part.mesh.rotation.x = THREE.MathUtils.lerp(part.homeRot.x, part.explodeRot.x, partFactor);
-    part.mesh.rotation.y = THREE.MathUtils.lerp(part.homeRot.y, part.explodeRot.y, partFactor);
-    part.mesh.rotation.z = THREE.MathUtils.lerp(part.homeRot.z, part.explodeRot.z, partFactor);
+    part.mesh.rotation.x = MathUtils.lerp(part.homeRot.x, part.explodeRot.x, partFactor);
+    part.mesh.rotation.y = MathUtils.lerp(part.homeRot.y, part.explodeRot.y, partFactor);
+    part.mesh.rotation.z = MathUtils.lerp(part.homeRot.z, part.explodeRot.z, partFactor);
   };
 
   // Quest 3 默认部件
@@ -2744,7 +2666,7 @@ function setupUpload() {
           if (pct < 100) {
             showStatus(
               `📤 上传中... ${pct}% (${(e.loaded / 1024).toFixed(0)} / ${(e.total / 1024).toFixed(0)} KB)`,
-              "info",
+              "info"
             );
           } else {
             showStatus("🔧 Blender 正在拆解模型... (已上传，等待后端处理)", "info");
@@ -2760,7 +2682,10 @@ function setupUpload() {
           showStatus(`⏳ Blender 拆解中... ${pct}%`, "info");
         } else if (e.loaded > 0) {
           // 无 Content-Length 时（分块流式），仅显示已接收大小
-          showStatus(`⏳ Blender 拆解中... 已接收 ${(e.loaded / 1024 / 1024).toFixed(1)} MB`, "info");
+          showStatus(
+            `⏳ Blender 拆解中... 已接收 ${(e.loaded / 1024 / 1024).toFixed(1)} MB`,
+            "info"
+          );
         }
       });
 
@@ -2786,7 +2711,7 @@ function setupUpload() {
             for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
             showStatus(
               `✅ Blender 拆解完成：${data.total_parts} 个部件 (${data.elapsed_seconds}s)`,
-              "success",
+              "success"
             );
             resolve({ arrayBuffer: bytes.buffer, manifest: data });
             return;
@@ -2814,10 +2739,7 @@ function setupUpload() {
           });
         } catch (err) {
           console.error("Blender 响应解析失败:", err);
-          showStatus(
-            `⚠️ Blender 响应解析失败，回退到 JS 拆解：${err.message || err}`,
-            "warn",
-          );
+          showStatus(`⚠️ Blender 响应解析失败，回退到 JS 拆解：${err.message || err}`, "warn");
           resolve(null);
         }
       });
@@ -2945,7 +2867,6 @@ function setupUpload() {
 // ===== AI 绘画功能 =====
 // AI 绘画面板已迁移到 src/panels/ai-paint-panel.js（setupAIPaint，依赖注入 loadCustomModel/showStatus）
 
-
 // 读取 ai-config.json：缺失 provider 或 key 时高亮「配置 AI」按钮
 // （已抽取到 src/panels/config-panel.js 的 fetchConfigAndHighlight）
 
@@ -2953,7 +2874,9 @@ function setupUpload() {
 
 // 等待 DOM 完全加载后初始化 AI 绘画（面板已迁移到 src/panels/ai-paint-panel.js）
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => setupAIPaint({ loadCustomModel, showStatus }));
+  document.addEventListener("DOMContentLoaded", () =>
+    setupAIPaint({ loadCustomModel, showStatus })
+  );
 } else {
   setupAIPaint({ loadCustomModel, showStatus });
 }
@@ -3003,7 +2926,9 @@ if (styleToggle) {
     styleToggle.textContent = modelStyle === "lego" ? "🧱 乐高风格" : "🛠️ 原生风格";
     styleToggle.classList.toggle("lego", modelStyle === "lego");
     styleToggle.style.transform = "rotate(360deg) scale(1.05)";
-    setTimeout(() => { styleToggle.style.transform = ""; }, 300);
+    setTimeout(() => {
+      styleToggle.style.transform = "";
+    }, 300);
   });
 }
 
@@ -3026,7 +2951,7 @@ function updateStepDescAnimation() {
 
 // 在 updateStepUI 的最后调用动画
 const originalUpdateStepUI = updateStepUI;
-updateStepUI = function() {
+updateStepUI = function () {
   originalUpdateStepUI();
   updateStepDescAnimation();
 };
@@ -3077,7 +3002,7 @@ function updateARButton() {
 async function startAR() {
   if (!arSupported) {
     alert(
-      "您的设备不支持 AR 功能\n\n支持的设备：\n- Android Chrome\n- iOS Safari 15+\n\n请确保使用 HTTPS 访问。",
+      "您的设备不支持 AR 功能\n\n支持的设备：\n- Android Chrome\n- iOS Safari 15+\n\n请确保使用 HTTPS 访问。"
     );
     return;
   }
@@ -3104,7 +3029,7 @@ async function startAR() {
     }
 
     // 设置 AR 渲染器
-    arRenderer = new THREE.WebGLRenderer({
+    arRenderer = new WebGLRenderer({
       antialias: true,
       alpha: true,
       logarithmicDepthBuffer: true,
@@ -3119,12 +3044,12 @@ async function startAR() {
     container.appendChild(arRenderer.domElement);
 
     // 创建 AR 场景
-    arScene = new THREE.Scene();
+    arScene = new Scene();
 
     // 添加灯光
-    const arAmbientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    const arAmbientLight = new AmbientLight(0xffffff, 0.6);
     arScene.add(arAmbientLight);
-    const arDirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    const arDirLight = new DirectionalLight(0xffffff, 0.8);
     arDirLight.position.set(5, 10, 7);
     arScene.add(arDirLight);
 
@@ -3136,12 +3061,7 @@ async function startAR() {
     arQuestGroup.scale.set(0.1, 0.1, 0.1);
 
     // 设置 AR 相机
-    const arCamera = new THREE.PerspectiveCamera(
-      70,
-      window.innerWidth / window.innerHeight,
-      0.01,
-      20,
-    );
+    const arCamera = new PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
 
     // 启用 hit-test：先设置 session，再初始化 hit-test source
     session.addEventListener("end", onAREnd);
@@ -3239,7 +3159,7 @@ async function startAR() {
     alert(
       "启动 AR 失败：" +
         err.message +
-        "\n\n请确保：\n1. 使用 HTTPS\n2. 设备支持 AR\n3. 授予相机权限",
+        "\n\n请确保：\n1. 使用 HTTPS\n2. 设备支持 AR\n3. 授予相机权限"
     );
     onAREnd();
   }

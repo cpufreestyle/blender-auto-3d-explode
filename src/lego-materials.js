@@ -5,12 +5,12 @@
 // 注意：样式状态 currentModelStyle 与切换逻辑 applyModelStyle 保留在 main.js（需改写该状态），
 //       本模块仅导出可变材质对象与取色函数，由 main.js 的 applyModelStyle 在切换时引用。
 
-import * as THREE from "three";
+import { Color, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial } from "three";
 
 // ===== 材质（升级真实感）=====
 export const materials = {
   // 白色前面板（亚光塑料质感）
-  frontPlate: new THREE.MeshPhysicalMaterial({
+  frontPlate: new MeshPhysicalMaterial({
     color: 0xf8f8f8,
     roughness: 0.35,
     metalness: 0.02,
@@ -18,13 +18,13 @@ export const materials = {
     clearcoatRoughness: 0.2,
   }),
   // 黑色主机身（哑光塑料）
-  body: new THREE.MeshStandardMaterial({
+  body: new MeshStandardMaterial({
     color: 0x1e1e21,
     roughness: 0.6,
     metalness: 0.08,
   }),
   // 深空蓝透镜外环（金属质感）
-  lensBarrel: new THREE.MeshPhysicalMaterial({
+  lensBarrel: new MeshPhysicalMaterial({
     color: 0x1a2f4a,
     roughness: 0.2,
     metalness: 0.55,
@@ -32,7 +32,7 @@ export const materials = {
     clearcoatRoughness: 0.1,
   }),
   // 透镜玻璃（透明蓝色）
-  lensGlass: new THREE.MeshPhysicalMaterial({
+  lensGlass: new MeshPhysicalMaterial({
     color: 0x99ccff,
     roughness: 0.03,
     metalness: 0.0,
@@ -42,27 +42,27 @@ export const materials = {
     opacity: 0.8,
   }),
   // 摄像头（深色玻璃纤维）
-  camera: new THREE.MeshStandardMaterial({
+  camera: new MeshStandardMaterial({
     color: 0x0d0d0d,
     roughness: 0.25,
     metalness: 0.65,
   }),
   // 传感器镜头
-  sensor: new THREE.MeshBasicMaterial({ color: 0x0a1a33 }),
+  sensor: new MeshBasicMaterial({ color: 0x0a1a33 }),
   // 头带臂（深灰色塑料）
-  strapArm: new THREE.MeshStandardMaterial({
+  strapArm: new MeshStandardMaterial({
     color: 0x2d2d30,
     roughness: 0.7,
     metalness: 0.12,
   }),
   // 记忆海绵（深灰色，高粗糙度）
-  foam: new THREE.MeshStandardMaterial({
+  foam: new MeshStandardMaterial({
     color: 0x1a1a1c,
     roughness: 0.95,
     metalness: 0.0,
   }),
   // 主板 PCB（深绿色）
-  pcb: new THREE.MeshStandardMaterial({
+  pcb: new MeshStandardMaterial({
     color: 0x094022,
     roughness: 0.75,
     metalness: 0.05,
@@ -72,15 +72,15 @@ export const materials = {
 // ===== 乐高 / 原生 外观切换（2026-07 新增）=====
 // 乐高风格：亮色塑料质感、无金属、轻微自发光，营造积木玩具观感（不改几何体）
 export function makeLegoMaterial(color) {
-  return new THREE.MeshStandardMaterial({
+  return new MeshStandardMaterial({
     color,
     roughness: 0.38,
     metalness: 0.0,
-    emissive: new THREE.Color(color).multiplyScalar(0.05),
+    emissive: new Color(color).multiplyScalar(0.05),
   });
 }
 export function makeLegoGlass() {
-  return new THREE.MeshPhysicalMaterial({
+  return new MeshPhysicalMaterial({
     color: 0x6fd0ff,
     roughness: 0.05,
     metalness: 0.0,
@@ -96,7 +96,7 @@ export const legoMaterials = {
   lensBarrel: makeLegoMaterial(0x0a69c2),
   lensGlass: makeLegoGlass(),
   camera: makeLegoMaterial(0x3b3b3b),
-  sensor: new THREE.MeshBasicMaterial({ color: 0x0a1a33 }),
+  sensor: new MeshBasicMaterial({ color: 0x0a1a33 }),
   strapArm: makeLegoMaterial(0xc91a22),
   foam: makeLegoMaterial(0x4a4a4a),
   pcb: makeLegoMaterial(0x1e9e4a),
@@ -116,11 +116,11 @@ nativeToLego.set(materials.pcb, legoMaterials.pcb);
 
 // 自定义模型：根据原始颜色推导亮色积木色
 export function brightenToLego(hex) {
-  const tmp = new THREE.Color(hex);
+  const tmp = new Color(hex);
   const hsl = {};
   tmp.getHSL(hsl);
   if (hsl.l < 0.08) return 0x2b2b2b; // 近黑 → 暗塑料
-  return new THREE.Color().setHSL(hsl.h, Math.max(0.6, hsl.s), 0.5).getHex();
+  return new Color().setHSL(hsl.h, Math.max(0.6, hsl.s), 0.5).getHex();
 }
 export function getLegoMaterialForMesh(child) {
   const nativeMat = child.userData._nativeMaterial;

@@ -2,7 +2,7 @@
  * STL Loader (精简版)
  * 从 Three.js examples 提取，支持二进制和 ASCII STL 格式
  */
-import * as THREE from './three.module.js';
+import { BufferAttribute, BufferGeometry, Float32BufferAttribute } from './three.module.js';
 
 class STLLoader {
   parse(data) {
@@ -56,9 +56,9 @@ class STLLoader {
       }
     }
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(positions, 3));
+    geometry.setAttribute('normal', new BufferAttribute(normals, 3));
     return geometry;
   }
 
@@ -93,9 +93,9 @@ class STLLoader {
       }
     }
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('normal', new Float32BufferAttribute(normals, 3));
     return geometry;
   }
 }

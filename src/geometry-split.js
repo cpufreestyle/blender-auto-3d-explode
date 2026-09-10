@@ -4,7 +4,7 @@
 // 不引用 main.js 的共享状态（scene/camera/parts/questGroup 等），因此可独立复用与测试。
 // 与 main.js 共用同一个 ../vendor/three.module.js 实例（ESM 按解析路径缓存，材质/几何类型一致）。
 
-import * as THREE from "three";
+import { Box3, BufferGeometry, Float32BufferAttribute, Vector3 } from "three";
 import { UnionFind, generatePartName as _generatePartName } from "./utils.js";
 
 // 从几何体中提取指定面，创建新的非索引几何体
@@ -28,10 +28,10 @@ export function extractFacesToGeometry(geometry, faceIndices) {
     }
   }
 
-  const newGeo = new THREE.BufferGeometry();
-  newGeo.setAttribute("position", new THREE.Float32BufferAttribute(newPositions, 3));
-  if (newNormals) newGeo.setAttribute("normal", new THREE.Float32BufferAttribute(newNormals, 3));
-  if (newUVs) newGeo.setAttribute("uv", new THREE.Float32BufferAttribute(newUVs, 2));
+  const newGeo = new BufferGeometry();
+  newGeo.setAttribute("position", new Float32BufferAttribute(newPositions, 3));
+  if (newNormals) newGeo.setAttribute("normal", new Float32BufferAttribute(newNormals, 3));
+  if (newUVs) newGeo.setAttribute("uv", new Float32BufferAttribute(newUVs, 2));
   return newGeo;
 }
 
@@ -119,8 +119,8 @@ export function splitByMaterialGroups(geometry) {
 // 空间切分（按包围盒最长轴均分）
 export function splitSpatially(geometry, material, targetParts) {
   const pos = geometry.attributes.position;
-  const box = new THREE.Box3().setFromBufferAttribute(pos);
-  const size = new THREE.Vector3();
+  const box = new Box3().setFromBufferAttribute(pos);
+  const size = new Vector3();
   box.getSize(size);
 
   const maxAxis = size.x >= size.y && size.x >= size.z ? "x" : size.y >= size.z ? "y" : "z";
@@ -153,9 +153,9 @@ export function splitSpatially(geometry, material, targetParts) {
   return results;
 }
 
-// generatePartName 适配层：将 THREE.Box3 转换为 utils.js 需要的 {center, size} 格式
+// generatePartName 适配层：将 Box3 转换为 utils.js 需要的 {center, size} 格式
 export function generatePartName(index, position, bbox) {
-  const center = bbox.getCenter(new THREE.Vector3());
-  const size = bbox.getSize(new THREE.Vector3());
+  const center = bbox.getCenter(new Vector3());
+  const size = bbox.getSize(new Vector3());
   return _generatePartName(index, position, { center, size });
 }
