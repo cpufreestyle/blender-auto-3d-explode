@@ -1699,9 +1699,34 @@ async function handleGenToBlender(req, res) {
  * 从 Blender 实时场景导出指定对象为 GLB（默认导出最近一次导入的对象），二进制回传。
  */
 async function handleBlenderExport(req, res, url) {
-  const name = url.searchParams.get("name") || lastImportedObject;
+  let name = url.searchParams.get("name") || lastImportedObject;
+
+  // 无显式对象名时，回退到 Blender 当前激活对象 / 场景首个网格对象，
+  // 使「从 Blender 读回」在用户未先执行「生成并发送」时也能使用。
   if (!name) {
-    sendJSON(res, 400, { success: false, error: "缺少 name，且尚无已导入对象可回退" });
+    try {
+      const pick = await callBlenderMcp(
+        "execute_code",
+        {
+          code:
+            "import bpy; a=bpy.context.active_object; " +
+            "mesh=[o.name for o in bpy.data.objects if o.type=='MESH']; " +
+            "print((a.name if (a and a.type=='MESH') else (mesh[0] if mesh else '')))",
+        },
+        10_000,
+      );
+      const picked = String((pick && pick.result) || "").trim();
+      if (picked) name = picked;
+    } catch {
+      /* 忽略探测错误，交给下方 400 处理 */
+    }
+  }
+
+  if (!name) {
+    sendJSON(res, 400, {
+      success: false,
+      error: "Blender 场景中尚无可导出的网格对象，请先在 Blender 中创建或导入对象后再读回",
+    });
     return;
   }
   const exportPath = path.join(UPLOAD_DIR, `export-${Date.now()}.glb`);
