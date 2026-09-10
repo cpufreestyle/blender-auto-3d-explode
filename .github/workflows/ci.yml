@@ -59,11 +59,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       - name: Lint Python
         run: |
           pip install ruff
-          ruff check *.py --line-length 200
+          # 覆盖 Blender 脚本目录（此前仅检查根目录 *.py，漏掉 scripts/ 与 blender_scripts/）
+          ruff check *.py scripts/*.py blender_scripts/*.py --line-length 200
 
       - name: Run tests
         run: |
