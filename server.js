@@ -760,32 +760,36 @@ async function runVLMImageTo3D(vlmCfg, body, imageBase64, res, startTime) {
 }
 
 /**
- * 本地部署图像转3D（TripoSR 真重建，离线推理）
- * 把 base64 图片写成临时 PNG，调用 scripts/triposr_infer.py（TripoSR 虚拟环境 python）
- * 生成真正的 3D 网格 GLB（有体积/背面），返回二进制结果。
+ * 本地部署图像转3D（默认：零依赖 Blender 浮雕/体素方案，离线、可拆解）
+ * - 默认走 blender_image_to_3d.py（用已安装的 Blender 跑，不需 GPU/venv），
+ *   按 --tiles 切成若干独立网格（默认 3×3=9 块），拼合即还原、爆炸即分离，
+ *   因此默认生成的模型就是「可拆解」的（满足本地教学拆解需求）。
+ * - 仅当显式勾选「真重建」且本机 TripoSR 环境就绪时，才走 TripoSR 真重建（单网格，质量更高）。
  */
 async function runLocalImageTo3D(rep, body, imageBase64, res, startTime) {
+  // 真重建（TripoSR）：需 venv + 权重，单网格、默认不可拆解；仅显式请求且环境就绪时启用
+  const triposrDir = process.env.TRIPOSR_DIR || path.join(__dirname, "external", "TripoSR");
+  const venvPython = path.join(triposrDir, ".venv", "bin", "python3");
+  const inferScript = path.join(__dirname, "scripts", "triposr_infer.py");
+  if (body.real && fs.existsSync(venvPython) && fs.existsSync(inferScript)) {
+    return runLocalTripoSRImageTo3D(rep, body, imageBase64, res, startTime, {
+      triposrDir, venvPython, inferScript,
+    });
+  }
+  return runLocalReliefImageTo3D(rep, body, imageBase64, res, startTime);
+}
+
+/**
+ * 本地「真重建」（TripoSR）：离线推理，生成有体积/背面的真·3D 网格 GLB。
+ * 注意：默认单网格、不可拆解；如需可拆解请使用默认的浮雕/体素方案。
+ */
+async function runLocalTripoSRImageTo3D(rep, body, imageBase64, res, startTime, env) {
   const jobId = `img3d-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const imgPath = path.join(UPLOAD_DIR, `img3d-${jobId}.png`);
   const outputPath = path.join(UPLOAD_DIR, `img3d-${jobId}.glb`);
   const manifestPath = path.join(UPLOAD_DIR, `img3d-${jobId}.json`);
 
   fs.writeFileSync(imgPath, Buffer.from(imageBase64, "base64"));
-
-  // 定位 TripoSR 仓库与它的虚拟环境 python（由 scripts/setup_triposr.sh 创建）
-  const triposrDir = process.env.TRIPOSR_DIR || path.join(__dirname, "external", "TripoSR");
-  const venvPython = path.join(triposrDir, ".venv", "bin", "python3");
-  const inferScript = path.join(__dirname, "scripts", "triposr_infer.py");
-
-  if (!fs.existsSync(venvPython)) {
-    throw new Error(
-      "本地真重建环境未就绪：未找到 TripoSR 虚拟环境（" + venvPython + "）。\n" +
-      "请先运行：bash scripts/setup_triposr.sh"
-    );
-  }
-  if (!fs.existsSync(inferScript)) {
-    throw new Error("未找到推理脚本: " + inferScript);
-  }
 
   const mcResolution = body.mcResolution ?? rep.mcResolution ?? 256;
   const bakeTexture = body.bakeTexture ?? rep.bakeTexture ?? false;
@@ -795,7 +799,7 @@ async function runLocalImageTo3D(rep, body, imageBase64, res, startTime) {
   const chunkSize = body.chunkSize ?? rep.chunkSize ?? 8192;
 
   const args = [
-    inferScript,
+    env.inferScript,
     "--image", imgPath,
     "--output", outputPath,
     "--manifest", manifestPath,
@@ -803,16 +807,16 @@ async function runLocalImageTo3D(rep, body, imageBase64, res, startTime) {
     "--mc-resolution", String(mcResolution),
     "--texture-resolution", String(textureResolution),
     "--chunk-size", String(chunkSize),
-    "--triposr-dir", triposrDir,
+    "--triposr-dir", env.triposrDir,
   ];
   if (bakeTexture) args.push("--bake-texture");
   if (removeBg) args.push("--remove-bg");
 
-  console.log(`  🧊 图片转3D: 本地 TripoSR 真重建 ${inferScript} (mc=${mcResolution}, bake=${bakeTexture}, device=${device})`);
+  console.log(`  🧊 图片转3D: 本地 TripoSR 真重建 ${env.inferScript} (mc=${mcResolution}, bake=${bakeTexture}, device=${device})`);
   let stdout = "";
   let stderr = "";
   try {
-    const r = await execFileAsync(venvPython, args, {
+    const r = await execFileAsync(env.venvPython, args, {
       timeout: 900_000, // 单图真重建在 CPU 上需数分钟（含首次权重下载），放宽到 15 分钟
       maxBuffer: 200 * 1024 * 1024,
     });
@@ -845,7 +849,95 @@ async function runLocalImageTo3D(rep, body, imageBase64, res, startTime) {
   });
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-  console.log(`  ✅ 图片转3D（本地·真重建）完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
+  console.log(`  ✅ 图片转3D（本地·TripoSR 真重建）完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
+  sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
+}
+
+/**
+ * 本地「可拆解」重建（Blender 浮雕/体素）：零依赖，用已安装 Blender 跑，
+ * 按 --tiles 切成独立网格（默认 3×3），天生可爆炸拆解，离线即用。
+ */
+async function runLocalReliefImageTo3D(rep, body, imageBase64, res, startTime) {
+  const jobId = `img3d-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const imgPath = path.join(UPLOAD_DIR, `img3d-${jobId}.png`);
+  const outputPath = path.join(UPLOAD_DIR, `img3d-${jobId}.glb`);
+  const manifestPath = path.join(UPLOAD_DIR, `img3d-${jobId}.json`);
+
+  await fs.promises.writeFile(imgPath, Buffer.from(imageBase64, "base64"));
+
+  if (!BLENDER_PATH) {
+    throw new Error(
+      "本地可拆解重建失败：未找到 Blender 可执行文件。请先安装 Blender 并在 PATH 中可用，" +
+      "或设置 BLENDER_PATH 环境变量后重启 server.js。"
+    );
+  }
+  const reliefScript = path.join(__dirname, "blender_image_to_3d.py");
+  if (!fs.existsSync(reliefScript)) {
+    throw new Error("未找到本地重建脚本: " + reliefScript);
+  }
+
+  const mode = (body.mode || rep.mode || "relief").toLowerCase(); // relief | voxel
+  if (mode !== "relief" && mode !== "voxel") {
+    throw new Error(`不支持的本地重建 mode: ${mode}`);
+  }
+  const tiles = Math.min(Math.max(parseInt(body.tiles ?? rep.tiles ?? 3, 10), 1), 8);
+  const resolution = Math.min(Math.max(parseInt(body.resolution ?? rep.resolution ?? 128, 10), 16), 512);
+  const depth = Math.min(Math.max(parseFloat(body.depth ?? rep.depth ?? 0.35), 0.02), 2);
+  const useTexture = !!(body.texture ?? rep.texture ?? false);
+
+  const args = [
+    "--background", "--python", reliefScript, "--",
+    "--image", imgPath,
+    "--output", outputPath,
+    "--manifest", manifestPath,
+    "--mode", mode,
+    "--tiles", String(tiles),
+    "--resolution", String(resolution),
+    "--depth", String(depth),
+  ];
+  if (useTexture) args.push("--texture");
+
+  console.log(`  🧊 图片转3D: 本地 Blender 可拆解重建 ${reliefScript} (mode=${mode}, tiles=${tiles}, tex=${useTexture})`);
+  let stdout = "";
+  let stderr = "";
+  try {
+    const r = await execFileAsync(BLENDER_PATH, args, {
+      timeout: 600_000, // Blender 后台渲染 + 导出，放宽到 10 分钟
+      maxBuffer: 200 * 1024 * 1024,
+    });
+    stdout = r.stdout || "";
+    stderr = r.stderr || "";
+  } catch (berr) {
+    // Blender 后台模式常因无关 addon（如 tripo_addon）卸载时的异步清理而以非零码退出，
+    // 但 GLB 往往已成功写出。因此先记录诊断信息，是否成功以 GLB 是否产出为准（见下方判断）。
+    stderr = (berr.stderr || "") + (berr.stdout || "");
+    console.warn(`  ⚠️ Blender 进程返回非零退出码（可能无关），将检查 GLB 是否已生成: ${String(berr.message || "").slice(0, 300)}`);
+  }
+  if (stdout) console.log(`  📤 Blender stdout:\n${stdout.slice(0, 2000)}`);
+  if (stderr) console.log(`  📤 Blender stderr:\n${stderr.slice(0, 2000)}`);
+
+  if (!(await fs.promises.stat(outputPath).catch(() => null))) {
+    throw new Error(
+      `本地可拆解重建未生成 GLB 文件。请确认 Blender 可正常运行（${BLENDER_PATH}）。` +
+      `Blender stderr: ${stderr.slice(0, 800)}`
+    );
+  }
+
+  const glbBuffer = await fs.promises.readFile(outputPath);
+  let manifest = { total_parts: 0, parts: [] };
+  if (await fs.promises.stat(manifestPath).catch(() => null)) {
+    try {
+      manifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf-8"));
+    } catch { /* 用默认 manifest */ }
+  }
+
+  // 清理临时文件
+  await Promise.all(
+    [imgPath, outputPath, manifestPath].map(f => fs.promises.unlink(f).catch(() => {}))
+  );
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+  console.log(`  ✅ 图片转3D（本地·可拆解·${tiles}×${tiles}块）完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s, parts=${manifest.total_parts})`);
   sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
 }
 

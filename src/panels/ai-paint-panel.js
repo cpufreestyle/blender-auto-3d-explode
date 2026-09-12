@@ -25,7 +25,9 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
   const removeImgBtn = document.getElementById("ai-paint-remove-image");
   const imgTo3DBtn = document.getElementById("img-to-3d-btn");
   const imgTo3DDeploy = document.getElementById("img-to-3d-deploy");
-  const imgTo3DModelLocal = document.getElementById("img-to-3d-model-local");
+  const imgTo3DModeLocal = document.getElementById("img-to-3d-mode-local");
+  const imgTo3DTilesLocal = document.getElementById("img-to-3d-tiles-local");
+  const imgTo3DReal = document.getElementById("img-to-3d-real");
   const imgTo3DRemoveBg = document.getElementById("img-to-3d-remove-bg");
   const imgTo3DBake = document.getElementById("img-to-3d-bake");
   const imgTo3DModel = document.getElementById("img-to-3d-model");
@@ -314,7 +316,9 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
     const deploy = imgTo3DDeploy ? imgTo3DDeploy.value : "local";
     const isLocal = deploy === "local";
     const isReplicate = deploy === "replicate";
-    if (imgTo3DModelLocal) imgTo3DModelLocal.classList.toggle("hidden", !isLocal);
+    if (imgTo3DModeLocal) imgTo3DModeLocal.classList.toggle("hidden", !isLocal);
+    if (imgTo3DTilesLocal) imgTo3DTilesLocal.classList.toggle("hidden", !isLocal);
+    if (imgTo3DReal && imgTo3DReal.parentElement) imgTo3DReal.parentElement.classList.toggle("hidden", !isLocal);
     if (imgTo3DModel) imgTo3DModel.classList.toggle("hidden", !isReplicate);
     if (imgTo3DModelCustom) imgTo3DModelCustom.classList.add("hidden");
   }
@@ -346,7 +350,7 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
       imgTo3DBtn.textContent = "⏳ 重建中...";
     }
     const providerLabel = {
-      local: "本地 TripoSR",
+      local: "本地可拆解",
       replicate: "Replicate 云端",
       meshy: "Meshy AI 云端",
       tripo: "Tripo 云端",
@@ -355,7 +359,7 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
     showAIStatus(
       `<span class="ai-paint-spinner"></span>` +
         (isLocal
-          ? "正在用本地 TripoSR 真重建 3D（单图重建，首次需下载模型权重，约 1-3 分钟）..."
+          ? "正在用本地 Blender 重建 3D（零依赖、可拆解，按图切块，约 10-30 秒）..."
           : `正在用 ${providerLabel} 重建 3D 模型...（约 1-3 分钟，请耐心等待）`),
       "info",
     );
@@ -399,11 +403,11 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
         // 部署方式 + 模型：本地走 TripoSR 真重建，云端走 Replicate（owner/name）
         const payload = { image: uploadedImageDataUrl, deploy };
         if (deploy === "local") {
-          const q = imgTo3DModelLocal ? imgTo3DModelLocal.value : "256";
-          payload.mcResolution = parseInt(q, 10) || 256; // 真重建：重建质量（marching cubes 分辨率）
-          payload.tiles = 1; // 真重建为单网格，不再切块
-          payload.removeBg = imgTo3DRemoveBg ? imgTo3DRemoveBg.checked : true; // 去背景显著提升重建质量
-          payload.bakeTexture = imgTo3DBake ? imgTo3DBake.checked : false; // 烘焙纹理图集（比顶点色清晰）
+          payload.mode = imgTo3DModeLocal ? imgTo3DModeLocal.value : "relief"; // relief | voxel
+          payload.tiles = imgTo3DTilesLocal ? (parseInt(imgTo3DTilesLocal.value, 10) || 3) : 3; // 拆解块数，越大越易拆解
+          payload.real = !!(imgTo3DReal && imgTo3DReal.checked); // 真重建需本机就绪 TripoSR
+          payload.removeBg = imgTo3DRemoveBg ? imgTo3DRemoveBg.checked : true; // 去背景（真重建时用）
+          payload.bakeTexture = imgTo3DBake ? imgTo3DBake.checked : false; // 烘焙纹理（真重建时用）
         } else if (deploy === "replicate") {
           let m = imgTo3DModel ? imgTo3DModel.value : "";
           if (m === "__custom__" && imgTo3DModelCustom) m = imgTo3DModelCustom.value.trim();

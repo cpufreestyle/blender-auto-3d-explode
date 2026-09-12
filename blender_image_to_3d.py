@@ -86,7 +86,7 @@ def main():
 
     img = bpy.data.images.load(image_path)
     W, H = img.size
-    pixels = list(img.pixels)  # RGBA，长度 W*H*4，左下角为原点
+    pixels = img.pixels  # 保持只读访问，避免把大图像素整块复制到 Python list
 
     aspect = (W / H) if H else 1.0
     if aspect >= 1:
@@ -96,22 +96,29 @@ def main():
         resY = max(2, resolution)
         resX = max(2, int(round(resolution * aspect)))
 
-    def brightness_at(x, y):
-        px = int(round(x / (resX - 1) * (W - 1)))
-        py = int(round((resY - 1 - y) / (resY - 1) * (H - 1)))  # 翻转 Y 以匹配常规朝向
-        idx = (py * W + px) * 4
-        r, g, b = pixels[idx], pixels[idx + 1], pixels[idx + 2]
-        return 0.299 * r + 0.587 * g + 0.114 * b  # 0..1
+    # 预计算亮度网格，减少重复插值开销
+    brightness_grid = [[0.0] * resX for _ in range(resY)]
+    for y in range(resY):
+        py = int(round((resY - 1 - y) / (resY - 1) * (H - 1)))
+        row_offset = py * W * 4
+        for x in range(resX):
+            px = int(round(x / (resX - 1) * (W - 1)))
+            idx = row_offset + px * 4
+            r = pixels[idx]
+            g = pixels[idx + 1]
+            b = pixels[idx + 2]
+            br = 0.299 * r + 0.587 * g + 0.114 * b
+            if mode == "voxel":
+                levels = 8
+                br = round(br * (levels - 1)) / (levels - 1)
+            brightness_grid[y][x] = br
 
     # 先按网格计算所有顶点的全局坐标（px,py,pz）与 UV，供分块复用
     verts2d = []
     uv2d = []
     for y in range(resY):
         for x in range(resX):
-            br = brightness_at(x, y)
-            if mode == "voxel":
-                levels = 8
-                br = round(br * (levels - 1)) / (levels - 1)
+            br = brightness_grid[y][x]
             px = (x / (resX - 1) - 0.5) * 2.0
             py = (y / (resY - 1) - 0.5) * 2.0 / aspect
             pz = br * depth
@@ -174,35 +181,32 @@ def main():
         # 极端兜底：无节点材料
         mat.diffuse_color = (0.8, 0.8, 0.8, 1.0)
 
+    created_objs = []
     if tiles == 1:
         obj, _ = build_tile(0, 0, "ImageRelief")
-        bpy.context.view_layer.objects.active = obj
-        obj.select_set(True)
-        try:
-            bpy.ops.object.shade_smooth()
-        except Exception:
-            pass
-        if obj.data.materials:
-            obj.data.materials[0] = mat
-        else:
-            obj.data.materials.append(mat)
+        created_objs.append(obj)
         part_order.append(("ImageRelief", mathutils.Vector((0, 0, 0))))
     else:
         for tr in range(tiles):
             for tc in range(tiles):
                 name = f"Tile_{tr}_{tc}"
                 obj, center = build_tile(tr, tc, name)
-                bpy.context.view_layer.objects.active = obj
-                obj.select_set(True)
-                try:
-                    bpy.ops.object.shade_smooth()
-                except Exception:
-                    pass
-                if obj.data.materials:
-                    obj.data.materials[0] = mat
-                else:
-                    obj.data.materials.append(mat)
+                created_objs.append(obj)
                 part_order.append((name, center))
+
+    for obj in created_objs:
+        obj.select_set(True)
+    if created_objs:
+        bpy.context.view_layer.objects.active = created_objs[0]
+        try:
+            bpy.ops.object.shade_smooth()
+        except Exception:
+            pass
+        for obj in created_objs:
+            if obj.data.materials:
+                obj.data.materials[0] = mat
+            else:
+                obj.data.materials.append(mat)
 
     # 按"距模型中心降序（外层先拆）"排序，便于爆炸拆解时由外向内
     part_order.sort(key=lambda t: t[1].length, reverse=True)

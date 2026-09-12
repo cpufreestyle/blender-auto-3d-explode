@@ -148,9 +148,13 @@ export function findBlenderCandidates(platform, homeDir, env = {}) {
   const pathJoin = (...parts) => parts.join("/").replace(/\/+/g, "/");
 
   if (platform === "darwin") {
+    // 优先用小写 blender 启动器：macOS 上大写 Blender 是裸 Mach-O 二进制，
+    // 经 child_process.execFile 调用时可能把它自身误当成 .blend 文件解析而报
+    // 「文件格式不支持」。小写 blender 是独立启动器，能正确传递参数。
     candidates.push(
-      "/Applications/Blender.app/Contents/MacOS/Blender",
       "/Applications/Blender.app/Contents/MacOS/blender",
+      "/Applications/Blender.app/Contents/MacOS/Blender",
+      pathJoin(homeDir, "Applications/Blender.app/Contents/MacOS/blender"),
       pathJoin(homeDir, "Applications/Blender.app/Contents/MacOS/Blender"),
       "/opt/homebrew/bin/blender",
       "/usr/local/bin/blender",

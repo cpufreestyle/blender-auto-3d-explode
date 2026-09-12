@@ -110,18 +110,25 @@
         <div class="ai-to3d-row">
           <button id="img-to-3d-btn" class="btn btn-secondary">🧊 图片转3D</button>
           <select id="img-to-3d-deploy" class="ai-select" title="图片转3D 提供商">
-            <option value="local" selected>🖥️ 本地 TripoSR</option>
+            <option value="local" selected>🖥️ 本地可拆解</option>
             <option value="replicate">☁️ Replicate 云端（Hunyuan3D-2）</option>
             <option value="meshy">🌐 Meshy AI</option>
             <option value="tripo">🌐 Tripo（Triple 3D）</option>
             <option value="hyper3d">🌐 Hyper3D（Rodin）</option>
           </select>
-          <select id="img-to-3d-model-local" class="ai-select" title="重建质量">
-            <option value="256">标准 (256)</option>
-            <option value="384">高精 (384)</option>
+          <select id="img-to-3d-mode-local" class="ai-select" title="重建模式">
+            <option value="relief" selected>浮雕（平滑）</option>
+            <option value="voxel">像素方块</option>
           </select>
+          <select id="img-to-3d-tiles-local" class="ai-select" title="拆解块数（越大越易拆解）">
+            <option value="1">单网格</option>
+            <option value="2">2×2 块</option>
+            <option value="3" selected>3×3 块（推荐·可拆解）</option>
+            <option value="4">4×4 块</option>
+          </select>
+          <label class="ai-to3d-check"><input type="checkbox" id="img-to-3d-real" /> 真重建(TripoSR)</label>
           <label class="ai-to3d-check"><input type="checkbox" id="img-to-3d-remove-bg" checked /> 去背景</label>
-          <label class="ai-to3d-check"><input type="checkbox" id="img-to-3d-bake" checked /> 烘焙纹理</label>
+          <label class="ai-to3d-check"><input type="checkbox" id="img-to-3d-bake" /> 烘焙纹理</label>
           <select id="img-to-3d-model" class="ai-select hidden" title="云端模型（高保真真重建）">
             <option value="tencent/hunyuan3d-2">Hunyuan3D-2（高保真）</option>
             <option value="camenduru/triposr">TripoSR（快速）</option>
