@@ -79,6 +79,14 @@
     <!-- ===== 顶部：配置 AI 模型 / 图片转3D（显眼入口）===== -->
     <button id="open-config-btn" class="btn btn-config">⚙️ 配置 AI 模型 / 图片转3D</button>
 
+    <!-- ===== 模型加载遮罩 ===== -->
+    <div id="model-loading" class="model-loading hidden">
+      <div class="model-loading-inner">
+        <div class="spinner-ring"></div>
+        <div id="model-loading-text" class="spinner-text">正在准备模型...</div>
+      </div>
+    </div>
+
     <!-- ===== AI 绘画（可折叠）===== -->
     <details class="panel collapsible" open>
       <summary class="panel-header">

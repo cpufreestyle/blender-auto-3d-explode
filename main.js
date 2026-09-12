@@ -17,6 +17,7 @@ import {
   MathUtils,
   Mesh,
   MeshBasicMaterial,
+  BasicShadowMap,
   PCFSoftShadowMap,
   PerspectiveCamera,
   Points,
@@ -95,7 +96,7 @@ scene.add(gridHelper);
 
 // 添加环境粒子（增强空间感）
 const particlesGeometry = new BufferGeometry();
-const particlesCount = 500;
+const particlesCount = lowPowerMode ? 150 : 500;
 const posArray = new Float32Array(particlesCount * 3);
 
 for (let i = 0; i < particlesCount * 3; i++) {
@@ -123,9 +124,11 @@ const renderer = new WebGLRenderer({
 renderer.setSize(window.innerWidth, window.innerHeight);
 // 移动端/一体机（Quest 3 等）GPU 为填充率瓶颈，限制 DPR 避免过度采样；桌面维持 2
 const isTouchDevice = navigator.maxTouchPoints > 0;
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const lowPowerMode = isTouchDevice || isMobile;
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouchDevice ? 1.5 : 2));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = PCFSoftShadowMap;
+renderer.shadowMap.enabled = !lowPowerMode;
+renderer.shadowMap.type = lowPowerMode ? BasicShadowMap : PCFSoftShadowMap;
 renderer.toneMapping = ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 container.appendChild(renderer.domElement);
@@ -214,20 +217,20 @@ function fitCameraToModel(modelGroup, smooth = true) {
 const ambientLight = new AmbientLight(0xffffff, 0.45);
 scene.add(ambientLight);
 
-const mainLight = new DirectionalLight(0xffffff, 1.5);
+const mainLight = new DirectionalLight(0xffffff, lowPowerMode ? 1.2 : 1.5);
 mainLight.position.set(6, 10, 7);
 mainLight.castShadow = true;
-mainLight.shadow.mapSize.set(2048, 2048);
+mainLight.shadow.mapSize.set(lowPowerMode ? 1024 : 2048, lowPowerMode ? 1024 : 2048);
 mainLight.shadow.bias = -0.0001;
 mainLight.shadow.camera.near = 0.5;
 mainLight.shadow.camera.far = 30;
 scene.add(mainLight);
 
-const fillLight = new DirectionalLight(0x99bbff, 0.6);
+const fillLight = new DirectionalLight(0x99bbff, lowPowerMode ? 0.4 : 0.6);
 fillLight.position.set(-6, 4, -5);
 scene.add(fillLight);
 
-const rimLight = new SpotLight(0xffffff, 1.8);
+const rimLight = new SpotLight(0xffffff, lowPowerMode ? 1.0 : 1.8);
 rimLight.position.set(0, 8, -7);
 rimLight.angle = Math.PI / 5;
 rimLight.penumbra = 0.5;
@@ -237,7 +240,7 @@ rimLight.distance = 35;
 scene.add(rimLight);
 
 // 补充底部反射光
-const bottomLight = new DirectionalLight(0x334466, 0.3);
+const bottomLight = new DirectionalLight(0x334466, lowPowerMode ? 0.15 : 0.3);
 bottomLight.position.set(0, -5, 0);
 scene.add(bottomLight);
 
@@ -280,8 +283,8 @@ function createPart({
 }) {
   mesh.position.set(...homePos);
   mesh.rotation.set(...homeRot);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
+  mesh.castShadow = !lowPowerMode;
+  mesh.receiveShadow = !lowPowerMode;
   mesh.userData = { name };
   questGroup.add(mesh);
   parts.push({
@@ -471,10 +474,13 @@ let hasCustomModel = false;
  */
 function clearCustomModelGroup() {
   // material.dispose() 不会释放贴图的 GPU 资源，需先单独 dispose 所有纹理
-  const disposeMaterial = m => {
+  const disposeMaterialTextures = m => {
     for (const value of Object.values(m)) {
       if (value && value.isTexture) value.dispose();
     }
+  };
+  const disposeMaterial = m => {
+    disposeMaterialTextures(m);
     m.dispose();
   };
   while (customModelGroup.children.length > 0) {
@@ -490,6 +496,7 @@ function clearCustomModelGroup() {
         }
       }
     });
+    child.userData = {};
     customModelGroup.remove(child);
   }
   customModelParts = [];
@@ -497,6 +504,35 @@ function clearCustomModelGroup() {
   customModelGroup.position.set(0, 0, 0);
   // 清除上一个模型的装配顺序，避免误用
   assemblySequenceOrder = null;
+}
+
+function disposeSceneRecursively(node) {
+  if (!node) return;
+  const disposeMaterialTextures = m => {
+    for (const value of Object.values(m)) {
+      if (value && value.isTexture) value.dispose();
+    }
+  };
+  const disposeMaterial = m => {
+    disposeMaterialTextures(m);
+    m.dispose();
+  };
+  node.traverse(child => {
+    if (child.geometry) child.geometry.dispose();
+    if (child.material) {
+      if (Array.isArray(child.material)) {
+        child.material.forEach(disposeMaterial);
+      } else {
+        disposeMaterial(child.material);
+      }
+    }
+  });
+}
+
+let isLoadingCustomModel = false;
+
+function yieldToMain() {
+  return new Promise(resolve => setTimeout(resolve, 0));
 }
 
 /**
@@ -631,7 +667,7 @@ function autoSplitModel(model) {
       for (const gr of groupResults) {
         const newMesh = new Mesh(
           gr.geometry,
-          Array.isArray(material) ? material[gr.materialIndex] || material[0] : material
+          Array.isArray(material) ? material[gr.materialIndex] || material[0] : material,
         );
         newMesh.matrix.copy(mesh.matrixWorld);
         newMesh.matrixAutoUpdate = false;
@@ -756,18 +792,18 @@ async function runAssemblyAnalysis() {
       score == null ? "#888" : score >= 80 ? "#2e7d32" : score >= 55 ? "#f9a825" : "#c62828";
 
     const recs =
-      Array.isArray(pr.recommendations) && pr.recommendations.length
-        ? pr.recommendations.map(r => `<li>${r}</li>`).join("")
-        : "<li>无明显制造风险</li>";
+      Array.isArray(pr.recommendations) && pr.recommendations.length ?
+        pr.recommendations.map(r => `<li>${r}</li>`).join("") :
+        "<li>无明显制造风险</li>";
 
     const bd = pr.breakdown || {};
-    const bdRows = Object.keys(bd).length
-      ? '<table class="asm-table"><tr><th>扣分项</th><th>分值</th></tr>' +
+    const bdRows = Object.keys(bd).length ?
+      "<table class=\"asm-table\"><tr><th>扣分项</th><th>分值</th></tr>" +
         Object.entries(bd)
           .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`)
           .join("") +
-        "</table>"
-      : "";
+        "</table>" :
+      "";
 
     resultEl.innerHTML = `
       <div class="asm-score">
@@ -842,9 +878,36 @@ ${partNames.map(n => `• ${n}`).join("<br>")}<br><br>
 }
 
 async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
+  if (isLoadingCustomModel) {
+    showStatus("⏳ 正在加载模型，请稍候...", "info");
+    return;
+  }
+
+  const loadStart = performance.now();
+  let previousHasCustomModel = hasCustomModel;
+  let previousCustomModelParts = customModelParts.map(part => ({
+    mesh: part.mesh,
+    homePos: part.homePos.clone(),
+    explodePos: part.explodePos.clone(),
+    homeRot: part.homeRot.clone(),
+    explodeRot: part.explodeRot.clone(),
+    name: part.name,
+    partCenter: part.partCenter.clone(),
+    stepIndex: part.stepIndex,
+  }));
+  let previousStepGroups = stepGroups;
+  let previousTotalSteps = totalSteps;
+  let previousCurrentStep = currentStep;
+  let previousDisplayedStep = displayedStep;
+
   try {
+    isLoadingCustomModel = true;
+    setModelLoading(true, "📦 正在解析模型...");
     const splitMethod = blenderManifest ? "Blender CLI" : "前端 JS";
     showStatus(`📦 正在解析模型（${splitMethod}）...`, "info");
+
+    // 先释放旧模型，降低解析新模型时的显存/内存峰值
+    clearCustomModelGroup();
 
     const LoaderClass = await loadGLTFLoader();
     const loader = new LoaderClass();
@@ -853,8 +916,6 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
       loader.parse(arrayBuffer, "", resolve, err => reject(new Error("解析失败：" + err.message)));
     });
 
-    // 清除之前的自定义模型
-    clearCustomModelGroup();
     // 立即隐藏默认（Quest 3）模型，确保生成的模型单独显示、不与主模型叠加
     questGroup.visible = false;
 
@@ -874,14 +935,20 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
       splitParts = autoSplitModel(model);
     }
 
+    // 原始 GLTF 场景的几何体/材质已复制/拆分为新部件，释放原始场景以回收 GPU 资源
+    disposeSceneRecursively(model);
+
     if (splitParts.length === 0) {
       throw new Error("模型中未找到可渲染的网格");
     }
 
+    setModelLoading(true, "🔧 正在准备部件...");
+
     // ========== 烘焙世界矩阵到几何体（非前端 Quest 3 路径需要）==========
     if (!(isQ3 && !blenderManifest)) {
-      for (const part of splitParts) {
-        const mesh = part.mesh;
+      for (let i = 0; i < splitParts.length; i++) {
+        await yieldToMain();
+        const mesh = splitParts[i].mesh;
         mesh.updateMatrixWorld(true);
         mesh.geometry.applyMatrix4(mesh.matrixWorld);
         mesh.position.set(0, 0, 0);
@@ -889,24 +956,33 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
         mesh.scale.set(1, 1, 1);
         mesh.matrixAutoUpdate = true;
         mesh.matrix.identity();
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
+        mesh.castShadow = !lowPowerMode;
+        mesh.receiveShadow = !lowPowerMode;
       }
 
       // 计算模型中心，将几何体居中
       const modelBox = new Box3();
-      for (const part of splitParts) {
-        const partBox = new Box3().setFromObject(part.mesh);
+      for (let i = 0; i < splitParts.length; i++) {
+        await yieldToMain();
+        const partBox = new Box3().setFromObject(splitParts[i].mesh);
         modelBox.union(partBox);
       }
       const modelCenter = modelBox.getCenter(new Vector3());
-      for (const part of splitParts) {
-        part.mesh.geometry.translate(-modelCenter.x, -modelCenter.y, -modelCenter.z);
+      for (let i = 0; i < splitParts.length; i++) {
+        await yieldToMain();
+        splitParts[i].mesh.geometry.translate(-modelCenter.x, -modelCenter.y, -modelCenter.z);
       }
     }
 
     // ========== 创建部件数据 ==========
+    const splitPartMap = new Map(splitParts.map(part => [part.mesh, part]));
+    customModelParts.length = 0;
+    while (customModelGroup.children.length > 0) {
+      customModelGroup.remove(customModelGroup.children[0]);
+    }
+
     for (let i = 0; i < splitParts.length; i++) {
+      await yieldToMain();
       const mesh = splitParts[i].mesh;
 
       // 计算部件中心（相对于模型中心，即原点）
@@ -916,7 +992,7 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
       // 爆炸方向：从模型中心指向部件中心
       const explodePos = calculateExplodePos(partCenter, i, splitParts.length);
 
-      customModelParts.push({
+      const part = {
         mesh,
         homePos: new Vector3(0, 0, 0),
         explodePos,
@@ -925,7 +1001,8 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
         name: "", // 稍后分配
         partCenter: partCenter.clone(),
         stepIndex: 1,
-      });
+      };
+      customModelParts.push(part);
 
       customModelGroup.add(mesh);
     }
@@ -933,40 +1010,7 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
     // ========== 按距离中心排序（外层先拆）==========
     // 如果有 Blender 清单，按清单顺序排列；否则按距离排序
     if (blenderManifest && blenderManifest.parts) {
-      // 清单已按距离降序排列，直接使用清单顺序
-      const manifestOrder = blenderManifest.parts.map((p, idx) => ({
-        name: p.display_name || p.name,
-        idx,
-      }));
-      // 按 manifest 顺序重排 customModelParts（根据 partCenter 匹配）
-      const used = new Set();
-      const reordered = [];
-      for (const mp of manifestOrder) {
-        // 用 center 匹配
-        const targetCenter = blenderManifest.parts[mp.idx].center;
-        let bestIdx = -1,
-          bestDist = Infinity;
-        for (let i = 0; i < customModelParts.length; i++) {
-          if (used.has(i)) continue;
-          const d = customModelParts[i].partCenter.distanceTo(
-            new Vector3(targetCenter[0], targetCenter[1], targetCenter[2])
-          );
-          if (d < bestDist) {
-            bestDist = d;
-            bestIdx = i;
-          }
-        }
-        if (bestIdx >= 0) {
-          used.add(bestIdx);
-          reordered.push(customModelParts[bestIdx]);
-        }
-      }
-      // 补充未匹配的
-      for (let i = 0; i < customModelParts.length; i++) {
-        if (!used.has(i)) reordered.push(customModelParts[i]);
-      }
-      customModelParts.length = 0;
-      customModelParts.push(...reordered);
+      await sortPartsByManifestAsync(blenderManifest);
     } else {
       customModelParts.sort((a, b) => b.partCenter.length() - a.partCenter.length());
     }
@@ -978,14 +1022,17 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
 
     // 重新计算包围盒（已居中）
     const centeredBox = new Box3();
-    for (const part of customModelParts) {
-      centeredBox.union(new Box3().setFromObject(part.mesh));
+    for (let i = 0; i < partCount; i++) {
+      centeredBox.union(new Box3().setFromObject(customModelParts[i].mesh));
+      if (i % 40 === 0) await yieldToMain();
     }
 
     // ========== 命名 ==========
     if (isQ3 && blenderManifest && blenderManifest.parts) {
       // Quest 3 模型 + Blender 清单：使用 Blender 分配的名称
-      customModelParts.forEach((part, i) => {
+      for (let i = 0; i < partCount; i++) {
+        await yieldToMain();
+        const part = customModelParts[i];
         part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
         if (blenderManifest.parts[i]) {
           part.name =
@@ -995,19 +1042,23 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
         }
         part.mesh.userData = { name: part.name };
         part.mesh.name = part.name;
-      });
+      }
     } else if (isQ3) {
       // Quest 3 模型 + 前端拆解：splitModelToQuest3Regions 已分配名称
-      customModelParts.forEach((part, i) => {
+      for (let i = 0; i < partCount; i++) {
+        await yieldToMain();
+        const part = customModelParts[i];
         part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
-        const origName = splitParts.find(sp => sp.mesh === part.mesh)?.name;
+        const origName = splitPartMap.get(part.mesh)?.name;
         if (origName) part.name = origName;
         part.mesh.userData = { name: part.name };
         part.mesh.name = part.name;
-      });
+      }
     } else {
       // 非 Quest 3 模型：Blender 清单名称 → GLB 原始名称 → 位置生成名称
-      customModelParts.forEach((part, i) => {
+      for (let i = 0; i < partCount; i++) {
+        await yieldToMain();
+        const part = customModelParts[i];
         part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
         if (blenderManifest && blenderManifest.parts && blenderManifest.parts[i]) {
           part.name =
@@ -1015,7 +1066,7 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
             blenderManifest.parts[i].name ||
             `部件${i + 1}`;
         } else {
-          const origName = splitParts.find(sp => sp.mesh === part.mesh)?.name;
+          const origName = splitPartMap.get(part.mesh)?.name;
           if (origName && !origName.startsWith("部件")) {
             part.name = origName;
           } else {
@@ -1024,22 +1075,81 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
         }
         part.mesh.userData = { name: part.name };
         part.mesh.name = part.name;
-      });
+      }
     }
 
     // 统一收尾：隐藏默认模型、生成步骤、适配相机、回到合体
     finalizeCustomModelLoad(fileName, { adjustExplode: true });
-    showStatus(`✅ 成功加载：${fileName}\n自动拆分为 ${partCount} 个部件`, "success");
+
+    const elapsed = ((performance.now() - loadStart) / 1000).toFixed(1);
+    showStatus(`✅ 成功加载：${fileName}\n自动拆分为 ${partCount} 个部件（${elapsed}s）`, "success");
 
     console.log(`✅ 自定义模型加载完成：${partCount} 个部件（自动拆分，${groupCount} 个步骤组）`);
   } catch (err) {
     console.error("加载模型失败：", err);
     showStatus(`❌ 加载失败：${err.message}`, "error");
-    // 加载失败：恢复默认模型可见，并清除可能已部分添加的自定义模型，避免与主模型叠加
+    // 加载失败：尽量回滚到上一个可用状态，避免空白/混合显示
     clearCustomModelGroup();
-    questGroup.visible = true;
-    hasCustomModel = false;
+    if (previousHasCustomModel && previousCustomModelParts.length) {
+      customModelParts = previousCustomModelParts;
+      customModelGroup.visible = true;
+      questGroup.visible = false;
+      hasCustomModel = true;
+      stepGroups = previousStepGroups;
+      totalSteps = previousTotalSteps;
+      currentStep = previousCurrentStep;
+      displayedStep = previousDisplayedStep;
+      updateStepUI();
+      fitCameraToModel(customModelGroup, false);
+    } else {
+      questGroup.visible = true;
+      hasCustomModel = false;
+      stepGroups = defaultStepGroups;
+      totalSteps = stepGroups.length;
+      currentStep = 0;
+      displayedStep = 0;
+      updateStepUI();
+      fitCameraToModel(questGroup, false);
+    }
+  } finally {
+    isLoadingCustomModel = false;
+    setModelLoading(false);
   }
+}
+
+async function sortPartsByManifestAsync(blenderManifest) {
+  const manifestOrder = blenderManifest.parts.map((p, idx) => ({
+    name: p.display_name || p.name,
+    idx,
+  }));
+  const used = new Set();
+  const reordered = [];
+  for (const mp of manifestOrder) {
+    await yieldToMain();
+    const targetCenter = blenderManifest.parts[mp.idx].center;
+    let bestIdx = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < customModelParts.length; i++) {
+      if (used.has(i)) continue;
+      const d = customModelParts[i].partCenter.distanceTo(
+        new Vector3(targetCenter[0], targetCenter[1], targetCenter[2]),
+      );
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx >= 0) {
+      used.add(bestIdx);
+      reordered.push(customModelParts[bestIdx]);
+    }
+  }
+  for (let i = 0; i < customModelParts.length; i++) {
+    if (!used.has(i)) reordered.push(customModelParts[i]);
+    if (i % 40 === 0) await yieldToMain();
+  }
+  customModelParts.length = 0;
+  customModelParts.push(...reordered);
 }
 
 function updateCustomModelUI(partCount, fileName) {
@@ -1187,7 +1297,7 @@ function updateToolsList(step) {
   const tools = step.tools || [];
 
   if (tools.length === 0) {
-    toolsListEl.innerHTML = '<div class="tools-none">✅ 本步骤无需工具</div>';
+    toolsListEl.innerHTML = "<div class=\"tools-none\">✅ 本步骤无需工具</div>";
   } else {
     toolsListEl.innerHTML = tools.map(tool => `<div class="tool-item">${tool}</div>`).join("");
   }
@@ -1218,7 +1328,7 @@ parts.forEach(part => {
 
 console.log(
   "部件步骤分配：",
-  parts.map(p => `${p.mesh.userData.name}->步骤${p.stepIndex}`)
+  parts.map(p => `${p.mesh.userData.name}->步骤${p.stepIndex}`),
 );
 
 // ===== 步骤控制 UI =====
@@ -1433,8 +1543,6 @@ if (timelineResetBtn) {
 }
 
 // 移动端检测
-const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
 if (isMobile) {
   // 移动端优化
   document.body.classList.add("mobile-device");
@@ -1575,7 +1683,7 @@ if (generatedSelect && generatedLoadBtn) {
       /* 忽略：无生成库时不展示 */
     });
 
-  generatedLoadBtn.addEventListener("click", async () => {
+  generatedLoadBtn.addEventListener("click", async() => {
     const url = generatedSelect.value;
     if (!url) return;
     try {
@@ -1788,22 +1896,22 @@ function updateExplodedView(now) {
   if (!needsExplodeUpdate) return;
 
   // 整体炸开模式下，所有部件使用同一因子；否则按分步/鼠标因子
-  const globalFactor = explodeAllMode
-    ? explodeAnimFactor
-    : mouseControlEnabled
-      ? mouseFactor
-      : currentStep / totalSteps;
+  const globalFactor = explodeAllMode ?
+    explodeAnimFactor :
+    mouseControlEnabled ?
+      mouseFactor :
+      currentStep / totalSteps;
   axisMat.opacity = globalFactor * 0.5;
 
   // 统一的部件更新函数（避免重复代码）
   const updatePart = part => {
-    const partFactor = explodeAllMode
-      ? explodeAnimFactor
-      : smoothStep(
-          part.stepIndex - 1,
-          part.stepIndex,
-          mouseControlEnabled ? mouseFactor * totalSteps : currentStep
-        );
+    const partFactor = explodeAllMode ?
+      explodeAnimFactor :
+      smoothStep(
+        part.stepIndex - 1,
+        part.stepIndex,
+        mouseControlEnabled ? mouseFactor * totalSteps : currentStep,
+      );
 
     part.mesh.position.lerpVectors(part.homePos, part.explodePos, partFactor);
     part.mesh.rotation.x = MathUtils.lerp(part.homeRot.x, part.explodeRot.x, partFactor);
@@ -1865,6 +1973,34 @@ function showStatus(msg, type = "info") {
   uploadStatusEl.classList.remove("hidden");
 }
 
+const modelLoadingEl = document.getElementById("model-loading");
+const modelLoadingTextEl = document.getElementById("model-loading-text");
+const MODEL_LOADING_BTN_IDS = [
+  "upload-btn",
+  "clear-model-btn",
+  "prev-step",
+  "next-step",
+  "reset-step",
+  "style-toggle",
+  "explode-btn",
+  "explode-loop",
+  "timeline-play",
+  "timeline-reset",
+  "generated-load",
+  "img-to-3d-btn",
+  "open-config-btn",
+  "blender-launch",
+];
+
+function setModelLoading(loading, text = "正在准备模型...") {
+  if (modelLoadingEl) modelLoadingEl.classList.toggle("hidden", !loading);
+  if (modelLoadingTextEl) modelLoadingTextEl.textContent = text;
+  MODEL_LOADING_BTN_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = loading;
+  });
+}
+
 // 等待 DOM 完全加载后再初始化上传功能
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", setupUpload);
@@ -1911,7 +2047,7 @@ function setupUpload() {
           if (pct < 100) {
             showStatus(
               `📤 上传中... ${pct}% (${(e.loaded / 1024).toFixed(0)} / ${(e.total / 1024).toFixed(0)} KB)`,
-              "info"
+              "info",
             );
           } else {
             showStatus("🔧 Blender 正在拆解模型... (已上传，等待后端处理)", "info");
@@ -1929,7 +2065,7 @@ function setupUpload() {
           // 无 Content-Length 时（分块流式），仅显示已接收大小
           showStatus(
             `⏳ Blender 拆解中... 已接收 ${(e.loaded / 1024 / 1024).toFixed(1)} MB`,
-            "info"
+            "info",
           );
         }
       });
@@ -1956,7 +2092,7 @@ function setupUpload() {
             for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
             showStatus(
               `✅ Blender 拆解完成：${data.total_parts} 个部件 (${data.elapsed_seconds}s)`,
-              "success"
+              "success",
             );
             resolve({ arrayBuffer: bytes.buffer, manifest: data });
             return;
@@ -2132,7 +2268,7 @@ function setupUpload() {
 // 等待 DOM 完全加载后初始化 AI 绘画（面板已迁移到 src/panels/ai-paint-panel.js）
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () =>
-    setupAIPaint({ loadCustomModel, showStatus })
+    setupAIPaint({ loadCustomModel, showStatus }),
   );
 } else {
   setupAIPaint({ loadCustomModel, showStatus });
@@ -2208,7 +2344,7 @@ function updateStepDescAnimation() {
 
 // 在 updateStepUI 的最后调用动画
 const originalUpdateStepUI = updateStepUI;
-updateStepUI = function () {
+updateStepUI = function() {
   originalUpdateStepUI();
   updateStepDescAnimation();
 };
@@ -2259,7 +2395,7 @@ function updateARButton() {
 async function startAR() {
   if (!arSupported) {
     alert(
-      "您的设备不支持 AR 功能\n\n支持的设备：\n- Android Chrome\n- iOS Safari 15+\n\n请确保使用 HTTPS 访问。"
+      "您的设备不支持 AR 功能\n\n支持的设备：\n- Android Chrome\n- iOS Safari 15+\n\n请确保使用 HTTPS 访问。",
     );
     return;
   }
@@ -2416,7 +2552,7 @@ async function startAR() {
     alert(
       "启动 AR 失败：" +
         err.message +
-        "\n\n请确保：\n1. 使用 HTTPS\n2. 设备支持 AR\n3. 授予相机权限"
+        "\n\n请确保：\n1. 使用 HTTPS\n2. 设备支持 AR\n3. 授予相机权限",
     );
     onAREnd();
   }

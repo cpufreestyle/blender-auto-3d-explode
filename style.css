@@ -535,6 +535,20 @@ input[type="range"]::-moz-range-thumb {
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
 .error { color: #ff6b6b; max-width: 80%; text-align: center; white-space: pre-line; }
 
+/* ===== 模型加载遮罩 ===== */
+.model-loading {
+  position: absolute; inset: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  background: rgb(10 12 18 / 55%);
+  backdrop-filter: blur(2px);
+}
+.model-loading.hidden { display: none; }
+.model-loading-inner {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 14px 18px; border-radius: 12px;
+  background: var(--glass); border: 1px solid var(--glass-border);
+}
+
 /* ===== 颜色色板 ===== */
 .ai-paint-color-swatches { display: flex; gap: 3px; margin-top: 4px; flex-wrap: wrap; }
 .ai-paint-color-swatch { width: 20px; height: 20px; border-radius: 5px; border: 2px solid rgb(255 255 255 / 15%); }
