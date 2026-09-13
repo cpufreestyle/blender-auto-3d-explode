@@ -1,0 +1,15 @@
+{
+  "total_parts": 1,
+  "parts": [
+    {
+      "name": "ImageRelief",
+      "display_name": "ImageRelief",
+      "type": "relief",
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ]
+}

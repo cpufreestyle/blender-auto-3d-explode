@@ -123,3 +123,13 @@ docs/REAL_MODEL_INTEGRATION.md
 
 # 第三方仓库 (TripoSR 等，含 .venv，体积巨大)
 external/
+
+# ─── 同步仓库时清理：临时测试产物（保留本地，不进仓库） ──────────────
+*.err
+*.out
+prompt.json
+e2e-headers*.txt
+e2e-prompt.json
+local-test-*.txt
+rsp-headers.txt
+tripo-e2e-*.mjs

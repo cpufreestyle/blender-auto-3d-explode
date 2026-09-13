@@ -39,9 +39,48 @@ import { log } from "./src/logger.js";
 import path from "path";
 import os from "os";
 import { fileURLToPath } from "url";
+import { ProxyAgent, setGlobalDispatcher } from "undici";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// ── 零配置代理自动探测 ──────────────────────────────
+// 让 server 开箱即用：若已设置 HTTP(S)_PROXY 则直接用；否则探测本机常见代理端口
+// （Clash 7897/7890、1080、8080），命中即用 undici ProxyAgent 接管全局 fetch。
+// 这样外网 API（TokenDance / Tripo / Meshy 等）无需再手动 --require proxy-bootstrap.cjs。
+async function detectProxy() {
+  const envProxy =
+    process.env.HTTPS_PROXY || process.env.HTTP_PROXY ||
+    process.env.https_proxy || process.env.http_proxy;
+  if (envProxy) {
+    try {
+      setGlobalDispatcher(new ProxyAgent({ uri: envProxy, connect: { rejectUnauthorized: false } }));
+      console.log(`  🌐 使用环境变量代理: ${envProxy}`);
+      return;
+    } catch (e) {
+      console.warn(`  ⚠️ 环境变量代理无效，忽略: ${e.message}`);
+    }
+  }
+  const candidates = ["127.0.0.1:7897", "127.0.0.1:7890", "127.0.0.1:1080", "127.0.0.1:8080"];
+  for (const c of candidates) {
+    const [host, port] = c.split(":");
+    const reachable = await new Promise((resolve) => {
+      const sock = net.createConnection({ host, port: Number(port), timeout: 400 });
+      sock.once("connect", () => { try { sock.destroy(); } catch {} resolve(true); });
+      sock.once("error", () => { try { sock.destroy(); } catch {} resolve(false); });
+      sock.once("timeout", () => { try { sock.destroy(); } catch {} resolve(false); });
+    });
+    if (reachable) {
+      try {
+        setGlobalDispatcher(new ProxyAgent({ uri: `http://${c}`, connect: { rejectUnauthorized: false } }));
+        console.log(`  🌐 已自动启用本机代理: http://${c}`);
+        return;
+      } catch { }
+    }
+  }
+  console.log("  ℹ️ 未检测到本机代理；外网 API（TokenDance/Tripo 等）如需访问请启动代理或设置 HTTP_PROXY");
+}
+await detectProxy();
 
 // 统一日志：将 console.* 重定向到结构化 logger（保留原有消息内容，追加时间戳/级别）。
 // 放在此处（findBlender 调用之前），使全部后续 console.* 均获得结构化输出。
@@ -1079,6 +1118,34 @@ try {
 } catch (err) {
   console.log('  ⚠️  无法加载 AI 配置:', err.message);
 }
+
+// ── 首次使用：自动探测本地 LLM 作为默认 provider ──
+// 若当前 provider 可用（本地 ollama/lmstudio，或已配置 Key 的云端）则不动；
+// 否则探测 ollama/lmstudio，命中即用，避免「首次打开就要求填 API Key」。
+async function autoDetectProvider() {
+  const keyed = (p) => !!(AI_CONFIG[p] && (AI_CONFIG[p].key || AI_CONFIG[p].apiKey));
+  const cur = AI_CONFIG.provider;
+  const curUsable = cur === "ollama" || cur === "lmstudio" || keyed(cur);
+  if (curUsable) return;
+  const probes = [
+    { name: "ollama", url: (AI_CONFIG.ollama?.url || "http://localhost:11434") + "/api/tags" },
+    { name: "lmstudio", url: (AI_CONFIG.lmstudio?.url || "http://localhost:1234/v1/models") },
+  ];
+  for (const p of probes) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 1500);
+      const r = await fetch(p.url, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (r.ok) {
+        AI_CONFIG.provider = p.name;
+        console.log(`  🤖 未配置可用 provider，已自动选用本地 ${p.name}`);
+        return;
+      }
+    } catch { }
+  }
+}
+await autoDetectProvider();
 
 /**
  * 获取 AI 配置

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GLB 预览</title>
+<style>
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #0f1115; color: #e6e8ee;
+    font-family: system-ui, -apple-system, "Microsoft YaHei", sans-serif;
+  }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+  .hud {
+    position: fixed; left: 16px; top: 16px; padding: 10px 14px;
+    border-radius: 10px; background: rgba(20, 24, 32, .72);
+    border: 1px solid rgba(255, 255, 255, .08);
+    font-size: 13px; line-height: 1.7; backdrop-filter: blur(6px);
+  }
+  .hud b { color: #7cc4ff; }
+  .hud .tip { opacity: .55; font-size: 12px; }
+  .err {
+    position: fixed; inset: 0; display: none; place-items: center;
+    padding: 24px; text-align: center; color: #ff9a9a; font-size: 14px;
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="hud">
+  <div>模型：<b id="name">—</b></div>
+  <div>部件：<b id="parts">载入中…</b></div>
+  <div class="tip">拖拽旋转 · 滚轮缩放 · 右键平移</div>
+</div>
+<div class="err" id="err"></div>
+
+<script type="module">
+import * as THREE from './vendor/three.module.js';
+import { OrbitControls } from './vendor/OrbitControls.js';
+import { GLTFLoader } from './vendor/GLTFLoader.js';
+
+const MODEL = new URLSearchParams(location.search).get('model') || 'models/generated/lego-car.glb';
+document.getElementById('name').textContent = MODEL.split('/').pop();
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+if ('SRGBColorSpace' in THREE) renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.getElementById('app').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0f1115);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.01, 2000);
+camera.position.set(3, 2.2, 4);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 1.2;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.1));
+const dirA = new THREE.DirectionalLight(0xffffff, 1.6); dirA.position.set(4, 6, 3); scene.add(dirA);
+const dirB = new THREE.DirectionalLight(0x88aaff, 0.5); dirB.position.set(-4, 2, -3); scene.add(dirB);
+scene.add(new THREE.GridHelper(20, 20, 0x2a3340, 0x1a2029));
+
+new GLTFLoader().load(
+  MODEL,
+  (gltf) => {
+    const obj = gltf.scene;
+
+    // 居中 + 归一化尺寸，保证任何模型都能完整入镜
+    const box = new THREE.Box3().setFromObject(obj);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    obj.position.sub(center);
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    obj.scale.setScalar(2 / maxDim);
+    scene.add(obj);
+
+    let meshes = 0;
+    const names = new Set();
+    obj.traverse((o) => {
+      if (o.isMesh) meshes++;
+      const key = o.userData?.ai_paint_part || o.name;
+      if (key) names.add(key);
+    });
+    document.getElementById('parts').textContent = `${meshes} 个网格 / ${names.size} 个命名部件`;
+
+    controls.target.set(0, 0, 0);
+    controls.update();
+  },
+  undefined,
+  (e) => {
+    const el = document.getElementById('err');
+    el.style.display = 'grid';
+    el.textContent = `模型载入失败：${e?.message || e}（路径：${MODEL}）`;
+  }
+);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+(function tick() {
+  requestAnimationFrame(tick);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+</script>
+</body>
+</html>
