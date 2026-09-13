@@ -94,6 +94,13 @@ gridHelper.material.opacity = 0.3;
 gridHelper.material.transparent = true;
 scene.add(gridHelper);
 
+// 移动端/一体机（Quest 3 等）GPU 为填充率瓶颈：低功耗模式判定
+// ⚠️ 必须在下方粒子的 lowPowerMode 使用之前声明，否则触发 TDZ 报错
+// "Cannot access 'lowPowerMode' before initialization"
+const isTouchDevice = navigator.maxTouchPoints > 0;
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const lowPowerMode = isTouchDevice || isMobile;
+
 // 添加环境粒子（增强空间感）
 const particlesGeometry = new BufferGeometry();
 const particlesCount = lowPowerMode ? 150 : 500;
@@ -122,10 +129,7 @@ const renderer = new WebGLRenderer({
   powerPreference: "high-performance",
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
-// 移动端/一体机（Quest 3 等）GPU 为填充率瓶颈，限制 DPR 避免过度采样；桌面维持 2
-const isTouchDevice = navigator.maxTouchPoints > 0;
-const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-const lowPowerMode = isTouchDevice || isMobile;
+// 限制 DPR：移动端/一体机避免过度采样（防填充率瓶颈）；桌面维持 2
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouchDevice ? 1.5 : 2));
 renderer.shadowMap.enabled = !lowPowerMode;
 renderer.shadowMap.type = lowPowerMode ? BasicShadowMap : PCFSoftShadowMap;
