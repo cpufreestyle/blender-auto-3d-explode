@@ -173,6 +173,8 @@ export function findBlenderCandidates(platform, homeDir, env = {}) {
     candidates.push(
       pathJoin(programFiles, "Blender Foundation", "Blender", "blender.exe"),
       pathJoin(programFilesX86, "Blender Foundation", "Blender", "blender.exe"),
+      // 本机实际安装路径（官方安装版，装在 D 盘）：Blender 5.2 LTS
+      "D:/Program Files/Blender Foundation/Blender 5.2/blender.exe",
       pathJoin(homeDir, "scoop", "apps", "blender", "current", "blender.exe"),
       "C:/ProgramData/chocolatey/bin/blender.exe",
     );
