@@ -34,12 +34,10 @@ Get-CimInstance Win32_Process | Where-Object {
 } | ForEach-Object { Write-Host "Stopping old server PID $($_.ProcessId)"; Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 2
 
-# 3) Restart with BLENDER_PATH + outbound proxy for cloud 3D APIs (Tripo/Meshy/Hyper3D)
+# 3) Restart with BLENDER_PATH。外网代理由 server.js 启动时自动探测
+#    （HTTP(S)_PROXY 或本机 7897/7890/1080/8080），无需再注入 --require proxy-bootstrap.cjs。
 $env:BLENDER_PATH = $BlenderPath
-$env:HTTPS_PROXY = "http://127.0.0.1:7897"
-$env:HTTP_PROXY = "http://127.0.0.1:7897"
-$nodeOpts = "--require $root\proxy-bootstrap.cjs"
-Start-Process -FilePath "node" -ArgumentList $nodeOpts, "server.js" -WorkingDirectory $root `
+Start-Process -FilePath "node" -ArgumentList "server.js" -WorkingDirectory $root `
   -NoNewWindow -RedirectStandardOutput "server.log" -RedirectStandardError "server.err"
 Start-Sleep -Seconds 4
 

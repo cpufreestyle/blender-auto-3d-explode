@@ -118,6 +118,8 @@ const particlesMaterial = new PointsMaterial({
   opacity: 0.4,
 });
 const particlesMesh = new Points(particlesGeometry, particlesMaterial);
+// 低功耗（移动端/一体机）：粒子纯装饰，直接不画，省一次 draw call 与每帧矩阵更新
+particlesMesh.visible = !lowPowerMode;
 scene.add(particlesMesh);
 
 const camera = new PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
@@ -224,7 +226,8 @@ scene.add(ambientLight);
 const mainLight = new DirectionalLight(0xffffff, lowPowerMode ? 1.2 : 1.5);
 mainLight.position.set(6, 10, 7);
 mainLight.castShadow = true;
-mainLight.shadow.mapSize.set(lowPowerMode ? 1024 : 2048, lowPowerMode ? 1024 : 2048);
+// 阴影贴图：桌面 1024（2048 观感提升有限、开销却是 4 倍），低功耗 512
+mainLight.shadow.mapSize.set(lowPowerMode ? 512 : 1024, lowPowerMode ? 512 : 1024);
 mainLight.shadow.bias = -0.0001;
 mainLight.shadow.camera.near = 0.5;
 mainLight.shadow.camera.far = 30;
@@ -636,6 +639,16 @@ function finalizeCustomModelLoad(fileName, opts = {}) {
   isExploded = false;
   explodeBtn.classList.remove("exploded");
   explodeBtn.textContent = "💥 爆炸";
+
+  // 「少点击」：上传/AI 生成完成后自动播一次爆炸，用户无需再点「💥爆炸视图」
+  // 就能直接看到拆解结果（若用户已开启循环播放则不打扰）。
+  if (!explodeLoop) {
+    clearTimeout(autoExplodeTimer);
+    autoExplodeTimer = setTimeout(() => {
+      autoExplodeTimer = null;
+      if (!isExploded && !explodeLoop) toggleExplode();
+    }, 500);
+  }
 }
 
 // ===== 模型自动拆分系统 =====
@@ -725,7 +738,7 @@ let assemblySequenceOrder = null;
  */
 async function fetchAssemblySequenceOrder(method = "distance") {
   try {
-    const resp = await fetch(`/api/assembly/sequence?method=${encodeURIComponent(method)}`);
+    const resp = await fetch(`${API_BASE}/api/assembly/sequence?method=${encodeURIComponent(method)}`);
     if (!resp.ok) return null;
     const data = await resp.json();
     if (data && data.success && Array.isArray(data.order) && data.order.length) {
@@ -1580,6 +1593,8 @@ resetBtn.addEventListener("click", () => {
 // 爆炸按钮：在完全合体和完全爆炸之间切换
 const explodeBtn = document.getElementById("explode-btn");
 let isExploded = false;
+// 「少点击」优化：拆解/生成完成后自动播一次爆炸动画的定时器
+let autoExplodeTimer = null;
 
 // 装配分析面板按钮
 const assemblyAnalyzeBtn = document.getElementById("assembly-analyze-btn");
@@ -1671,7 +1686,7 @@ if (explodeLoopSpeed) {
 const generatedSelect = document.getElementById("generated-select");
 const generatedLoadBtn = document.getElementById("generated-load");
 if (generatedSelect && generatedLoadBtn) {
-  fetch("/api/generated")
+  fetch(`${API_BASE}/api/generated`)
     .then(r => r.json())
     .then(data => {
       if (!data.success || !data.files || !data.files.length) return;
@@ -1947,6 +1962,8 @@ window.addEventListener("resize", () => {
 // ===== 渲染循环 =====
 function animate(now) {
   requestAnimationFrame(animate);
+  // 后台标签页不做任何计算与渲染（浏览器已节流 rAF，这里再兜一层）
+  if (document.hidden) return;
   updateExplodedView(now);
 
   // 粒子动画（缓慢旋转）— 仅在可见时更新

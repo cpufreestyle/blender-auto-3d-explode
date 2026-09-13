@@ -57,12 +57,28 @@ async function fetchBlenderHealth() {
 
 function updateBlenderUI(health) {
   if (!blenderStatusEl) return;
+  const setBannerText = (text) => {
+    const t = blenderBanner ? blenderBanner.querySelector(".bb-text") : null;
+    if (t && text) t.textContent = text;
+  };
   if (!health || health.status !== "ok") {
     blenderStatusEl.className = "blender-chip " + (health ? "error" : "unknown");
     blenderStatusEl.textContent = health ? "❌ Blender 不可用" : "⚠️ 后端离线";
     if (blenderBanner) {
-      // 仅当后端可达但 Blender 不可用时提示
-      blenderBanner.classList.toggle("hidden", !health);
+      if (!health) {
+        // 后端不可达：多半是没启动后端（npx serve 只供前端，不含 /api）。
+        // 必须提示用户，否则页面看起来"能用"但 AI/拆解全部静默失败。
+        setBannerText(
+          "未连接后端服务：请运行 node server.js（或双击 start.bat）。页面需要 3001 端口的后端才能使用 AI 与拆解。",
+        );
+        // 「启动 Blender」本身也要走后端，离线时隐藏，避免点了没反应
+        if (blenderLaunchBtn) blenderLaunchBtn.classList.add("hidden");
+        blenderBanner.classList.remove("hidden");
+      } else {
+        setBannerText("未检测到 Blender，AI 绘画与高质量拆解将降级为前端处理。");
+        if (blenderLaunchBtn) blenderLaunchBtn.classList.remove("hidden");
+        blenderBanner.classList.remove("hidden");
+      }
     }
   } else {
     blenderStatusEl.className = "blender-chip ok";

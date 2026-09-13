@@ -31,11 +31,13 @@
 
 ### macOS
 
-双击 `启动服务.command`
+双击 `start.command`
 
 ### Windows
 
 双击 `start.bat`
+
+> 想连 Blender MCP（装配分析 / 生成并发送到 Blender）时，用 `start-blender-all.ps1` 可一并拉起 Blender 常驻宿主。
 
 ### 命令行
 

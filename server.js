@@ -38,6 +38,7 @@ import { DEFAULT_MODELS } from "./src/provider-models.js";
 import { log } from "./src/logger.js";
 import path from "path";
 import os from "os";
+import zlib from "zlib";
 import { fileURLToPath } from "url";
 import { ProxyAgent, setGlobalDispatcher } from "undici";
 
@@ -127,7 +128,13 @@ function findBlender() {
       /* ignore */
     }
   }
-  console.log("  ⚠️  未找到 Blender 可执行文件，将使用 PATH 中的 blender");
+  console.log("  ⚠️  未找到 Blender 可执行文件，将尝试使用 PATH 中的 blender");
+  console.log("     💡 若后续报错「spawn blender ENOENT」，说明本机 Blender 不在 PATH，任选其一：");
+  console.log("        1) 显式指定路径后再启动：");
+  console.log('           set BLENDER_PATH=D:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe');
+  console.log("           node server.js");
+  console.log("        2) 把 Blender 安装目录加入系统 PATH；");
+  console.log("        3) 直接运行 start.bat 或 start-blender-all.ps1（会自动探测本机 Blender）。");
   return "blender";
 }
 
@@ -1511,8 +1518,11 @@ function launchBlenderApp() {
     cmd = "open";
     args = ["-a", "Blender"];
   } else if (platform === "win32") {
+    // 优先使用已探测到的 BLENDER_PATH（可能是非 PATH 的官方安装版，如 D 盘），
+    // 否则回退到 PATH 中的 blender。避免装了 Blender 却因不在 PATH 而启动失败。
+    const exe = BLENDER_PATH && BLENDER_PATH !== "blender" ? BLENDER_PATH : "blender";
     cmd = "cmd";
-    args = ["/c", "start", "", "blender"];
+    args = ["/c", "start", "", exe];
   } else {
     // Linux：后台启动 blender GUI
     cmd = "blender";
@@ -1989,7 +1999,23 @@ const MIME_TYPES = {
   ".woff2": "font/woff2",
   ".ttf": "font/ttf",
   ".wasm": "application/wasm",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+  ".webmanifest": "application/manifest+json",
 };
+
+/**
+ * 静态资源缓存策略：
+ *   · index.html  → no-cache（每次协商，保证入口最新）
+ *   · 带 ?v= 版本号 → 强缓存 1 年 + immutable（内容变了就换版本号）
+ *   · 其它        → 1 小时缓存，过期后协商（ETag/Last-Modified 兜底）
+ */
+function staticCacheControl(url, pathname) {
+  if (pathname === "/index.html" || pathname === "/") return "no-cache";
+  if (url && /[?&]v=/.test(url.search || "")) return "public, max-age=31536000, immutable";
+  return "public, max-age=3600, must-revalidate";
+}
 
 function serveStatic(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
@@ -2013,25 +2039,88 @@ function serveStatic(req, res, url) {
     return;
   }
 
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
+  fs.stat(filePath, (statErr, stat) => {
+    if (statErr || !stat.isFile()) {
       sendJSON(res, 404, { error: "Not Found", path: pathname });
       return;
     }
 
     const ext = path.extname(filePath).toLowerCase();
     const contentType = MIME_TYPES[ext] || "application/octet-stream";
+    // 用 size+mtime 生成弱 ETag：内容一变 ETag 就变，可安全用于协商缓存
+    const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+    const lastModified = stat.mtime.toUTCString();
+    const cacheControl = staticCacheControl(url, pathname);
 
-    res.writeHead(200, {
+    // ── 协商缓存：命中则直接 304（省掉整个响应体）──
+    const inm = req.headers["if-none-match"];
+    const ims = req.headers["if-modified-since"];
+    const etagHit =
+      !!inm && inm.split(",").some((t) => t.trim() === etag || t.trim() === "*");
+    const imsHit =
+      !inm && ims && new Date(ims).getTime() >= Math.floor(stat.mtimeMs / 1000) * 1000;
+    if (etagHit || imsHit) {
+      res.writeHead(304, {
+        ETag: etag,
+        "Last-Modified": lastModified,
+        "Cache-Control": cacheControl,
+      });
+      res.end();
+      return;
+    }
+
+    const headers = {
       "Content-Type": contentType,
-      "Cache-Control": "no-cache",
-      "Content-Length": data.length,
-    });
-    res.end(data);
+      "Cache-Control": cacheControl,
+      ETag: etag,
+      "Last-Modified": lastModified,
+    };
+
+    // ── 文本类资源 gzip（体积通常省 60~75%）──
+    const isCompressible = /^(text\/|application\/(json|javascript|wasm)|image\/svg)/.test(
+      contentType,
+    );
+    const acceptsGzip = /\bgzip\b/.test(req.headers["accept-encoding"] || "");
+    if (isCompressible && acceptsGzip && stat.size > 1024) {
+      headers["Content-Encoding"] = "gzip";
+      headers["Vary"] = "Accept-Encoding";
+      res.writeHead(200, headers);
+      const src = fs.createReadStream(filePath);
+      const gz = zlib.createGzip();
+      src.on("error", () => { try { res.destroy(); } catch { /* ignore */ } });
+      gz.on("error", () => { try { res.destroy(); } catch { /* ignore */ } });
+      src.pipe(gz).pipe(res);
+      return;
+    }
+
+    // ── 直出：流式读取，避免整文件读入内存（大 GLB 也适用）──
+    headers["Content-Length"] = stat.size;
+    res.writeHead(200, headers);
+    const stream = fs.createReadStream(filePath);
+    stream.on("error", () => { try { res.destroy(); } catch { /* ignore */ } });
+    stream.pipe(res);
   });
 }
 
 // ── 启动 ──────────────────────────────────────────────
+
+// 端口/权限类错误的可操作中文提示（否则会落到进程级 uncaughtException 打英文堆栈）
+server.on("error", (err) => {
+  if (err && err.code === "EADDRINUSE") {
+    console.error(`\n  ❌ 端口 ${PORT} 已被占用（可能还有一个 node server.js 在跑）。`);
+    console.error("     💡 解决办法（任选其一）：");
+    console.error(`        1) 关掉占用进程：netstat -ano | findstr :${PORT}  →  taskkill /PID <PID> /F`);
+    console.error("        2) 换个端口启动：set PORT=3002 && node server.js");
+    console.error("");
+    process.exit(1);
+  }
+  if (err && err.code === "EACCES") {
+    console.error(`\n  ❌ 没有权限监听端口 ${PORT}（该端口被系统保留或受保护）。`);
+    console.error("     💡 换一个大于 1024 的端口：set PORT=3002 && node server.js\n");
+    process.exit(1);
+  }
+  log.error("服务器错误:", err);
+});
 
 server.listen(PORT, () => {
   console.log("═".repeat(50));

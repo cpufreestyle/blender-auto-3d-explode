@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="api-base" content="http://localhost:3001" />
   <title>Blender 3D 拆解教学</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=3.2.10" />
   <!-- dev 模式（npx serve .）裸导入解析：源码 import "three"，映射到本地 vendor 副本。
        webpack 构建产物自包含，不依赖此映射；修改时需与 package.json 的 three 版本保持一致。 -->
   <script type="importmap">
@@ -88,7 +88,7 @@
     </div>
 
     <!-- ===== AI 绘画（可折叠）===== -->
-    <details class="panel collapsible" open>
+    <details class="panel collapsible">
       <summary class="panel-header">
         <span>🎨 AI 绘画</span>
         <span class="chevron">▾</span>
@@ -98,11 +98,6 @@
           <input type="text" id="ai-paint-prompt" class="ai-input" placeholder="红色球体、机器人、超人..." />
           <button id="ai-paint-btn" class="btn btn-primary">✨生成</button>
           <button id="text-to-3d-btn" class="btn btn-secondary" title="文生3D：有 Hyper3D Key 走云端，否则回退本地开源 Hunyuan3D-2">🌐文生3D</button>
-          <select id="text-to-3d-mode" class="ai-select" title="文生3D 提供方">
-            <option value="auto" selected>🌐 自动（有Key云端/否则本地）</option>
-            <option value="cloud">☁️ 云端 Hyper3D（需Key）</option>
-            <option value="local">🖥️ 本地 Hunyuan3D-2（免费·需GPU）</option>
-          </select>
         </div>
         <div class="ai-upload-row">
           <div id="ai-paint-dropzone" class="mini-dropzone">
@@ -117,39 +112,51 @@
         </div>
         <div class="ai-to3d-row">
           <button id="img-to-3d-btn" class="btn btn-secondary">🧊 图片转3D</button>
-          <select id="img-to-3d-deploy" class="ai-select" title="图片转3D 提供商">
-            <option value="local" selected>🖥️ 本地可拆解</option>
-            <option value="replicate">☁️ Replicate 云端（Hunyuan3D-2）</option>
-            <option value="meshy">🌐 Meshy AI</option>
-            <option value="tripo">🌐 Tripo（Triple 3D）</option>
-            <option value="hyper3d">🌐 Hyper3D（Rodin）</option>
-          </select>
-          <select id="img-to-3d-mode-local" class="ai-select" title="重建模式">
-            <option value="relief" selected>浮雕（平滑）</option>
-            <option value="voxel">像素方块</option>
-          </select>
-          <select id="img-to-3d-tiles-local" class="ai-select" title="拆解块数（越大越易拆解）">
-            <option value="1">单网格</option>
-            <option value="2">2×2 块</option>
-            <option value="3" selected>3×3 块（推荐·可拆解）</option>
-            <option value="4">4×4 块</option>
-          </select>
-          <label class="ai-to3d-check"><input type="checkbox" id="img-to-3d-real" /> 真重建(TripoSR)</label>
-          <label class="ai-to3d-check"><input type="checkbox" id="img-to-3d-remove-bg" checked /> 去背景</label>
-          <label class="ai-to3d-check"><input type="checkbox" id="img-to-3d-bake" /> 烘焙纹理</label>
-          <select id="img-to-3d-model" class="ai-select hidden" title="云端模型（高保真真重建）">
-            <option value="tencent/hunyuan3d-2">Hunyuan3D-2（高保真）</option>
-            <option value="camenduru/triposr">TripoSR（快速）</option>
-            <option value="__custom__">自定义…</option>
-          </select>
-          <input id="img-to-3d-model-custom" class="ai-input ai-input-sm hidden" placeholder="owner/name" />
           <span class="ai-to3d-hint">需先上传参考图</span>
         </div>
-        <div class="ai-to3d-row">
-          <button id="gen-to-blender-btn" class="btn btn-secondary" title="云端生成后自动导入 Blender 实时场景（需 Blender 已连接 MCP）">📤 生成并发送到 Blender</button>
-          <button id="blender-readback-btn" class="btn btn-secondary" title="从 Blender 读回最近导入的对象并在网页显示">📥 从 Blender 读回</button>
-          <span class="ai-to3d-hint">全自动：生成 → 导入 Blender → 读回</span>
-        </div>
+        <details class="adv-settings">
+          <summary>⚙️ 高级设置（提供方 / 云端模型 / Blender 联动）</summary>
+          <div class="adv-body">
+            <div class="ai-to3d-row">
+              <select id="text-to-3d-mode" class="ai-select" title="文生3D 提供方">
+                <option value="auto" selected>🌐 自动（有Key云端/否则本地）</option>
+                <option value="cloud">☁️ 云端 Hyper3D（需Key）</option>
+                <option value="local">🖥️ 本地 Hunyuan3D-2（免费·需GPU）</option>
+              </select>
+              <select id="img-to-3d-deploy" class="ai-select" title="图片转3D 提供商">
+                <option value="local" selected>🖥️ 本地可拆解</option>
+                <option value="replicate">☁️ Replicate 云端（Hunyuan3D-2）</option>
+                <option value="meshy">🌐 Meshy AI</option>
+                <option value="tripo">🌐 Tripo（Triple 3D）</option>
+                <option value="hyper3d">🌐 Hyper3D（Rodin）</option>
+              </select>
+              <select id="img-to-3d-mode-local" class="ai-select" title="重建模式">
+                <option value="relief" selected>浮雕（平滑）</option>
+                <option value="voxel">像素方块</option>
+              </select>
+              <select id="img-to-3d-tiles-local" class="ai-select" title="拆解块数（越大越易拆解）">
+                <option value="1">单网格</option>
+                <option value="2">2×2 块</option>
+                <option value="3" selected>3×3 块（推荐·可拆解）</option>
+                <option value="4">4×4 块</option>
+              </select>
+              <label class="ai-to3d-check"><input type="checkbox" id="img-to-3d-real" /> 真重建(TripoSR)</label>
+              <label class="ai-to3d-check"><input type="checkbox" id="img-to-3d-remove-bg" checked /> 去背景</label>
+              <label class="ai-to3d-check"><input type="checkbox" id="img-to-3d-bake" /> 烘焙纹理</label>
+              <select id="img-to-3d-model" class="ai-select hidden" title="云端模型（高保真真重建）">
+                <option value="tencent/hunyuan3d-2">Hunyuan3D-2（高保真）</option>
+                <option value="camenduru/triposr">TripoSR（快速）</option>
+                <option value="__custom__">自定义…</option>
+              </select>
+              <input id="img-to-3d-model-custom" class="ai-input ai-input-sm hidden" placeholder="owner/name" />
+            </div>
+            <div class="ai-to3d-row">
+              <button id="gen-to-blender-btn" class="btn btn-secondary" title="云端生成后自动导入 Blender 实时场景（需 Blender 已连接 MCP）">📤 生成并发送到 Blender</button>
+              <button id="blender-readback-btn" class="btn btn-secondary" title="从 Blender 读回最近导入的对象并在网页显示">📥 从 Blender 读回</button>
+              <span class="ai-to3d-hint">全自动：生成 → 导入 Blender → 读回</span>
+            </div>
+          </div>
+        </details>
         <div class="ai-presets">
           <button class="chip" data-prompt="红色球体">🔴球体</button>
           <button class="chip" data-prompt="篮球">🏀篮球</button>
@@ -333,10 +340,11 @@
         <button id="fcm-close" class="fcm-close" title="稍后再说">✕</button>
       </div>
       <p class="fcm-sub">
-        首次使用需要选择一个 AI 模型提供方（OpenAI / Anthropic / 本地 Ollama 等）并填入凭证，
-        AI 绘画与图片转 3D 功能才能正常工作。配置页面已嵌入下方，填好点「保存配置」即可。
+        <b>这一步是可选的</b>：本地「图片转 3D（可拆解）」只要有 Blender 就能用，不需要任何 AI Key。<br />
+        只有想用「AI 绘画 / 文生 3D」或云端重建时，才需要选一个提供方（OpenAI / Anthropic / 本地 Ollama 等）
+        并填入凭证。配置页面在下方，填好点「保存配置」；也可以点「稍后再说」直接开始使用。
       </p>
-      <iframe id="fcm-iframe" src="ai-config.html" title="模型配置"></iframe>
+      <iframe id="fcm-iframe" data-src="ai-config.html" title="模型配置"></iframe>
       <div class="fcm-footer">
         <button id="fcm-later" class="btn">稍后再说</button>
         <button id="fcm-done" class="btn btn-primary" disabled>已完成配置 ✓</button>
@@ -344,7 +352,7 @@
     </div>
   </div>
 
-  <script type="module" src="main.js?v=3.2.5"></script>
+  <script type="module" src="main.js?v=3.2.10"></script>
 
   <!-- 首次使用：检测是否已配置，未配置则弹出模型配置 -->
   <script>
@@ -353,7 +361,14 @@
       const API_BASE = document.querySelector('meta[name="api-base"]')?.content || "http://localhost:3001";
       const overlay = document.getElementById('first-config-modal');
       if (!overlay) return;
-      const show = () => overlay.classList.remove('hidden');
+      const iframe = document.getElementById('fcm-iframe');
+      // 懒加载：只有真的要弹窗时才请求配置页（否则每次打开都白下 ~49KB）
+      const show = () => {
+        if (iframe && !iframe.getAttribute('src')) {
+          iframe.setAttribute('src', iframe.dataset.src || 'ai-config.html');
+        }
+        overlay.classList.remove('hidden');
+      };
       const hide = () => overlay.classList.add('hidden');
       const dismiss = () => {
         try { sessionStorage.setItem('configPromptDismissed', '1'); } catch (e) {}

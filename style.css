@@ -520,6 +520,25 @@ input[type="range"]::-moz-range-thumb {
   pointer-events: none; z-index: 5;
 }
 .loading { color: var(--text-dim); background: transparent; border: none; padding: 0; }
+
+/* ===== AI 面板「高级设置」折叠 ===== */
+.adv-settings {
+  margin-top: 8px;
+  border-top: 1px dashed rgb(255 255 255 / 12%);
+  padding-top: 6px;
+}
+.adv-settings > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #9fa1ac;
+  user-select: none;
+  list-style: none;
+  padding: 2px 0;
+}
+.adv-settings > summary::-webkit-details-marker { display: none; }
+.adv-settings > summary:hover { color: #e8e8ee; }
+.adv-settings[open] > summary { margin-bottom: 6px; }
+.adv-settings .adv-body { display: flex; flex-direction: column; gap: 6px; }
 .loading-spinner { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); }
 
 .spinner-ring {
