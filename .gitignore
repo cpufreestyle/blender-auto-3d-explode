@@ -133,3 +133,9 @@ e2e-prompt.json
 local-test-*.txt
 rsp-headers.txt
 tripo-e2e-*.mjs
+
+# ─── 本地大文件与敏感文档（严禁入库） ──────────────────────────────
+# Blender 安装包（388MB）
+blender.zip
+# 交接文档：含本机路径与历史令牌信息
+HANDOFF.md

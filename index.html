@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="api-base" content="http://localhost:3001" />
   <title>Blender 3D 拆解教学</title>
-  <link rel="stylesheet" href="style.css?v=3.2.10" />
+  <link rel="stylesheet" href="style.css?v=3.2.11" />
   <!-- dev 模式（npx serve .）裸导入解析：源码 import "three"，映射到本地 vendor 副本。
        webpack 构建产物自包含，不依赖此映射；修改时需与 package.json 的 three 版本保持一致。 -->
   <script type="importmap">
@@ -265,6 +265,8 @@
         <input id="auto-rotate" type="checkbox" checked />
         <span>🔄自动旋转</span>
       </label>
+      <button id="shot-btn" class="btn" title="导出当前拆解视图为 PNG 图片（快捷键 S）">🖼️ 截图</button>
+      <button id="export-md-btn" class="btn" title="导出完整拆解教案（Markdown，含步骤/部件/工具）">📄 导教案</button>
       <button id="ar-btn" class="btn btn-ar" style="display:none">📱 AR 预览</button>
     </div>
 
@@ -319,6 +321,8 @@
           <li>👆 <b>右键</b> 平移</li>
           <li>⏭️ <b>下一步</b> 逐步拆解</li>
           <li>💥 <b>爆炸</b> 一键分离</li>
+          <li>⌨️ <b>空格</b> 爆炸/合体 · <b>← →</b> 切换步骤 · <b>F</b> 聚焦 · <b>S</b> 截图</li>
+          <li>🖼️ <b>截图</b> 导出 PNG · 📄 <b>导教案</b> 导出拆解教学 Markdown</li>
         </ul>
       </div>
     </details>
@@ -352,7 +356,7 @@
     </div>
   </div>
 
-  <script type="module" src="main.js?v=3.2.10"></script>
+  <script type="module" src="main.js?v=3.2.11"></script>
 
   <!-- 首次使用：检测是否已配置，未配置则弹出模型配置 -->
   <script>

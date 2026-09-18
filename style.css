@@ -254,6 +254,29 @@ html, body {
 .status-box.success { background: rgb(76 175 80 / 12%); border: 1px solid rgb(76 175 80 / 25%); color: #a5d6a7; }
 .status-box.error { background: rgb(244 67 54 / 12%); border: 1px solid rgb(244 67 54 / 25%); color: #ef9a9a; }
 
+/* ===== Toast 提示（截图 / 导出反馈，挂在 body 上避免被面板裁剪）===== */
+.toast-wrap {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  z-index: 9999; pointer-events: none;
+}
+
+.toast {
+  max-width: min(90vw, 420px); padding: 10px 16px; border-radius: var(--rad-md);
+  background: rgb(24 26 34 / 96%); color: var(--text); border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 45%); font-size: var(--font-md); line-height: 1.5;
+  text-align: center; opacity: 0; transform: translateY(12px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast-success { border-color: rgb(76 175 80 / 45%); }
+.toast-error { border-color: rgb(244 67 54 / 50%); }
+
+.toast.toast-light {
+  background: rgb(255 255 255 / 97%); color: #1f2330;
+  border-color: rgb(0 0 0 / 12%); box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
 /* ===== 装配分析 / 可制造性评分 ===== */
 .asm-score { display: flex; align-items: center; gap: 12px; margin: 4px 0 10px; }
 

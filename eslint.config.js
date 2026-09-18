@@ -51,6 +51,8 @@ export default [
         btoa: 'readonly',
         TextDecoder: 'readonly',
         TextEncoder: 'readonly',
+        // 文件导出（截图 / 教案导出用）
+        Blob: 'readonly',
         // Node.js 兼容（utils.js 可在 Node.js 中运行）
         Buffer: 'readonly',
         process: 'readonly',
@@ -66,6 +68,8 @@ export default [
       'no-console': 'warn',
       'no-unused-vars': 'warn',
       'no-undef': 'error',
+      // 防止 lowPowerMode 那类「先用后声明」的 TDZ 崩溃再次出现（函数声明仍允许提升）
+      'no-use-before-define': ['error', { functions: false, classes: true, variables: true }],
       'eol-last': ['error', 'always'],
       'comma-dangle': ['error', 'always-multiline'],
       'no-trailing-spaces': 'error',

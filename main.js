@@ -158,6 +158,31 @@ controls.autoRotate = true;
 controls.autoRotateSpeed = 1.2;
 controls.target.set(0, 0.15, 0);
 
+// ============================================================
+// 模块共享状态与引用
+// 这些状态会被文件前部的函数（createPart / 装配分析 / 拆解动画…）引用，
+// 必须在使用前声明：main.js 的历史事故就是「先用后声明」的 TDZ 崩溃
+// （lowPowerMode，见 fix(frontend) dda6b5c）。集中声明在此，并由
+// ESLint 的 no-use-before-define 持续守护该约定。
+// ============================================================
+const questGroup = new Group(); // Quest 3 默认模型组
+const customModelGroup = new Group(); // 自定义模型组
+let assemblySequenceOrder = null; // Blender MCP 返回的部件拆解顺序（索引小者先拆）
+let stepGroups = defaultStepGroups; // 当前生效的拆解步骤方案
+let totalSteps = stepGroups.length; // 步骤总数
+let currentStep = 0; // 实际显示步骤（动画中）
+let displayedStep = 0; // 当前 UI 显示的步骤（已完成）
+let animatingStep = 0; // 动画目标步骤
+let explodeLoop = false; // 爆炸/合体动画是否自动循环播放
+let needsExplodeUpdate = true; // 脏标记：需要重新计算部件位置
+let isExploded = false; // 是否已完全炸开
+let autoExplodeTimer = null; // 「少点击」优化：完成拆解/生成后自动播一次爆炸动画
+
+// 共享 DOM 引用（脚本以 module 形式置于 body 末尾，此时 DOM 已就绪）
+const explodeBtn = document.getElementById("explode-btn");
+const timelineSlider = document.getElementById("timeline-slider");
+const toolsListEl = document.getElementById("tools-list");
+
 // ===== 自动适配相机到模型 =====
 function fitCameraToModel(modelGroup, smooth = true) {
   // 计算包围盒
@@ -275,7 +300,7 @@ function applyModelStyle(style) {
 }
 
 // ===== Quest 3 简化模型构建 =====
-const questGroup = new Group();
+// questGroup 声明见文件上方「模块共享状态与引用」
 scene.add(questGroup);
 
 const parts = []; // 存储所有可拆解部件
@@ -468,10 +493,12 @@ createPart({
 });
 
 // ===== 自定义模型处理 =====
-const customModelGroup = new Group();
+// customModelGroup 声明见文件上方「模块共享状态与引用」
 scene.add(customModelGroup);
 let customModelParts = []; // 存储自定义模型的部件
 let hasCustomModel = false;
+// 当前展示的模型名（默认 Quest 3；上传/生成后替换），用于截图与教案导出命名
+let currentModelName = "Meta Quest 3";
 
 // ===== 自定义模型公共工具函数（提取重复逻辑）=====
 
@@ -728,8 +755,7 @@ function autoSplitModel(model) {
 }
 
 // ===== Blender MCP 装配顺序对接 =====
-// 由 /api/assembly/sequence 获取的部件拆解顺序（名称数组，索引小者先拆）
-let assemblySequenceOrder = null;
+// assemblySequenceOrder 声明见文件上方「模块共享状态与引用」
 
 /**
  * 从后端（server.js -> Blender MCP addon）拉取装配拆解顺序。
@@ -1173,6 +1199,9 @@ function updateCustomModelUI(partCount, fileName) {
   const countEl = document.getElementById("part-count");
   if (countEl) countEl.textContent = partCount;
 
+  // 记录模型名（去掉扩展名），供截图 / 教案导出命名
+  if (fileName) currentModelName = String(fileName).replace(/\.[^.]+$/, "");
+
   const uploadSection = document.querySelector(".panel");
   if (uploadSection) {
     const fileNameEl = document.getElementById("uploaded-file-name");
@@ -1214,6 +1243,7 @@ function updateCustomModelUI(partCount, fileName) {
 function clearCustomModel() {
   clearCustomModelGroup();
   hasCustomModel = false;
+  currentModelName = "Meta Quest 3";
 
   // 恢复默认模型可见性
   questGroup.visible = true;
@@ -1305,7 +1335,7 @@ fitCameraToModel(questGroup, false);
 
 // ===== 分步骤拆解（教学导向，参考 iFixit 风格）=====
 // defaultStepGroups 已从 ./src/quest3-steps.js 导入
-let stepGroups = defaultStepGroups;
+// stepGroups / totalSteps 声明见文件上方「模块共享状态与引用」
 
 // 工具清单更新
 function updateToolsList(step) {
@@ -1321,7 +1351,7 @@ function updateToolsList(step) {
 }
 
 // defaultStepGroups 已从 ./src/quest3-steps.js 导入
-let totalSteps = stepGroups.length;
+// totalSteps 声明见文件上方「模块共享状态与引用」
 
 // 给每个部件分配步骤序号（默认最后一步）
 parts.forEach(part => {
@@ -1349,9 +1379,7 @@ console.log(
 );
 
 // ===== 步骤控制 UI =====
-let currentStep = 0; // 实际显示步骤（动画中）
-let displayedStep = 0; // 当前 UI 显示的步骤（已完成）
-let animatingStep = 0; // 动画目标步骤
+// currentStep / displayedStep / animatingStep 声明见文件上方「模块共享状态与引用」
 let animationStart = 0; // 动画开始时间
 let animationFrom = 0; // 动画起始步骤
 let mouseFactor = 0; // 鼠标控制炸开因子 (0-1)
@@ -1368,8 +1396,9 @@ let explodeAnimFactor = 0; // 当前全局炸开因子
 let explodeAllMode = false; // true 时所有部件按同一因子同时炸开（忽略分步）
 let explodeAnimDuration = 1100; // 爆炸动画时长（毫秒，受循环速度档控制）
 let loopHoldMs = 900; // 循环播放时炸开/合体之间的停留时间（毫秒）
-let explodeLoop = false; // 爆炸/合体动画是否自动循环播放
 let explodeLoopTimer = null; // 循环反向定时器，便于手动接管时取消
+// explodeLoop / explodeBtn / isExploded / autoExplodeTimer / needsExplodeUpdate
+// 声明见文件上方「模块共享状态与引用」
 
 const prevBtn = document.getElementById("prev-step");
 const nextBtn = document.getElementById("next-step");
@@ -1383,12 +1412,11 @@ const autoRotateCheck = document.getElementById("auto-rotate");
 // 新增 UI 元素
 const depthSlider = document.getElementById("explode-depth");
 const depthValueEl = document.getElementById("depth-value");
-const timelineSlider = document.getElementById("timeline-slider");
+// timelineSlider / toolsListEl 声明见文件上方「模块共享状态与引用」
 const timelineStepEl = document.getElementById("timeline-step");
 const timelinePlayBtn = document.getElementById("timeline-play");
 const timelineResetBtn = document.getElementById("timeline-reset");
 const timelineSpeedSelect = document.getElementById("timeline-speed");
-const toolsListEl = document.getElementById("tools-list");
 
 console.log("UI elements:", {
   prevBtn: !!prevBtn,
@@ -1591,10 +1619,7 @@ resetBtn.addEventListener("click", () => {
 });
 
 // 爆炸按钮：在完全合体和完全爆炸之间切换
-const explodeBtn = document.getElementById("explode-btn");
-let isExploded = false;
-// 「少点击」优化：拆解/生成完成后自动播一次爆炸动画的定时器
-let autoExplodeTimer = null;
+// （explodeBtn / isExploded / autoExplodeTimer 的声明见上方「爆炸/拆解状态」区，此处不再重复声明）
 
 // 装配分析面板按钮
 const assemblyAnalyzeBtn = document.getElementById("assembly-analyze-btn");
@@ -1787,8 +1812,149 @@ document.addEventListener("keydown", e => {
       e.preventDefault();
       focusCurrentPart();
       break;
+    case "s":
+    case "S":
+      e.preventDefault();
+      exportScreenshot();
+      break;
   }
 });
+
+// ===== 轻量 Toast 提示（截图/导出反馈，面板折叠时也可见）=====
+function getToastWrap() {
+  let wrap = document.getElementById("toast-wrap");
+  if (!wrap) {
+    wrap = document.createElement("div");
+    wrap.id = "toast-wrap";
+    wrap.className = "toast-wrap";
+    document.body.appendChild(wrap);
+  }
+  return wrap;
+}
+
+function showToast(msg, type = "info") {
+  const wrap = getToastWrap();
+  // 主题跟随：亮色主题的 class 挂在 .ui-overlay 上，而 toast 挂在 body（避免被面板裁剪）
+  const isLightTheme = !!document.querySelector(".ui-overlay.light-theme");
+  const el = document.createElement("div");
+  el.className = `toast toast-${type}${isLightTheme ? " toast-light" : ""}`;
+  el.textContent = msg;
+  wrap.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("show"));
+  // 最多同时保留 3 条，避免连续操作时堆积
+  while (wrap.children.length > 3) wrap.firstElementChild.remove();
+  setTimeout(() => {
+    el.classList.remove("show");
+    setTimeout(() => el.remove(), 300);
+  }, 2200);
+}
+
+// 文件名安全的时间戳：20260918-095030
+function fileTimestamp() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, "0");
+  const date = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+  const time = `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  return `${date}-${time}`;
+}
+
+function triggerDownload(href, filename) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+// ===== 截图导出：当前拆解视图 → PNG =====
+function exportScreenshot() {
+  try {
+    // 必须在同一同步执行栈内 render() 后立刻取像素：
+    // 未开启 preserveDrawingBuffer 时，缓冲区会在浏览器合成后被清空，晚取只能拿到空白图。
+    renderer.render(scene, camera);
+    const url = renderer.domElement.toDataURL("image/png");
+    triggerDownload(url, `${currentModelName}-拆解截图-${fileTimestamp()}.png`);
+    showToast("🖼️ 截图已保存为 PNG", "success");
+  } catch (err) {
+    showToast("❌ 截图失败：" + err.message, "error");
+  }
+}
+
+// ===== 教案导出：拆解方案 → Markdown（备课 / 教学资料）=====
+function stripTags(html) {
+  return String(html || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function buildLessonMarkdown() {
+  const partsInModel = hasCustomModel ? customModelParts : parts;
+  const lines = [
+    `# ${currentModelName} · 拆解教学教案`,
+    "",
+    `> 导出时间：${new Date().toLocaleString("zh-CN")}`,
+    "",
+    `- 模型名称：${currentModelName}`,
+    `- 拆解步骤：${totalSteps} 步`,
+    `- 部件总数：${partsInModel.length}`,
+    `- 导出时进度：步骤 ${displayedStep} / ${totalSteps}`,
+    "",
+    "## 拆解步骤",
+    "",
+  ];
+
+  stepGroups.forEach((step, idx) => {
+    lines.push(`### 步骤 ${idx + 1}：${stripTags(step.name)}`);
+    lines.push("");
+    const desc = stripTags(step.description);
+    if (desc) {
+      // 描述里的多行纯文本转成 Markdown 引用块，避免被折成一行
+      lines.push(...desc.split("\n").map(l => (l.trim() ? `> ${l}` : ">")));
+      lines.push("");
+    }
+    const stepParts = step.parts || [];
+    lines.push(`- **涉及部件（${stepParts.length}）**：${stepParts.length ? stepParts.join("、") : "无（概览步骤）"}`);
+    const tools = step.tools || [];
+    lines.push(`- **所需工具**：${tools.length ? tools.map(stripTags).join("、") : "无需工具"}`);
+    lines.push("");
+  });
+
+  // 工具清单汇总（跨步骤去重）
+  const allTools = [];
+  stepGroups.forEach(step =>
+    (step.tools || []).forEach(t => {
+      const name = stripTags(t);
+      if (name && !allTools.includes(name)) allTools.push(name);
+    }),
+  );
+
+  lines.push("## 工具清单汇总", "");
+  if (allTools.length) allTools.forEach(t => lines.push(`- ${t}`));
+  else lines.push("- 本拆解流程无需额外工具（纯观察教学）");
+  lines.push("", "---", "", `_由 blender-auto-3d-explode 自动生成 · ${location.origin}_`);
+
+  return lines.join("\n");
+}
+
+function exportLessonMarkdown() {
+  try {
+    const blob = new Blob([buildLessonMarkdown()], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    triggerDownload(url, `${currentModelName}-拆解教案.md`);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    showToast("📄 教案已导出（Markdown）", "success");
+  } catch (err) {
+    showToast("❌ 导出失败：" + err.message, "error");
+  }
+}
+
+const shotBtn = document.getElementById("shot-btn");
+if (shotBtn) shotBtn.addEventListener("click", exportScreenshot);
+const exportMdBtn = document.getElementById("export-md-btn");
+if (exportMdBtn) exportMdBtn.addEventListener("click", exportLessonMarkdown);
 
 // 聚焦当前步骤的部件
 function focusCurrentPart() {
@@ -1873,8 +2039,7 @@ updateStepUI();
 // ===== 部件动画插值 =====
 // smoothStep 已从 src/utils.js 导入
 
-// 优化：脏标记，避免每帧都重新计算部件位置
-let needsExplodeUpdate = true;
+// 优化：脏标记，避免每帧都重新计算部件位置（needsExplodeUpdate 声明见上方「爆炸/拆解状态」区）
 
 function updateExplodedView(now) {
   if (isAnimating) {
