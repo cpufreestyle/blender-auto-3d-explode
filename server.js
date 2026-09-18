@@ -106,8 +106,17 @@ const BLENDER_MCP_PORT = Number(process.env.BLENDERMCP_PORT || 9876);
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
 
-// 启动时清理残留临时文件
+// 启动时清理残留临时文件（上传目录 + 生成目录，防止磁盘随使用无限增长）
 cleanupOldTempFiles(UPLOAD_DIR, fs, path);
+cleanupOldTempFiles(GENERATED_DIR, fs, path);
+
+// 每小时定时清理一次，避免 models/generated 与上传目录持续堆积
+const TEMP_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const tempCleanupTimer = setInterval(() => {
+  cleanupOldTempFiles(UPLOAD_DIR, fs, path);
+  cleanupOldTempFiles(GENERATED_DIR, fs, path);
+}, TEMP_CLEANUP_INTERVAL_MS);
+tempCleanupTimer.unref?.();
 
 // ── 工具函数 ──────────────────────────────────────────
 
@@ -929,7 +938,8 @@ async function runLocalReliefImageTo3D(rep, body, imageBase64, res, startTime) {
   const tiles = Math.min(Math.max(parseInt(body.tiles ?? rep.tiles ?? 3, 10), 1), 8);
   const resolution = Math.min(Math.max(parseInt(body.resolution ?? rep.resolution ?? 128, 10), 16), 512);
   const depth = Math.min(Math.max(parseFloat(body.depth ?? rep.depth ?? 0.35), 0.02), 2);
-  const useTexture = !!(body.texture ?? rep.texture ?? false);
+  // 默认内嵌原图贴图，保证生成结果保留颜色（设为 false 可得到纯灰白浮雕，便于教学高亮）
+  const useTexture = !!(body.texture ?? rep.texture ?? true);
 
   const args = [
     "--background", "--python", reliefScript, "--",
