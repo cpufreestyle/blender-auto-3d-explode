@@ -42,6 +42,7 @@ skills-lock.json
 CODELY.md
 # AI 助手本地数据（工作记忆、会话笔记等，属本机私有，不入库）
 .codebuddy/
+.workbuddy/
 .qoder/
 
 # Logs
