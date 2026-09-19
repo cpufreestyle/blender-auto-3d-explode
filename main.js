@@ -1951,10 +1951,44 @@ function exportLessonMarkdown() {
   }
 }
 
+// 复制教案到剪贴板：安全上下文用 Clipboard API，否则回退 execCommand
+function copyLessonMarkdown() {
+  try {
+    const text = buildLessonMarkdown();
+    const ok = () => showToast("📋 教案已复制到剪贴板", "success");
+    const fail = (msg) => showToast("❌ 复制失败：" + msg, "error");
+    const fallback = () => {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const copied = document.execCommand && document.execCommand("copy");
+        ta.remove();
+        copied ? ok() : fail("浏览器不支持复制");
+      } catch (e) {
+        fail(e.message);
+      }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(ok).catch(fallback);
+    } else {
+      fallback();
+    }
+  } catch (err) {
+    showToast("❌ 复制失败：" + err.message, "error");
+  }
+}
+
 const shotBtn = document.getElementById("shot-btn");
 if (shotBtn) shotBtn.addEventListener("click", exportScreenshot);
 const exportMdBtn = document.getElementById("export-md-btn");
 if (exportMdBtn) exportMdBtn.addEventListener("click", exportLessonMarkdown);
+const copyMdBtn = document.getElementById("copy-md-btn");
+if (copyMdBtn) copyMdBtn.addEventListener("click", copyLessonMarkdown);
 
 // 聚焦当前步骤的部件
 function focusCurrentPart() {
