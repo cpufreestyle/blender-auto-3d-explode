@@ -28,7 +28,6 @@ jobs:
 
     - name: Lint JavaScript
       run: npm run lint
-      continue-on-error: true
 
     - name: Lint CSS
       run: npm run lint:css
