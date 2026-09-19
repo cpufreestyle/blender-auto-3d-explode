@@ -29,11 +29,19 @@ import {
   findBlenderCandidates,
   createBlenderJobQueue,
   isAllowedExtension,
+  waitForChildExit,
+  elapsedSeconds,
   ALLOWED_EXTENSIONS,
   MAX_FILE_SIZE,
 } from "./src/server-utils.js";
 import { readBody } from "./src/body.js";
-import { runMeshyImageTo3D, runTripoImageTo3D, runHyper3DImageTo3D, runHyper3DTextTo3D } from "./src/providers/image-to-3d.js";
+import {
+  runMeshyImageTo3D,
+  runTripoImageTo3D,
+  runHyper3DImageTo3D,
+  runHyper3DTextTo3D,
+  pollTask,
+} from "./src/providers/image-to-3d.js";
 import { DEFAULT_MODELS } from "./src/provider-models.js";
 import { log } from "./src/logger.js";
 import path from "path";
@@ -512,7 +520,7 @@ async function handleAIPaint(req, res) {
       const outputBuffer = fs.readFileSync(outputPath);
       const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
 
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+      const elapsed = elapsedSeconds(startTime);
       console.log(
         `  ✅ AI 绘画完成: ${manifest.total_parts} 个部件 (${elapsed}s, ${(outputBuffer.length / 1024).toFixed(1)} KB)`
       );
@@ -553,7 +561,7 @@ const REPLICATE_BASE = "https://api.replicate.com/v1";
  * 返回：二进制 GLB + manifest 头（同 /api/split 格式）
  */
 function finishImageTo3D(res, { glbBuffer, manifest }, startTime) {
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+  const elapsed = elapsedSeconds(startTime);
   sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
 }
 
@@ -686,15 +694,26 @@ async function handleImageTo3D(req, res) {
     const predId = pred.id;
     if (!predId) throw new Error("Replicate 未返回预测 ID");
 
-    // 3. 轮询任务状态（最长 8 分钟）
+    // 3. 轮询任务状态（最长 8 分钟），复用 providers 的 pollTask
     let result = pred;
-    const deadline = Date.now() + 8 * 60 * 1000;
-    while (result.status !== "succeeded" && result.status !== "failed" && result.status !== "canceled") {
-      if (Date.now() > deadline) throw new Error("Replicate 任务超时（8 分钟）");
-      await new Promise(r => setTimeout(r, 4000));
-      const pr = await fetch(`${REPLICATE_BASE}/predictions/${predId}`, { headers: auth });
-      if (!pr.ok) throw new Error(`Replicate 状态查询失败 ${pr.status}`);
-      result = await pr.json();
+    const isTerminal = (s) => s === "succeeded" || s === "failed" || s === "canceled";
+    if (!isTerminal(result.status)) {
+      await pollTask({
+        deadline: Date.now() + 8 * 60 * 1000,
+        timeoutMsg: "Replicate 任务超时（8 分钟）",
+        intervalMs: 4000,
+        checkStatus: async () => {
+          const pr = await fetch(`${REPLICATE_BASE}/predictions/${predId}`, { headers: auth });
+          if (!pr.ok) throw new Error(`Replicate 状态查询失败 ${pr.status}`);
+          result = await pr.json();
+          const detail = result.error ? " - " + JSON.stringify(result.error) : "";
+          return {
+            done: result.status === "succeeded",
+            failed: isTerminal(result.status),
+            error: `Replicate 任务失败: ${result.status}${detail}`,
+          };
+        },
+      });
     }
     if (result.status !== "succeeded") {
       const detail = result.error ? " - " + JSON.stringify(result.error) : "";
@@ -715,7 +734,7 @@ async function handleImageTo3D(req, res) {
     if (!glbRes.ok) throw new Error(`GLB 下载失败 ${glbRes.status}`);
     const glbBuffer = Buffer.from(await glbRes.arrayBuffer());
 
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    const elapsed = elapsedSeconds(startTime);
     const manifest = { total_parts: 0, parts: [] };
     console.log(`  ✅ 图片转3D 完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
     sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
@@ -772,6 +791,9 @@ async function handleTextTo3D(req, res) {
   }
 }
 
+// VLM 路线最坏耗时 = MAX_RETRIES(4) 轮「大模型生成代码 + Blender 执行 + 自动修复」，取 30 分钟上限
+const VLM_IMAGE_TO_3D_TIMEOUT_MS = 30 * 60 * 1000;
+
 /**
  * VLM 视觉模型程序化重建（图片转3D 的 VLM 路线）
  * 调用 scripts/vlm_img_to_blender.py：视觉模型看图→生成 Blender 代码→沙箱执行+自动修复→导出 GLB
@@ -781,10 +803,11 @@ async function runVLMImageTo3D(vlmCfg, body, imageBase64, res, startTime) {
     const provider = vlmCfg?.provider || "stepfun";
     const model = vlmCfg?.model || "step-3.7-flash";
     const imgPath = path.join(os.tmpdir(), "vlm_in.png");
+    const glbPath = path.join(os.tmpdir(), "vlm_img_to_3d.glb");
     fs.writeFileSync(imgPath, Buffer.from(imageBase64, "base64"));
 
     const script = path.join(__dirname, "scripts", "vlm_img_to_blender.py");
-    const args = ["--provider", provider, "--model", model, "--image", imgPath];
+    const args = ["--provider", provider, "--model", model, "--image", imgPath, "--out", glbPath];
     console.log(`  🤖 图片转3D(VLM): spawn ${provider}/${model}`);
 
     const child = spawn("python3", [script, ...args], { cwd: __dirname });
@@ -792,19 +815,20 @@ async function runVLMImageTo3D(vlmCfg, body, imageBase64, res, startTime) {
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
 
-    await new Promise((resolve, reject) => {
-      child.on("close", (code) =>
-        code === 0 ? resolve() : reject(new Error(`VLM 脚本退出 ${code}: ${stderr.slice(-800)}`))
-      );
-      child.on("error", reject);
-    });
+    const exitCode = await waitForChildExit(
+      child,
+      VLM_IMAGE_TO_3D_TIMEOUT_MS,
+      `VLM 脚本（${provider}/${model}）`
+    );
+    if (exitCode !== 0) {
+      throw new Error(`VLM 脚本退出 ${exitCode}: ${stderr.slice(-800)}`);
+    }
 
-    const glbPath = "/tmp/vlm_img_to_3d.glb";
     if (!fs.existsSync(glbPath)) {
       throw new Error("VLM 未导出 GLB；脚本输出: " + stdout.slice(-600));
     }
     const glbBuffer = fs.readFileSync(glbPath);
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    const elapsed = elapsedSeconds(startTime);
     const manifest = { total_parts: 0, parts: [] };
     console.log(`  ✅ 图片转3D(VLM) 完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
     sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
@@ -903,7 +927,7 @@ async function runLocalTripoSRImageTo3D(rep, body, imageBase64, res, startTime, 
     try { fs.unlinkSync(f); } catch { /* ignore */ }
   });
 
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+  const elapsed = elapsedSeconds(startTime);
   console.log(`  ✅ 图片转3D（本地·TripoSR 真重建）完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
   sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
 }
@@ -992,7 +1016,7 @@ async function runLocalReliefImageTo3D(rep, body, imageBase64, res, startTime) {
     [imgPath, outputPath, manifestPath].map(f => fs.promises.unlink(f).catch(() => {}))
   );
 
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+  const elapsed = elapsedSeconds(startTime);
   console.log(`  ✅ 图片转3D（本地·可拆解·${tiles}×${tiles}块）完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s, parts=${manifest.total_parts})`);
   sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
 }
@@ -1065,7 +1089,7 @@ async function runLocalTextTo3D(prompt, res, startTime) {
     try { fs.unlinkSync(f); } catch { /* ignore */ }
   });
 
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+  const elapsed = elapsedSeconds(startTime);
   console.log(`  ✅ 本地文生3D 完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
   sendBinaryResult(res, glbBuffer, manifest, elapsed, "text-to-3d");
 }
@@ -1643,7 +1667,7 @@ async function handleSplit(req, res) {
       const outputBuffer = fs.readFileSync(outputPath);
       const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
 
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+      const elapsed = elapsedSeconds(startTime);
       console.log(`  ✅ 拆解完成: ${manifest.total_parts} 个部件 (${elapsed}s)`);
 
       // 7. 返回二进制 GLB + manifest 头（不再 base64 编码）
@@ -1862,7 +1886,7 @@ async function handleGenToBlender(req, res) {
 
     sendJSON(res, 200, {
       success: true,
-      elapsed: ((Date.now() - startTime) / 1000).toFixed(2),
+      elapsed: elapsedSeconds(startTime),
       savedPath,
       modelUrl,
       imported,

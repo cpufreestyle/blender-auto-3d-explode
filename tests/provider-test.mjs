@@ -19,6 +19,7 @@ import {
   runHyper3DImageTo3D,
   runHyper3DTextTo3D,
 } from "../src/providers/image-to-3d.js";
+import * as providerModule from "../src/providers/image-to-3d.js";
 
 // ===== 测试框架（与 unit-test.mjs 一致）=====
 let passed = 0;
@@ -277,6 +278,80 @@ describe("任务失败状态正确上抛（Meshy FAILED）", async() => {
   }
   assert(threw, "Meshy 返回 FAILED 时应抛出异常");
   restoreFetch();
+});
+
+// Hyper3D 轮询遇到 Failed 作业必须上抛——图生/文生共用同一逻辑。
+// 这是重构前的表征测试（锁定现状行为），用于保护「消除 33 行逐字复制」不改变语义。
+describe("Hyper3D 作业 Failed 时上抛（图生/文生共用逻辑，重构安全网）", async() => {
+  installFetch((url) => {
+    if (url === "https://hyperhuman.deemos.com/api/v2/rodin")
+      return jsonResponse({ uuid: "u-fail", subscription_key: "sk-fail" });
+    if (url === "https://hyperhuman.deemos.com/api/v2/status")
+      return jsonResponse({ jobs: [{ status: "Done" }, { status: "Failed" }] });
+    if (url === "https://hyperhuman.deemos.com/api/v2/download")
+      return jsonResponse({ list: [{ name: "model.glb", url: "https://cdn/glb.h3d" }] });
+    return jsonResponse({ error: "unexpected url: " + url }, 500);
+  });
+  clearProviderEnv();
+
+  let imgErr = null;
+  try {
+    await runHyper3DImageTo3D({ apiKey: "test-key" }, SAMPLE_BODY, SAMPLE_B64);
+  } catch (e) {
+    imgErr = e;
+  }
+  assertEqual(imgErr && imgErr.message, "Hyper3D 生成失败", "图生3D：作业 Failed 抛出既定信息");
+
+  let textErr = null;
+  try {
+    await runHyper3DTextTo3D({ apiKey: "test-key" }, "一架红色客机");
+  } catch (e) {
+    textErr = e;
+  }
+  assertEqual(textErr && textErr.message, "Hyper3D 生成失败", "文生3D：作业 Failed 抛出同一信息");
+  restoreFetch();
+});
+
+// ===== pollTask：供 server.js 内联 Replicate 轮询复用的共享轮询器 =====
+
+describe("pollTask 导出与轮询契约（回归锁，保护 Replicate 轮询去重）", async() => {
+  assert(
+    typeof providerModule.pollTask === "function",
+    "pollTask 已作为具名导出供 server.js 复用",
+  );
+
+  // 超时：deadline 已过 → 用 timeoutMsg 拒绝，且不得调用 checkStatus
+  let statusCalled = 0;
+  let timeoutErr = null;
+  try {
+    await providerModule.pollTask({
+      deadline: Date.now() - 1,
+      timeoutMsg: "任务超时（测试用）",
+      intervalMs: 1,
+      checkStatus: () => {
+        statusCalled++;
+        return { done: false };
+      },
+    });
+  } catch (e) {
+    timeoutErr = e;
+  }
+  assertEqual(timeoutErr && timeoutErr.message, "任务超时（测试用）", "超时抛出的错误信息为 timeoutMsg");
+  assertEqual(statusCalled, 0, "超时先于 checkStatus 判定，未多余调用");
+
+  // 完成：返回 modelUrl，供调用方直接下载
+  let resolvedUrl = null;
+  try {
+    resolvedUrl = await providerModule.pollTask({
+      deadline: Date.now() + 60_000,
+      timeoutMsg: "不应超时",
+      intervalMs: 1,
+      checkStatus: () => ({ done: true, modelUrl: "https://cdn/glb.done" }),
+    });
+  } catch (e) {
+    resolvedUrl = `threw: ${e.message}`;
+  }
+  assertEqual(resolvedUrl, "https://cdn/glb.done", "轮询完成时返回 modelUrl");
 });
 
 // ===== 顺序执行所有 describe（避免并发共享 fetch mock 竞态）=====

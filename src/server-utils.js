@@ -239,3 +239,45 @@ export function cleanupOldTempFiles(uploadDir, fs, path, ttlMs = TEMP_FILE_TTL_M
     return 0;
   }
 }
+
+// ── 子进程等待守卫 ────────────────────────────────────
+
+/**
+ * 等待子进程退出；超时则先杀死子进程再拒绝，避免调用方无限挂起。
+ * resolve 值为退出码（含非零码），由调用方结合 stderr 构造错误信息。
+ * @param {import('child_process').ChildProcess} child - 已启动的子进程
+ * @param {number} timeoutMs - 超时上限，0 表示不设上限
+ * @param {string} label - 超时错误信息中的进程描述
+ * @returns {Promise<number>} 子进程退出码
+ */
+export function waitForChildExit(child, timeoutMs = 0, label = "子进程") {
+  return new Promise((resolve, reject) => {
+    let timer = null;
+    const settle = (fn, arg) => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      fn(arg);
+    };
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        child.kill();
+        const secs = Math.max(1, Math.round(timeoutMs / 1000));
+        settle(reject, new Error(`${label} 超时（超过 ${secs} 秒未退出）`));
+      }, timeoutMs);
+    }
+    child.on("close", (code) => settle(resolve, code));
+    child.on("error", (err) => settle(reject, err));
+  });
+}
+
+// ── 计时格式化 ────────────────────────────────────────
+
+/**
+ * 把起始时间戳换算为两位小数的秒数字符串（用于 X-Elapsed-Seconds 头与完成日志）。
+ * @param {number} startTime - 由 Date.now() 取得的起始时间戳
+ * @param {number} [now] - 结束时间戳，默认当前时间（便于测试注入）
+ * @returns {string} 秒数，如 "5.50"
+ */
+export function elapsedSeconds(startTime, now = Date.now()) {
+  return ((now - startTime) / 1000).toFixed(2);
+}

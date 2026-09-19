@@ -25,13 +25,14 @@ import base64
 import re
 import socket
 import urllib.request
+import tempfile
 import argparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 CONFIG = os.path.join(ROOT, "ai-config.json")
 DEFAULT_IMG = os.path.join(ROOT, "external", "TripoSR", "examples", "hamburger.png")
-EXPORT_PATH = "/tmp/vlm_img_to_3d.glb"
+EXPORT_PATH = os.path.join(tempfile.gettempdir(), "vlm_img_to_3d.glb")
 
 # 支持的视觉模型。OpenAI 兼容走 /chat/completions；anthropic 走原生 Messages API。
 # default_model：未显式指定模型时的回退（避免 anthropic/openai 误用 stepfun 的默认模型）。
@@ -47,20 +48,23 @@ ADDON_HOST = "localhost"
 ADDON_PORT = 9876
 ADDON_TIMEOUT = 120
 
+
 # 成功后导出 GLM_VLM_* 对象为 GLB（在 Blender 内执行）
-EXPORT_CODE = (
-    "import bpy\n"
-    "objs = [o for o in bpy.data.objects if o.name.startswith('GLM_VLM_')]\n"
-    "if objs:\n"
-    "    bpy.ops.object.select_all(action='DESELECT')\n"
-    "    for o in objs:\n"
-    "        o.select_set(True)\n"
-    "    bpy.ops.export_scene.gltf(filepath='" + EXPORT_PATH + "', "
-    "use_selection=True, export_format='GLB')\n"
-    "    print('EXPORT_DONE " + EXPORT_PATH + "')\n"
-    "else:\n"
-    "    print('EXPORT_NONE')\n"
-)
+# 路径由调用方传入：用 json.dumps 生成字面量，避免路径含引号时破坏生成的 Python 源码
+def build_export_code(out_path):
+    return (
+        "import bpy\n"
+        "objs = [o for o in bpy.data.objects if o.name.startswith('GLM_VLM_')]\n"
+        "if objs:\n"
+        "    bpy.ops.object.select_all(action='DESELECT')\n"
+        "    for o in objs:\n"
+        "        o.select_set(True)\n"
+        "    bpy.ops.export_scene.gltf(filepath=" + json.dumps(out_path) + ", "
+        "use_selection=True, export_format='GLB')\n"
+        "    print('EXPORT_DONE ' + " + json.dumps(out_path) + ")\n"
+        "else:\n"
+        "    print('EXPORT_NONE')\n"
+    )
 
 
 def load_provider_key(provider):
@@ -201,12 +205,17 @@ def call_addon(code):
             pass
 
 
-def run():
+def parse_args(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--provider", default="stepfun", choices=list(VLM_PROVIDERS.keys()))
     ap.add_argument("--model", default=None, help="覆盖模型名")
     ap.add_argument("--image", default=DEFAULT_IMG)
-    args = ap.parse_args()
+    ap.add_argument("--out", default=EXPORT_PATH, help="GLB 导出路径（默认平台临时目录）")
+    return ap.parse_args(argv)
+
+
+def run():
+    args = parse_args()
 
     if args.provider not in VLM_PROVIDERS:
         print(f"ERROR: 不支持的 provider '{args.provider}'，可选: {list(VLM_PROVIDERS.keys())}")
@@ -276,10 +285,10 @@ def run():
         # 导出 GLM_VLM_* 为 GLB
         print("\n导出 GLB...")
         try:
-            exp = call_addon(EXPORT_CODE)
+            exp = call_addon(build_export_code(args.out))
             exp_out = str(exp.get("result", "") or "")
             if "EXPORT_DONE" in exp_out:
-                print(f"  GLB 已导出: {EXPORT_PATH}")
+                print(f"  GLB 已导出: {args.out}")
             else:
                 print(f"  导出结果: {exp_out.strip()[:200]}")
         except Exception as e:
@@ -293,7 +302,7 @@ def run():
     if result is not None:
         fixed = max(0, attempt - 1)
         print(f"完成：经 {attempt} 次迭代（含 {fixed} 次自动修复）成功生成 3D 模型")
-        print(f"GLB 输出: {EXPORT_PATH}")
+        print(f"GLB 输出: {args.out}")
     else:
         print("失败：未能在限定重试次数内生成可执行代码")
         print(f"最后一次错误: {last_err}")

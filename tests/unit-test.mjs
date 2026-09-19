@@ -40,6 +40,7 @@ import {
   TEMP_FILE_TTL_MS,
   ALLOWED_EXTENSIONS,
 } from "../src/server-utils.js";
+import * as serverUtils from "../src/server-utils.js";
 
 // Buffer is a global in Node.js
 // ===== 测试框架 =====
@@ -688,6 +689,64 @@ describe("computeExplodeVector 爆炸方向计算", () => {
   assert(diagPart.x > 0 && diagPart.y > 0 && diagPart.z > 0, "对角线部件沿对角线爆炸");
   const dist = Math.sqrt(diagPart.x ** 2 + diagPart.y ** 2 + diagPart.z ** 2);
   assertApprox(dist, Math.sqrt(3) * 3, 1e-10, "对角线爆炸距离 = sqrt(3) * 3");
+});
+
+// ── waitForChildExit 子进程超时守卫（VLM 无限挂起缺陷的回归锁）──
+// 用真实子进程验证，不 mock：helper 的唯一职责是「退出即 resolve(码)，超时则 kill 并 reject」。
+// 非零退出码交由调用方结合 stderr 构造错误信息。
+{
+  const { spawn } = await import("child_process");
+  console.log("\n📋 waitForChildExit 子进程超时守卫");
+
+  // 1) 正常退出：resolve 并原样携带退出码（含非零码）
+  const exited = spawn(process.execPath, ["-e", "process.exit(3)"]);
+  let exitedCode = null;
+  let exitedErr = null;
+  try {
+    exitedCode = await serverUtils.waitForChildExit(exited, 5000);
+  } catch (e) {
+    exitedErr = e;
+  }
+  assertEqual(exitedErr, null, "进程正常退出不拒绝");
+  assertEqual(exitedCode, 3, "resolve 值为实际退出码 3（非零码由调用方判定）");
+
+  // 2) 超时：reject 且错误信息说明超时
+  const hang = spawn(process.execPath, ["-e", "setTimeout(() => process.exit(0), 30000)"]);
+  let hangClosed = false;
+  hang.on("close", () => (hangClosed = true));
+  let hangErr = null;
+  try {
+    await serverUtils.waitForChildExit(hang, 100);
+  } catch (e) {
+    hangErr = e;
+  }
+  // 单一强断言：必须因「超时」拒绝（TypeError 一类的缺失错误无法满足），避免虚假通过
+  assert(
+    hangErr !== null && /超时/.test(hangErr.message),
+    "子进程挂起时因超时被拒绝且错误信息说明超时",
+  );
+
+  // 3) 超时后必须真的杀掉子进程，否则留下孤儿 Blender/python 进程
+  await new Promise((r) => setTimeout(r, 150));
+  assert(hangClosed, "超时后子进程被 kill 并触发 close（无孤儿进程）");
+  if (!hangClosed) hang.kill();
+}
+
+// ── elapsedSeconds 计时格式化（server.js 中 9 处重复表达式的唯一来源）──
+describe("elapsedSeconds 耗时秒数字符串", () => {
+  assert(
+    typeof serverUtils.elapsedSeconds === "function",
+    "elapsedSeconds 已从 server-utils 导出",
+  );
+  if (typeof serverUtils.elapsedSeconds !== "function") return;
+
+  assertEqual(serverUtils.elapsedSeconds(1000, 6500), "5.50", "5.5 秒格式化为两位小数字符串");
+  assertEqual(serverUtils.elapsedSeconds(0, 250), "0.25", "不足 1 秒保留小数而非取整");
+  assertEqual(serverUtils.elapsedSeconds(0, 0), "0.00", "零耗时格式化为 0.00");
+
+  // now 省略时取当前时间：这是 server.js 各 handler 的实际调用形态
+  const auto = Number(serverUtils.elapsedSeconds(Date.now() - 2000));
+  assertApprox(auto, 2.0, 0.3, "省略 now 参数时按 Date.now() 计算");
 });
 
 // ===== 结果汇总 =====
