@@ -2,7 +2,6 @@ import multiprocessing as mp
 import time
 from huggingface_hub import hf_hub_download
 
-import os
 REPO = "stabilityai/TripoSR"
 FILE = "model.ckpt"
 LOCAL_DIR = r"D:\Michael\CodeBuddy\20260827161745\external\TripoSR\local_model"

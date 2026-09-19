@@ -1297,7 +1297,6 @@ def create_male_character():
 
 def call_ai_for_structure(prompt):
     """调用 AI API 分析提示词并返回模型结构"""
-    import urllib.request
     import json
     import os
     
@@ -1306,7 +1305,7 @@ def call_ai_for_structure(prompt):
     log(f"  📂 读取 AI 配置: {config_file}")
     
     if not os.path.exists(config_file):
-        log(f"  ❌ AI 配置文件不存在")
+        log("  ❌ AI 配置文件不存在")
         raise Exception('AI 配置不存在')
     
     with open(config_file, 'r') as f:
@@ -1595,7 +1594,7 @@ def parse_ai_response(content):
     # 如果没有找到 JSON，尝试直接解析
     try:
         return json.loads(content)
-    except:
+    except Exception:
         raise Exception(f'无法解析 AI 响应: {content[:200]}')
 
 
@@ -1746,7 +1745,6 @@ def create_part_from_ai(part_data, mat_lego, mat_stud, parts):
 def create_lego_style(prompt):
     """乐高风格生成器 — 调用 AI 理解提示词并生成对应模型"""
     import hashlib
-    import json
     
     prompt_lower = prompt.lower()
     parts = []
@@ -1801,12 +1799,12 @@ def create_lego_style(prompt):
             else:
                 log(f"  ⚠️ AI 返回结构中没有 'bricks' 或 'parts': {list(ai_structure.keys())}")
         else:
-            log(f"  ⚠️ AI 返回空结构")
+            log("  ⚠️ AI 返回空结构")
     except Exception as e:
         log(f"  ⚠️ AI 调用失败，使用默认生成: {e}")
 
     # AI 调用失败，使用默认的积木堆叠
-    log(f"  🎲 使用默认积木生成")
+    log("  🎲 使用默认积木生成")
 
     # 根据提示词创建不同类型的乐高模型
     
@@ -2340,14 +2338,10 @@ def create_generic_model(prompt):
 
     # 颜色检测
     colors = {
-        '红': (1.0, 0.1, 0.1), '红': (1.0, 0.1, 0.1),
-        '蓝': (0.1, 0.3, 0.9), '蓝': (0.1, 0.3, 0.9),
-        '绿': (0.1, 0.7, 0.2), '绿': (0.1, 0.7, 0.2),
-        '黄': (1.0, 0.85, 0.0), '黄': (1.0, 0.85, 0.0),
-        '紫': (0.6, 0.1, 0.8), '紫': (0.6, 0.1, 0.8),
-        '橙': (1.0, 0.5, 0.0), '橙': (1.0, 0.5, 0.0),
-        '白': (0.9, 0.9, 0.9), '白': (0.9, 0.9, 0.9),
-        '黑': (0.05, 0.05, 0.05), '黑': (0.05, 0.05, 0.05),
+        '红': (1.0, 0.1, 0.1), '蓝': (0.1, 0.3, 0.9),
+        '绿': (0.1, 0.7, 0.2), '黄': (1.0, 0.85, 0.0),
+        '紫': (0.6, 0.1, 0.8), '橙': (1.0, 0.5, 0.0),
+        '白': (0.9, 0.9, 0.9), '黑': (0.05, 0.05, 0.05),
     }
     base_color = (0.7, 0.7, 0.7)
     for kw, color in colors.items():
@@ -2541,7 +2535,7 @@ def match_prompt(prompt):
         # 调用模板对应的真实生成器（create_airplane / create_car / create_robot ...）
         return best_match['creator']
     else:
-        log(f"  📦 未匹配预设，实时生成乐高模型")
+        log("  📦 未匹配预设，实时生成乐高模型")
         return lambda: create_lego_style(prompt)
 
 
@@ -2554,10 +2548,10 @@ def setup_render_engine():
     # 尝试使用 Eevee Next / Eevee
     try:
         scene.render.engine = 'BLENDER_EEVEE_NEXT'
-    except:
+    except Exception:
         try:
             scene.render.engine = 'BLENDER_EEVEE'
-        except:
+        except Exception:
             pass
 
     # 渲染分辨率
@@ -2939,7 +2933,7 @@ def export_glb(output_path):
             for mod in list(obj.modifiers):
                 try:
                     bpy.ops.object.modifier_apply(modifier=mod.name)
-                except:
+                except Exception:
                     pass
 
     # 确保所有对象都被选中
@@ -3087,7 +3081,6 @@ def load_image_features(image_features_path):
         mood = IMAGE_FEATURES.get('mood', 'unknown')
         log(f"  🖼️ 图片特征已加载: {mood}色调, {len(colors)}个主色, 对称度{IMAGE_FEATURES.get('symmetry', 0):.0%}")
         for c in colors:
-            r, g, b = c['r'] / 255.0, c['g'] / 255.0, c['b'] / 255.0
             log(f"     🎨 rgb({c['r']},{c['g']},{c['b']}) 占比{c['ratio']:.0%}")
     except Exception as e:
         log(f"  ⚠️ 图片特征加载失败: {e}")
@@ -3193,7 +3186,7 @@ def main():
     load_image_features(image_features_path)
 
     log("=" * 50)
-    log(f"  🎨 AI 绘画 — Blender 模型生成器")
+    log("  🎨 AI 绘画 — Blender 模型生成器")
     log(f"  📝 提示词: {prompt}")
     if IMAGE_FEATURES:
         log(f"  🖼️ 图片参考: {IMAGE_FEATURES.get('mood', '?')}色调, {len(IMAGE_FEATURES.get('dominantColors', []))}个主色")
@@ -3231,7 +3224,7 @@ def main():
             json.dump(manifest, f, ensure_ascii=False, indent=2)
         log(f"  ✅ Manifest 已保存: {manifest_path} ({manifest['total_parts']} 个部件)")
 
-        log(f"\n  🎉 AI 绘画完成！")
+        log("\n  🎉 AI 绘画完成！")
         log(f"     GLB: {output_path}")
         log(f"     部件数: {manifest['total_parts']}")
 

@@ -21,6 +21,8 @@ curl -X POST http://localhost:8000/api/create -H "Content-Type: application/json
 
 import bpy
 import json
+import os
+import sys
 import argparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any
@@ -228,7 +230,11 @@ class BlenderAPIServer:
 
     def start(self):
         """启动服务器"""
-        # 初始化控制器
+        # 初始化控制器。Blender 以 --python 执行本文件时不会把脚本所在目录放进 sys.path，
+        # 而 BlenderController 定义在同目录的 blender_control.py 里，需先引导再导入。
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from blender_control import BlenderController
+
         self.controller = BlenderController()
 
         # 设置控制器到处理器
@@ -236,7 +242,7 @@ class BlenderAPIServer:
 
         # 启动 HTTP 服务器
         self.server = HTTPServer(('localhost', self.port), BlenderAPIHandler)
-        print(f"\n🚀 Blender HTTP API 服务器启动")
+        print("\n🚀 Blender HTTP API 服务器启动")
         print(f"📍 地址: http://localhost:{self.port}")
         print(f"📚 API 文档: http://localhost:{self.port}/\n")
         print("等待请求...\n")

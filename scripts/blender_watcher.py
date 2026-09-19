@@ -11,10 +11,7 @@ python3 blender_watcher.py --watch-dir ./blender_scripts --output-dir ./output
 pip3 install watchdog
 """
 
-import os
-import sys
 import time
-import json
 import argparse
 import subprocess
 from pathlib import Path
@@ -89,12 +86,12 @@ class BlenderScriptHandler(FileSystemEventHandler):
                 print(f"⚠️  {result.stderr}")
 
             if result.returncode == 0:
-                print(f"✅ 执行成功！")
+                print("✅ 执行成功！")
             else:
                 print(f"❌ 执行失败（退出码 {result.returncode}）")
 
         except subprocess.TimeoutExpired:
-            print(f"⏰ 执行超时（>5分钟）")
+            print("⏰ 执行超时（>5分钟）")
         except Exception as e:
             print(f"❌ 执行出错: {e}")
 
@@ -138,7 +135,7 @@ def main():
                 time.sleep(1)
         else:
             print(f"\n⚠️  在 {watch_dir} 中没有找到 Python 脚本")
-            print(f"请将 .py 文件放到该目录，或使用 --test <script.py>")
+            print("请将 .py 文件放到该目录，或使用 --test <script.py>")
         return
 
     # 监听模式
@@ -148,11 +145,11 @@ def main():
     observer.schedule(handler, str(watch_dir), recursive=False)
     observer.start()
 
-    print(f"\n👀 开始监听文件变化...")
-    print(f"💡 提示：")
+    print("\n👀 开始监听文件变化...")
+    print("💡 提示：")
     print(f"   - 将 Python 脚本保存到 {watch_dir}")
-    print(f"   - 保存后会自动在 Blender 中执行")
-    print(f"   - 按 Ctrl+C 停止监听\n")
+    print("   - 保存后会自动在 Blender 中执行")
+    print("   - 按 Ctrl+C 停止监听\n")
 
     try:
         while True:

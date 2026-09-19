@@ -472,10 +472,10 @@ def create_quest3_model(materials: dict) -> List[bpy.types.Object]:
 
     # 添加填充几何体修改器（兼容新旧版本）
     try:
-        fill = strap.modifiers.new(name="Fill", type='NODES')
+        strap.modifiers.new(name="Fill", type='NODES')
     except TypeError:
         # 旧版本使用 'GeometryNodes'
-        fill = strap.modifiers.new(name="Fill", type='GeometryNodes')
+        strap.modifiers.new(name="Fill", type='GeometryNodes')
     # 简单起见，使用默认设置
 
     strap['home_pos'] = (0, 0, 0)

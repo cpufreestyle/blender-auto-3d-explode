@@ -22,7 +22,6 @@ blender --background --python blender_control.py -- --config config.json
 
 import bpy
 import json
-import sys
 import argparse
 from math import radians
 from typing import Dict, Any
@@ -416,16 +415,16 @@ def main():
         controller.setup_environment()
 
         # 创建红色立方体
-        cube = controller.create_cube("RedCube", size=2.0, location=(0, 0, 1))
+        controller.create_cube("RedCube", size=2.0, location=(0, 0, 1))
         controller.apply_material("RedCube", color=(0.8, 0.2, 0.2, 1.0), metallic=0.3)
 
         # 创建蓝色球体
-        sphere = controller.create_sphere("BlueSphere", radius=1.2, location=(3, 0, 1))
+        controller.create_sphere("BlueSphere", radius=1.2, location=(3, 0, 1))
         controller.apply_material("BlueSphere", color=(0.2, 0.4, 0.8, 1.0), metallic=0.5)
 
         # 创建绿色圆柱体
-        cylinder = controller.create_cylinder("GreenCylinder", radius=0.8, depth=3,
-                                              location=(-3, 0, 1.5))
+        controller.create_cylinder("GreenCylinder", radius=0.8, depth=3,
+                                   location=(-3, 0, 1.5))
         controller.apply_material("GreenCylinder", color=(0.2, 0.8, 0.3, 1.0), roughness=0.7)
 
         # 添加动画
@@ -455,11 +454,11 @@ def create_quest3_scene():
     controller.setup_environment()
 
     # 主机身
-    body = controller.create_cube("Body", size=2.0, location=(0, 0, 0.5))
+    controller.create_cube("Body", size=2.0, location=(0, 0, 0.5))
     controller.apply_material("Body", color=(0.12, 0.12, 0.13, 1.0), roughness=0.6)
 
     # 前面板
-    front = controller.create_cube("Front", size=1.8, location=(0, 0.05, 0.5))
+    controller.create_cube("Front", size=1.8, location=(0, 0.05, 0.5))
     controller.apply_material("Front", color=(0.97, 0.97, 0.97, 1.0), roughness=0.35)
 
     # 透镜
@@ -481,7 +480,7 @@ def create_animated_cubes():
     controller.setup_environment()
 
     for i in range(5):
-        cube = controller.create_cube(
+        controller.create_cube(
             f"Cube_{i}",
             size=1.0,
             location=(i * 2.5 - 5, 0, 1)

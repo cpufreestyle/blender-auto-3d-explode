@@ -63,9 +63,11 @@ jobs:
 
       - name: Lint Python
         run: |
-          pip install ruff
+          # 固定 ruff 版本：未锁版本时上游新版本新增规则会让与本次改动无关的提交变红。
+          # 规则集与行宽由仓库根目录 ruff.toml 决定，命令行不再重复传 --line-length。
+          pip install "ruff==0.16.8"
           # 覆盖 Blender 脚本目录（此前仅检查根目录 *.py，漏掉 scripts/ 与 blender_scripts/）
-          ruff check *.py scripts/*.py blender_scripts/*.py --line-length 200
+          ruff check *.py scripts/*.py blender_scripts/*.py tests/*.py
 
       - name: Run tests
         run: |
