@@ -20,6 +20,7 @@
 | 🖼️ **截图导出** | 一键把当前拆解视图存成 PNG，直接用于课件 / 报告（快捷键 `S`） |
 | 📄 **教案导出** | 把整套拆解步骤（含部件、工具清单）导出成 Markdown 备课文档 |
 | 📋 **教案复制** | 一键把 Markdown 教案复制到剪贴板，直接粘贴进笔记 / 文档 |
+| 💾 **GLB 导出** | 把当前拆解状态导出为 GLB 3D 模型，可在 Blender / 任意 glTF 查看器继续编辑 |
 | 🔌 **多 AI 提供商** | OpenAI / Anthropic / StepFun / Kimi / NVIDIA / Ollama / LM Studio |
 | 🌐 **3D 生成 MCP 联动** | Meshy / Tripo(Triple 3D) / Hyper3D(Rodin) 经 MCP 工具调用，生成模型直接导入 Blender 场景 |
 
@@ -75,6 +76,7 @@ node server.js
 - **🖼️ 截图**：把当前视角与拆解状态导出为 PNG（文件名含模型名与时间戳）
 - **📄 导教案**：导出 Markdown 教案，包含模型概况、每步的名称 / 说明 / 涉及部件 / 所需工具，以及跨步骤去重的工具清单汇总
 - **📋 复制教案**：把同一份 Markdown 教案复制到剪贴板，便于直接粘贴进笔记或文档（非安全上下文自动回退 `execCommand`）
+- **💾 导出 GLB**：把当前拆解状态（含爆炸 / 分步位置）导出为 GLB 二进制 glTF，可在 Blender、Windows 3D 查看器、在线 glTF 工具中打开与二次编辑
 
 ### 键盘快捷键
 

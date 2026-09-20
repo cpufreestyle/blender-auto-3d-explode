@@ -31,6 +31,7 @@ import {
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
+import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { defaultStepGroups } from "./src/quest3-steps.js";
 import {
   easeOutCubic,
@@ -1983,12 +1984,42 @@ function copyLessonMarkdown() {
   }
 }
 
+// ===== GLB 导出：当前拆解状态 → 二进制 glTF =====
+function exportGLB() {
+  try {
+    const target = hasCustomModel ? customModelGroup : questGroup;
+    if (!target || target.children.length === 0) {
+      showToast("❌ 当前没有可导出的模型", "error");
+      return;
+    }
+    const exporter = new GLTFExporter();
+    exporter.parse(
+      target,
+      (result) => {
+        const blob = new Blob([result], { type: "model/gltf-binary" });
+        const url = URL.createObjectURL(blob);
+        triggerDownload(url, `${currentModelName}-拆解步骤${displayedStep}-${fileTimestamp()}.glb`);
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        showToast("💾 GLB 已导出（当前拆解状态）", "success");
+      },
+      (err) => {
+        showToast("❌ GLB 导出失败：" + (err && err.message ? err.message : err), "error");
+      },
+      { binary: true }
+    );
+  } catch (err) {
+    showToast("❌ GLB 导出失败：" + err.message, "error");
+  }
+}
+
 const shotBtn = document.getElementById("shot-btn");
 if (shotBtn) shotBtn.addEventListener("click", exportScreenshot);
 const exportMdBtn = document.getElementById("export-md-btn");
 if (exportMdBtn) exportMdBtn.addEventListener("click", exportLessonMarkdown);
 const copyMdBtn = document.getElementById("copy-md-btn");
 if (copyMdBtn) copyMdBtn.addEventListener("click", copyLessonMarkdown);
+const exportGlbBtn = document.getElementById("export-glb-btn");
+if (exportGlbBtn) exportGlbBtn.addEventListener("click", exportGLB);
 
 // 聚焦当前步骤的部件
 function focusCurrentPart() {
