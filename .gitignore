@@ -97,6 +97,10 @@ models/basketball.glb
 models/red_sphere.glb
 models/sample_robot.urdf
 
+# VLM 图片转3D 的生成产物（曾写死 scripts/_vlm_generated_blender.py 导致并发互踩；
+# 现已按 --code-out 派生唯一路径、请求结束即清理，此固定名不应再出现）
+scripts/_vlm_generated_blender.py
+
 # 注意: blender_ai_paint.py 是 server.js 调用的核心 AI 绘画生成脚本，必须纳入版本控制
 
 # 工作笔记/临时文档 (仅保留核心文档)
