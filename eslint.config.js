@@ -12,6 +12,7 @@ export default [
     files: [
       'main.js',
       'src/ar-preview.js',
+      'src/export-panel.js',
       'src/quest3-data.js',
       'src/quest3-steps.js',
       'src/utils.js'
@@ -101,6 +102,7 @@ export default [
         process: 'readonly',
         Buffer: 'readonly',
         URL: 'readonly',
+        Blob: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         setInterval: 'readonly',
