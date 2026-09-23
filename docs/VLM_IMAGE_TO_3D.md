@@ -46,7 +46,7 @@ python3 scripts/vlm_img_to_blender.py \
 
 - 不传 `--image` 时使用默认示例图（`external/TripoSR/examples/hamburger.png`）。
 - 不传 `--model` 时回退到 `ai-config.json` 中该 provider 的 `model`，再回退到脚本内置的该 provider 默认模型。
-- 成功后导出 GLB 到 `/tmp/vlm_img_to_3d.glb`，最终生成的 Blender 代码存档到 `scripts/_vlm_generated_blender.py`。
+- 成功后导出 GLB 到 `--out` 指定路径，最终生成的 Blender 代码存档到 `--code-out` 指定路径（二者每请求唯一，请求结束即清理）。
 
 ## 管线原理
 
@@ -84,4 +84,4 @@ python3 scripts/vlm_img_to_blender.py \
 
 ## 示例产物
 
-- `scripts/_vlm_generated_blender.py` —— 一次 VLM 看图生成的汉堡模型代码样例。
+- 运行一次即可在终端看到生成的 Blender 代码打印；代码文件按 `--code-out` 落在临时目录，请求结束即清理，不再作为样例入库。
