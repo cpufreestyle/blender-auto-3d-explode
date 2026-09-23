@@ -45,8 +45,9 @@ def find_bsdf(mat):
     "Principled BSDF" 这个名字索引会拿不到节点：要么静默跳过材质设置，要么新建一个
     节点却没接到材质输出上，材质就变成默认灰。按节点类型查找不受界面语言影响。
     """
-    if not mat.node_tree or not mat.node_tree.nodes:
-        mat.use_nodes = True
+    # Blender 5.x 起新建材质默认带节点树（use_nodes 属性 6.0 将移除），直接用 node_tree
+    if mat.node_tree is None:
+        return None
     for n in mat.node_tree.nodes:
         if n.type == "BSDF_PRINCIPLED":
             return n
@@ -62,7 +63,6 @@ def create_materials():
 
     # 白色前面板（亚光塑料）
     mat = bpy.data.materials.new(name="FrontPlate")
-    mat.use_nodes = True
     bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
@@ -77,7 +77,6 @@ def create_materials():
 
     # 黑色主机身（哑光塑料）
     mat = bpy.data.materials.new(name="Body")
-    mat.use_nodes = True
     bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
@@ -88,7 +87,6 @@ def create_materials():
 
     # 深空蓝透镜外环（金属质感）
     mat = bpy.data.materials.new(name="LensBarrel")
-    mat.use_nodes = True
     bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
@@ -102,7 +100,6 @@ def create_materials():
 
     # 透镜玻璃（透明蓝色）
     mat = bpy.data.materials.new(name="LensGlass")
-    mat.use_nodes = True
     bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
@@ -116,7 +113,6 @@ def create_materials():
 
     # 摄像头（深色玻璃纤维）
     mat = bpy.data.materials.new(name="Camera")
-    mat.use_nodes = True
     bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
@@ -127,7 +123,6 @@ def create_materials():
 
     # 传感器镜头
     mat = bpy.data.materials.new(name="Sensor")
-    mat.use_nodes = True
     bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
@@ -139,7 +134,6 @@ def create_materials():
 
     # 头带臂（深灰色塑料）
     mat = bpy.data.materials.new(name="StrapArm")
-    mat.use_nodes = True
     bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
@@ -150,7 +144,6 @@ def create_materials():
 
     # 记忆海绵（深灰色，高粗糙度）
     mat = bpy.data.materials.new(name="Foam")
-    mat.use_nodes = True
     bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
@@ -161,7 +154,6 @@ def create_materials():
 
     # 主板 PCB（深绿色）
     mat = bpy.data.materials.new(name="PCB")
-    mat.use_nodes = True
     bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
