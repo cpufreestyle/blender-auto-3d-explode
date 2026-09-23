@@ -13,6 +13,7 @@ export default [
       'main.js',
       'src/ar-preview.js',
       'src/export-panel.js',
+      'src/upload-panel.js',
       'src/quest3-data.js',
       'src/quest3-steps.js',
       'src/utils.js'
@@ -110,7 +111,10 @@ export default [
         TextDecoder: 'readonly',
         TextEncoder: 'readonly',
         atob: 'readonly',
-        btoa: 'readonly'
+        btoa: 'readonly',
+        Blob: 'readonly',
+        File: 'readonly',
+        FormData: 'readonly'
       }
     },
     rules: {
