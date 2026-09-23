@@ -29,20 +29,13 @@ import {
   findBlenderCandidates,
   createBlenderJobQueue,
   isAllowedExtension,
-  waitForChildExit,
   elapsedSeconds,
-  createVlmJobPaths,
   ALLOWED_EXTENSIONS,
   MAX_FILE_SIZE,
 } from "./src/server-utils.js";
 import { readBody } from "./src/body.js";
-import {
-  runMeshyImageTo3D,
-  runTripoImageTo3D,
-  runHyper3DImageTo3D,
-  runHyper3DTextTo3D,
-  pollTask,
-} from "./src/providers/image-to-3d.js";
+import { runHyper3DTextTo3D } from "./src/providers/image-to-3d.js";
+import { generateImageTo3D } from "./src/image-to-3d-router.js";
 import { DEFAULT_MODELS } from "./src/provider-models.js";
 import { log } from "./src/logger.js";
 import path from "path";
@@ -106,6 +99,18 @@ const PORT = process.env.PORT || 3001;
 const BLENDER_PATH = process.env.BLENDER_PATH || findBlender();
 const UPLOAD_DIR = path.join(os.tmpdir(), "blender-split-uploads");
 const GENERATED_DIR = path.join(__dirname, "models", "generated");
+
+// 图片转3D 调度器所需的进程级能力（注入 src/image-to-3d-router.js，便于单测用假 deps）
+const IMAGE_TO_3D_DEPS = {
+  fs,
+  path,
+  os,
+  spawn,
+  execFile: execFileAsync,
+  blenderPath: BLENDER_PATH,
+  uploadDir: UPLOAD_DIR,
+  rootDir: __dirname,
+};
 
 // Blender MCP addon（scripts/blender_mcp_addon.py）监听的 TCP 端口
 const BLENDER_MCP_HOST = process.env.BLENDERMCP_HOST || "localhost";
@@ -549,17 +554,14 @@ async function handleAIPaint(req, res) {
 }
 
 /**
- * 读取较大的 JSON 请求体（图片转 3D 需要传 base64 图片，默认 10KB 不够）
- */
-
-const REPLICATE_BASE = "https://api.replicate.com/v1";
-
-/**
  * POST /api/image-to-3d
- * Body: { "image": "data:image/png;base64,....", "deploy": "local"|"replicate", "model": "..." }
- * 本地模式：POST {localUrl}/generate → 响应直接返回 GLB 二进制（无需轮询）
- * 云端模式：上传 Replicate → 创建预测 → 轮询 → 下载 GLB
+ * Body: { "image": "data:image/png;base64,....", "deploy": "local"|"replicate"|"meshy"|"tripo"|"hyper3d"|"vlm", "model": "..." }
+ * 本地模式：零依赖 Blender 可拆解重建（显式勾选「真重建」且 TripoSR 就绪时走真重建）
+ * 云端模式：Meshy / Tripo / Hyper3D / Replicate；VLM：看图生成 Blender 代码再执行
  * 返回：二进制 GLB + manifest 头（同 /api/split 格式）
+ *
+ * 调度（本地/云端/VLM 分派、本地失败回退云端、各路线超时）统一在
+ * src/image-to-3d-router.js；这里只负责读请求体、校验 data URL、写响应。
  */
 function finishImageTo3D(res, { glbBuffer, manifest }, startTime) {
   const elapsed = elapsedSeconds(startTime);
@@ -576,9 +578,6 @@ async function handleImageTo3D(req, res) {
       return;
     }
 
-    const rep = AI_CONFIG.replicate || {};
-    const mode = body.deploy || rep.mode || "local";
-
     const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/.exec(imageDataUrl);
     if (!match) {
       sendJSON(res, 400, { error: "图片 data URL 格式错误" });
@@ -586,159 +585,15 @@ async function handleImageTo3D(req, res) {
     }
     const imageBase64 = match[2]; // 不含 data: 前缀的纯 base64
 
-    // 本地部署模式：调用本地 TripoSR 真重建（scripts/triposr_infer.py）由图片生成真·GLB
-    if (mode === "local") {
-      try {
-        await runLocalImageTo3D(rep, body, imageBase64, res, startTime);
-        return;
-      } catch (localErr) {
-        // 已配置 Replicate Token 时，本地服务不可用则自动回退云端，提升易用性
-        if (rep.token) {
-          console.warn(`  ⚠️ 本地图像转3D服务不可用，自动回退到 Replicate 云端: ${localErr.message}`);
-          // 继续走下方云端逻辑
-        } else {
-          throw localErr;
-        }
-      }
-    }
-
-    // 第三方云端提供商（与 MCP tools 一致）：Meshy / Tripo / Hyper3D(Rodin)
-    if (mode === "meshy") {
-      const out = await runMeshyImageTo3D(AI_CONFIG.providers?.meshy, body, imageBase64);
-      return finishImageTo3D(res, out, startTime);
-    }
-    if (mode === "tripo") {
-      const out = await runTripoImageTo3D(AI_CONFIG.providers?.tripo, body, imageBase64);
-      return finishImageTo3D(res, out, startTime);
-    }
-    if (mode === "hyper3d") {
-      const out = await runHyper3DImageTo3D(AI_CONFIG.providers?.hyper3d, body, imageBase64);
-      return finishImageTo3D(res, out, startTime);
-    }
-
-    // VLM 视觉模型程序化重建（看图→生成 3D 代码→自动修复→导出 GLB）
-    if (mode === "vlm") {
-      return await runVLMImageTo3D(AI_CONFIG.vlm, body, imageBase64, res, startTime);
-    }
-
-    // 云端 Replicate 模式
-    const token = rep.token;
-    if (!token) {
-      sendJSON(res, 400, {
-        error:
-          "图片转3D 失败：未配置 Replicate Token。请先在 ai-config.html 填写 Replicate API Token（及模型 owner/name），" +
-          "并在下拉框选择「Replicate 云端」；或运行 `bash scripts/setup_triposr.sh` 准备本地 TripoSR 真重建环境。",
-      });
-      return;
-    }
-    const imageBytes = Buffer.from(imageBase64, "base64");
-    const auth = { Authorization: `Bearer ${token}` };
-    const mime = match[1];
-
-    // 1. 上传图片到 Replicate 文件服务，换取可访问 URL
-    //    注意：Replicate /v1/files 要求 multipart/form-data，文件字段名为 "content"
-    console.log(`  ☁️ 图片转3D: 上传图片到 Replicate (${(imageBytes.length / 1024).toFixed(1)} KB)`);
-    const form = new FormData();
-    form.append("content", new Blob([imageBytes], { type: mime }), "image.png");
-    const uploadRes = await fetch(`${REPLICATE_BASE}/files`, {
-      method: "POST",
-      headers: auth, // 不手动设 Content-Type，由 fetch 自动附加 multipart boundary
-      body: form,
+    const out = await generateImageTo3D({
+      mode: body.deploy || (AI_CONFIG.replicate || {}).mode || "local",
+      body,
+      imageBase64,
+      mime: match[1],
+      config: AI_CONFIG,
+      deps: IMAGE_TO_3D_DEPS,
     });
-    if (!uploadRes.ok) {
-      const t = await uploadRes.text();
-      throw new Error(`Replicate 文件上传失败 ${uploadRes.status}: ${t.slice(0, 500)}`);
-    }
-    const uploadJson = await uploadRes.json();
-    const fileUrl = uploadJson?.urls?.get;
-    if (!fileUrl) throw new Error("Replicate 未返回文件 URL");
-
-    // 2. 创建预测任务（请求体里的 model 可临时覆盖配置；优先用 modelVersion，否则自动解析模型最新版本）
-    //    注意：Replicate 已弃用 /models/{owner}/{name}/predictions 路由，创建预测必须用 /v1/predictions + version
-    //    仅当显式选择「云端」模式时，才使用 body.model 作为云端模型；
-    //    本地模式回退到云端时，body.model 是本地生成方式（relief/voxel 等），不能当作 Replicate 模型名
-    const reqModel = mode === "replicate" ? body.model : undefined;
-    const [reqOwner, reqName] = reqModel ? reqModel.split("/") : [];
-    const owner = reqOwner || rep.owner || "tencent";
-    const name = reqName || rep.name || "hunyuan3d-2";
-    let version = body.modelVersion || rep.modelVersion;
-    if (!version) {
-      const mRes = await fetch(`${REPLICATE_BASE}/models/${owner}/${name}`, { headers: auth });
-      if (!mRes.ok) {
-        const t = await mRes.text();
-        throw new Error(`获取模型 ${owner}/${name} 版本失败 ${mRes.status}: ${t.slice(0, 300)}`);
-      }
-      const mJson = await mRes.json();
-      version = mJson?.latest_version?.id;
-      if (!version) throw new Error(`模型 ${owner}/${name} 未找到可用版本`);
-    }
-    const predUrl = `${REPLICATE_BASE}/predictions`;
-    const predBody = { version, input: { image: fileUrl } };
-    console.log(`  🚀 图片转3D: 创建 Replicate 预测 ${owner}/${name}`);
-    const predRes = await fetch(predUrl, {
-      method: "POST",
-      headers: { ...auth, "Content-Type": "application/json" },
-      body: JSON.stringify(predBody),
-    });
-    if (!predRes.ok) {
-      const t = await predRes.text();
-      // 余额不足（402）：给出中文指引，避免暴露原始英文报错
-      if (predRes.status === 402) {
-        throw new Error(
-          "Replicate 余额不足：请到 https://replicate.com/account/billing 绑定支付方式并充值，" +
-            "等待几分钟后重试。当前图片转3D功能需要在 Replicate 上消耗额度。"
-        );
-      }
-      throw new Error(`Replicate 预测创建失败 ${predRes.status}: ${t.slice(0, 500)}`);
-    }
-    const pred = await predRes.json();
-    const predId = pred.id;
-    if (!predId) throw new Error("Replicate 未返回预测 ID");
-
-    // 3. 轮询任务状态（最长 8 分钟），复用 providers 的 pollTask
-    let result = pred;
-    const isTerminal = (s) => s === "succeeded" || s === "failed" || s === "canceled";
-    if (!isTerminal(result.status)) {
-      await pollTask({
-        deadline: Date.now() + 8 * 60 * 1000,
-        timeoutMsg: "Replicate 任务超时（8 分钟）",
-        intervalMs: 4000,
-        checkStatus: async () => {
-          const pr = await fetch(`${REPLICATE_BASE}/predictions/${predId}`, { headers: auth });
-          if (!pr.ok) throw new Error(`Replicate 状态查询失败 ${pr.status}`);
-          result = await pr.json();
-          const detail = result.error ? " - " + JSON.stringify(result.error) : "";
-          return {
-            done: result.status === "succeeded",
-            failed: isTerminal(result.status),
-            error: `Replicate 任务失败: ${result.status}${detail}`,
-          };
-        },
-      });
-    }
-    if (result.status !== "succeeded") {
-      const detail = result.error ? " - " + JSON.stringify(result.error) : "";
-      throw new Error(`Replicate 任务失败: ${result.status}${detail}`);
-    }
-
-    // 4. 解析输出（TripoSR 返回单个 glb 文件 URL；兼容数组/对象）
-    const out = result.output;
-    let glbUrl = null;
-    if (typeof out === "string") glbUrl = out;
-    else if (Array.isArray(out)) glbUrl = typeof out[0] === "string" ? out[0] : out[0]?.url;
-    else if (out && typeof out === "object") glbUrl = out.url || out.mesh || out.model;
-    if (!glbUrl) throw new Error("Replicate 输出中未找到 GLB 文件 URL");
-
-    // 5. 下载 GLB
-    console.log("  ⬇️ 图片转3D: 下载生成的 GLB...");
-    const glbRes = await fetch(glbUrl);
-    if (!glbRes.ok) throw new Error(`GLB 下载失败 ${glbRes.status}`);
-    const glbBuffer = Buffer.from(await glbRes.arrayBuffer());
-
-    const elapsed = elapsedSeconds(startTime);
-    const manifest = { total_parts: 0, parts: [] };
-    console.log(`  ✅ 图片转3D 完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
-    sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
+    finishImageTo3D(res, out, startTime);
   } catch (err) {
     console.error(`  ❌ 图片转3D 失败: ${err.message}`);
     if (err.status === 400) sendJSON(res, 400, { error: err.message });
@@ -790,265 +645,6 @@ async function handleTextTo3D(req, res) {
     if (err.status === 400) sendJSON(res, 400, { error: err.message });
     else sendJSON(res, 500, { success: false, error: err.message });
   }
-}
-
-// VLM 路线最坏耗时 = MAX_RETRIES(4) 轮「大模型生成代码 + Blender 执行 + 自动修复」，取 30 分钟上限
-const VLM_IMAGE_TO_3D_TIMEOUT_MS = 30 * 60 * 1000;
-
-/**
- * VLM 视觉模型程序化重建（图片转3D 的 VLM 路线）
- * 调用 scripts/vlm_img_to_blender.py：视觉模型看图→生成 Blender 代码→沙箱执行+自动修复→导出 GLB
- */
-async function runVLMImageTo3D(vlmCfg, body, imageBase64, res, startTime) {
-  // 每次请求一组唯一路径：固定名（vlm_in.png / vlm_img_to_3d.glb）在并发请求下会互相
-  // 覆盖输入图片与产物 GLB，后到的请求会读到前一个请求的文件
-  const { image: imgPath, glb: glbPath, code: codePath } = createVlmJobPaths(os.tmpdir(), path);
-  try {
-    const provider = vlmCfg?.provider || "stepfun";
-    const model = vlmCfg?.model || "step-3.7-flash";
-    fs.writeFileSync(imgPath, Buffer.from(imageBase64, "base64"));
-
-    const script = path.join(__dirname, "scripts", "vlm_img_to_blender.py");
-    const args = [
-      "--provider",
-      provider,
-      "--model",
-      model,
-      "--image",
-      imgPath,
-      "--out",
-      glbPath,
-      "--code-out",
-      codePath,
-    ];
-    console.log(`  🤖 图片转3D(VLM): spawn ${provider}/${model}`);
-
-    const child = spawn("python3", [script, ...args], { cwd: __dirname });
-    let stdout = "", stderr = "";
-    child.stdout.on("data", (d) => (stdout += d));
-    child.stderr.on("data", (d) => (stderr += d));
-
-    const exitCode = await waitForChildExit(
-      child,
-      VLM_IMAGE_TO_3D_TIMEOUT_MS,
-      `VLM 脚本（${provider}/${model}）`
-    );
-    if (exitCode !== 0) {
-      throw new Error(`VLM 脚本退出 ${exitCode}: ${stderr.slice(-800)}`);
-    }
-
-    if (!fs.existsSync(glbPath)) {
-      throw new Error("VLM 未导出 GLB；脚本输出: " + stdout.slice(-600));
-    }
-    const glbBuffer = fs.readFileSync(glbPath);
-    const elapsed = elapsedSeconds(startTime);
-    const manifest = { total_parts: 0, parts: [] };
-    console.log(`  ✅ 图片转3D(VLM) 完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
-    sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
-  } catch (err) {
-    console.error(`  ❌ 图片转3D(VLM) 失败: ${err.message}`);
-    sendJSON(res, 500, { success: false, error: err.message });
-  } finally {
-    // 产物已读进内存（或本次请求已失败），把这三个文件收掉，别让系统临时目录
-    // 按请求数堆积；万一进程被杀，server-utils 的 TTL 清理会兜底
-    for (const file of [imgPath, glbPath, codePath]) {
-      try {
-        fs.rmSync(file, { force: true });
-      } catch {
-        // 清理失败不影响已经返回给客户端的结果
-      }
-    }
-  }
-}
-
-/**
- * 本地部署图像转3D（默认：零依赖 Blender 浮雕/体素方案，离线、可拆解）
- * - 默认走 blender_image_to_3d.py（用已安装的 Blender 跑，不需 GPU/venv），
- *   按 --tiles 切成若干独立网格（默认 3×3=9 块），拼合即还原、爆炸即分离，
- *   因此默认生成的模型就是「可拆解」的（满足本地教学拆解需求）。
- * - 仅当显式勾选「真重建」且本机 TripoSR 环境就绪时，才走 TripoSR 真重建（单网格，质量更高）。
- */
-async function runLocalImageTo3D(rep, body, imageBase64, res, startTime) {
-  // 真重建（TripoSR）：需 venv + 权重，单网格、默认不可拆解；仅显式请求且环境就绪时启用
-  const triposrDir = process.env.TRIPOSR_DIR || path.join(__dirname, "external", "TripoSR");
-  const venvPython = path.join(triposrDir, ".venv", "bin", "python3");
-  const inferScript = path.join(__dirname, "scripts", "triposr_infer.py");
-  if (body.real && fs.existsSync(venvPython) && fs.existsSync(inferScript)) {
-    return runLocalTripoSRImageTo3D(rep, body, imageBase64, res, startTime, {
-      triposrDir, venvPython, inferScript,
-    });
-  }
-  return runLocalReliefImageTo3D(rep, body, imageBase64, res, startTime);
-}
-
-/**
- * 本地「真重建」（TripoSR）：离线推理，生成有体积/背面的真·3D 网格 GLB。
- * 注意：默认单网格、不可拆解；如需可拆解请使用默认的浮雕/体素方案。
- */
-async function runLocalTripoSRImageTo3D(rep, body, imageBase64, res, startTime, env) {
-  const jobId = `img3d-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const imgPath = path.join(UPLOAD_DIR, `img3d-${jobId}.png`);
-  const outputPath = path.join(UPLOAD_DIR, `img3d-${jobId}.glb`);
-  const manifestPath = path.join(UPLOAD_DIR, `img3d-${jobId}.json`);
-
-  fs.writeFileSync(imgPath, Buffer.from(imageBase64, "base64"));
-
-  const mcResolution = body.mcResolution ?? rep.mcResolution ?? 256;
-  const bakeTexture = body.bakeTexture ?? rep.bakeTexture ?? false;
-  const removeBg = body.removeBg ?? rep.removeBg ?? true; // 本地 TriPoSR 默认去背景：带背景会严重拉低重建质量
-  const device = body.device ?? rep.device ?? "auto";
-  const textureResolution = body.textureResolution ?? rep.textureResolution ?? 2048;
-  const chunkSize = body.chunkSize ?? rep.chunkSize ?? 8192;
-
-  const args = [
-    env.inferScript,
-    "--image", imgPath,
-    "--output", outputPath,
-    "--manifest", manifestPath,
-    "--device", device,
-    "--mc-resolution", String(mcResolution),
-    "--texture-resolution", String(textureResolution),
-    "--chunk-size", String(chunkSize),
-    "--triposr-dir", env.triposrDir,
-  ];
-  if (bakeTexture) args.push("--bake-texture");
-  if (removeBg) args.push("--remove-bg");
-
-  console.log(`  🧊 图片转3D: 本地 TripoSR 真重建 ${env.inferScript} (mc=${mcResolution}, bake=${bakeTexture}, device=${device})`);
-  let stdout = "";
-  let stderr = "";
-  try {
-    const r = await execFileAsync(env.venvPython, args, {
-      timeout: 900_000, // 单图真重建在 CPU 上需数分钟（含首次权重下载），放宽到 15 分钟
-      maxBuffer: 200 * 1024 * 1024,
-    });
-    stdout = r.stdout || "";
-    stderr = r.stderr || "";
-  } catch (berr) {
-    throw new Error(`TripoSR 推理失败: ${(berr.stderr || berr.stdout || berr.message || "").slice(0, 2000)}`);
-  }
-  if (stdout) console.log(`  📤 TripoSR stdout:\n${stdout.slice(0, 2000)}`);
-  if (stderr) console.log(`  📤 TripoSR stderr:\n${stderr.slice(0, 2000)}`);
-
-  if (!fs.existsSync(outputPath)) {
-    throw new Error(
-      `本地真实重建未生成 GLB 文件。请确认 TripoSR 环境已就绪（bash scripts/setup_triposr.sh）。` +
-      `TripoSR stderr: ${stderr.slice(0, 800)}`
-    );
-  }
-
-  const glbBuffer = fs.readFileSync(outputPath);
-  let manifest = { total_parts: 0, parts: [] };
-  if (fs.existsSync(manifestPath)) {
-    try {
-      manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-    } catch { /* 用默认 manifest */ }
-  }
-
-  // 清理临时文件
-  [imgPath, outputPath, manifestPath].forEach(f => {
-    try { fs.unlinkSync(f); } catch { /* ignore */ }
-  });
-
-  const elapsed = elapsedSeconds(startTime);
-  console.log(`  ✅ 图片转3D（本地·TripoSR 真重建）完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s)`);
-  sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
-}
-
-/**
- * 本地「可拆解」重建（Blender 浮雕/体素）：零依赖，用已安装 Blender 跑，
- * 按 --tiles 切成独立网格（默认 3×3），天生可爆炸拆解，离线即用。
- */
-async function runLocalReliefImageTo3D(rep, body, imageBase64, res, startTime) {
-  const jobId = `img3d-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const imgPath = path.join(UPLOAD_DIR, `img3d-${jobId}.png`);
-  const outputPath = path.join(UPLOAD_DIR, `img3d-${jobId}.glb`);
-  const manifestPath = path.join(UPLOAD_DIR, `img3d-${jobId}.json`);
-
-  await fs.promises.writeFile(imgPath, Buffer.from(imageBase64, "base64"));
-
-  if (!BLENDER_PATH) {
-    throw new Error(
-      "本地可拆解重建失败：未找到 Blender 可执行文件。请先安装 Blender 并在 PATH 中可用，" +
-      "或设置 BLENDER_PATH 环境变量后重启 server.js。"
-    );
-  }
-  const reliefScript = path.join(__dirname, "blender_image_to_3d.py");
-  if (!fs.existsSync(reliefScript)) {
-    throw new Error("未找到本地重建脚本: " + reliefScript);
-  }
-
-  const mode = (body.mode || rep.mode || "relief").toLowerCase(); // relief | voxel | depth
-  if (mode !== "relief" && mode !== "voxel" && mode !== "depth") {
-    throw new Error(`不支持的本地重建 mode: ${mode}`);
-  }
-  const tiles = Math.min(Math.max(parseInt(body.tiles ?? rep.tiles ?? 3, 10), 1), 8);
-  const resolution = Math.min(Math.max(parseInt(body.resolution ?? rep.resolution ?? 128, 10), 16), 512);
-  const depth = Math.min(Math.max(parseFloat(body.depth ?? rep.depth ?? 0.35), 0.02), 2);
-  // 默认内嵌原图贴图，保证生成结果保留颜色（设为 false 可得到纯灰白浮雕，便于教学高亮）
-  const useTexture = !!(body.texture ?? rep.texture ?? true);
-  // depth 模式给模型真实厚度（侧墙 + 底盖），从背面看也是实体；relief/voxel 保持单面薄片
-  const thicknessArgs = [];
-  if (mode === "depth") {
-    const thickness = Math.min(Math.max(parseFloat(body.thickness ?? rep.thickness ?? 0.08), 0), 1);
-    thicknessArgs.push("--thickness", String(thickness));
-  }
-
-  const args = [
-    "--background", "--python", reliefScript, "--",
-    "--image", imgPath,
-    "--output", outputPath,
-    "--manifest", manifestPath,
-    "--mode", mode,
-    "--tiles", String(tiles),
-    "--resolution", String(resolution),
-    "--depth", String(depth),
-    ...thicknessArgs,
-  ];
-  if (useTexture) args.push("--texture");
-
-  console.log(`  🧊 图片转3D: 本地 Blender 可拆解重建 ${reliefScript} (mode=${mode}, tiles=${tiles}, tex=${useTexture})`);
-  let stdout = "";
-  let stderr = "";
-  try {
-    const r = await execFileAsync(BLENDER_PATH, args, {
-      timeout: 600_000, // Blender 后台渲染 + 导出，放宽到 10 分钟
-      maxBuffer: 200 * 1024 * 1024,
-    });
-    stdout = r.stdout || "";
-    stderr = r.stderr || "";
-  } catch (berr) {
-    // Blender 后台模式常因无关 addon（如 tripo_addon）卸载时的异步清理而以非零码退出，
-    // 但 GLB 往往已成功写出。因此先记录诊断信息，是否成功以 GLB 是否产出为准（见下方判断）。
-    stderr = (berr.stderr || "") + (berr.stdout || "");
-    console.warn(`  ⚠️ Blender 进程返回非零退出码（可能无关），将检查 GLB 是否已生成: ${String(berr.message || "").slice(0, 300)}`);
-  }
-  if (stdout) console.log(`  📤 Blender stdout:\n${stdout.slice(0, 2000)}`);
-  if (stderr) console.log(`  📤 Blender stderr:\n${stderr.slice(0, 2000)}`);
-
-  if (!(await fs.promises.stat(outputPath).catch(() => null))) {
-    throw new Error(
-      `本地可拆解重建未生成 GLB 文件。请确认 Blender 可正常运行（${BLENDER_PATH}）。` +
-      `Blender stderr: ${stderr.slice(0, 800)}`
-    );
-  }
-
-  const glbBuffer = await fs.promises.readFile(outputPath);
-  let manifest = { total_parts: 0, parts: [] };
-  if (await fs.promises.stat(manifestPath).catch(() => null)) {
-    try {
-      manifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf-8"));
-    } catch { /* 用默认 manifest */ }
-  }
-
-  // 清理临时文件
-  await Promise.all(
-    [imgPath, outputPath, manifestPath].map(f => fs.promises.unlink(f).catch(() => {}))
-  );
-
-  const elapsed = elapsedSeconds(startTime);
-  console.log(`  ✅ 图片转3D（本地·可拆解·${tiles}×${tiles}块）完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, ${elapsed}s, parts=${manifest.total_parts})`);
-  sendBinaryResult(res, glbBuffer, manifest, elapsed, "img-to-3d");
 }
 
 /**
@@ -1871,13 +1467,18 @@ async function handleGenToBlender(req, res) {
       return;
     }
     const imageBase64 = match[2];
-    const mode = body.deploy || "tripo";
+    // 只允许三家云端 provider（历史默认 tripo），其余值一律按 tripo 处理
+    const mode = ["meshy", "tripo", "hyper3d"].includes(body.deploy) ? body.deploy : "tripo";
 
-    // 1. 云端生成 GLB（复用既有 provider 实现）
-    let out;
-    if (mode === "meshy") out = await runMeshyImageTo3D(AI_CONFIG.providers?.meshy, body, imageBase64);
-    else if (mode === "hyper3d") out = await runHyper3DImageTo3D(AI_CONFIG.providers?.hyper3d, body, imageBase64);
-    else out = await runTripoImageTo3D(AI_CONFIG.providers?.tripo, body, imageBase64);
+    // 1. 云端生成 GLB（统一走图片转3D 调度器，与 /api/image-to-3d 同一实现）
+    const out = await generateImageTo3D({
+      mode,
+      body,
+      imageBase64,
+      mime: match[1],
+      config: AI_CONFIG,
+      deps: IMAGE_TO_3D_DEPS,
+    });
 
     // 2. 落盘（持久化，便于后续拆解/复现）
     const savedPath = saveGeneratedModel(out.glbBuffer, `${mode}-to-blender`);
