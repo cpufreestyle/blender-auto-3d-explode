@@ -1,4 +1,5 @@
-import os, time
+import os
+import time
 import requests
 
 URL = "https://huggingface.co/stabilityai/TripoSR/resolve/main/model.ckpt"

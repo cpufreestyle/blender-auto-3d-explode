@@ -24,7 +24,7 @@ def get_blender_version():
     """获取 Blender 主版本号"""
     try:
         return bpy.app.version[0]  # e.g. 4 or 5
-    except:
+    except Exception:
         return 4
 
 
@@ -724,7 +724,7 @@ def split_quest3_hybrid(model_center, model_size):
 
     # ── 最终保底：如果仍不足 15 个，再补一次 ──
     if result_count < 15:
-        log(f"  仍不足 15 个，再补一次...")
+        log("  仍不足 15 个，再补一次...")
         _fill_missing_quest3_parts(model_center, half_x, half_y, half_z)
         result_count = len(get_mesh_objects())
         log(f"  补充后: {result_count} 个部件")
@@ -768,7 +768,9 @@ def render_part_pngs(meshes, tmp_dir, size=384, engine="BLENDER_WORKBENCH"):
             bbox = obj.bound_box
             coords = [obj.matrix_world @ Vector(v[:]) for v in bbox]
             center = sum(coords, Vector()) / len(coords)
-            xs = [c.x for c in coords]; ys = [c.y for c in coords]; zs = [c.z for c in coords]
+            xs = [c.x for c in coords]
+            ys = [c.y for c in coords]
+            zs = [c.z for c in coords]
             max_dim = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs)) or 1.0
             dist = max_dim * 2.2
             cam_obj.location = (center.x, center.y - dist, center.z + max_dim * 0.3)
@@ -1079,9 +1081,9 @@ def parse_args():
     if not input_path:
         raise ValueError(f"缺少 --input 参数。sys.argv={sys.argv}")
     if not output_path:
-        raise ValueError(f"缺少 --output 参数")
+        raise ValueError("缺少 --output 参数")
     if not manifest_path:
-        raise ValueError(f"缺少 --manifest 参数")
+        raise ValueError("缺少 --manifest 参数")
 
     return input_path, output_path, manifest_path, original_filename, vlm_provider, vlm_model
 
@@ -1208,7 +1210,7 @@ def main():
         log(f"\n9️⃣ 导出清单: {manifest_path}")
         with open(manifest_path, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
-        log(f"  清单导出成功")
+        log("  清单导出成功")
 
         log("\n" + "=" * 60)
         log(f"✅ 拆解完成！{manifest['total_parts']} 个部件")

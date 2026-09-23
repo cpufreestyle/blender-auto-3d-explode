@@ -1,4 +1,5 @@
-import sys, json, urllib.request
+import json
+import urllib.request
 
 SYSTEM = """你是一个乐高积木模型专家。根据用户的描述，用标准的乐高砖块拼接出模型。
 

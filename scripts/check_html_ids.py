@@ -5,7 +5,6 @@
 
 import re
 import glob
-from pathlib import Path
 
 def check_html_ids(html_file):
     """检查单个 HTML 文件"""

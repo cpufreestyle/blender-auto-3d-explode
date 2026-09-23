@@ -67,7 +67,7 @@ def main():
     import torch
     from PIL import Image
     from tsr.system import TSR
-    from tsr.utils import remove_background, resize_foreground
+    from tsr.utils import resize_foreground
 
     device = args.device
     if device == "auto":

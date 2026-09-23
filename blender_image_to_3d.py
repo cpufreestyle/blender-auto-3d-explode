@@ -30,21 +30,29 @@ def parse_args():
     while i < len(argv):
         a = argv[i]
         if a == "--image" and i + 1 < len(argv):
-            opts["image"] = argv[i + 1]; i += 2
+            opts["image"] = argv[i + 1]
+            i += 2
         elif a == "--output" and i + 1 < len(argv):
-            opts["output"] = argv[i + 1]; i += 2
+            opts["output"] = argv[i + 1]
+            i += 2
         elif a == "--manifest" and i + 1 < len(argv):
-            opts["manifest"] = argv[i + 1]; i += 2
+            opts["manifest"] = argv[i + 1]
+            i += 2
         elif a == "--resolution" and i + 1 < len(argv):
-            opts["resolution"] = int(argv[i + 1]); i += 2
+            opts["resolution"] = int(argv[i + 1])
+            i += 2
         elif a == "--depth" and i + 1 < len(argv):
-            opts["depth"] = float(argv[i + 1]); i += 2
+            opts["depth"] = float(argv[i + 1])
+            i += 2
         elif a == "--mode" and i + 1 < len(argv):
-            opts["mode"] = argv[i + 1]; i += 2
+            opts["mode"] = argv[i + 1]
+            i += 2
         elif a == "--texture":
-            opts["texture"] = True; i += 1
+            opts["texture"] = True
+            i += 1
         elif a == "--tiles" and i + 1 < len(argv):
-            opts["tiles"] = int(argv[i + 1]); i += 2
+            opts["tiles"] = int(argv[i + 1])
+            i += 2
         else:
             i += 1
     return opts

@@ -1,0 +1,18 @@
+# Ruff 配置：只启用「能指出真实缺陷」的规则类。
+#
+# 不使用 ruff 的出厂默认规则集：无配置时 ruff 0.16.8 在本仓库报 373 项，其中 141 项
+# 与 AGENTS.md 的明文约定冲突 —— BLE001（禁裸 Exception，106 项）、S110（禁
+# try/except/pass，27 项）、TRY002（禁直接 raise 内置异常，8 项）。Blender 脚本由
+# `blender --background --python` 调用、没有测试覆盖，AGENTS.md 要求用
+# try/except + traceback.print_exc() 兜底并保证非零退出码。
+#
+# UP0xx（pyupgrade，41 项）同样不适用：同一份脚本要在 Blender 4.x 与 5.x 自带的不同
+# Python 版本下运行，无法假定单一版本的新式写法；I001/RUF0xx/EXE001 属纯风格项。
+#
+# 保留并需修复的 E722（裸 except，22 项）不在此列：它确实会连 KeyboardInterrupt 一起吞掉，
+# 改成 except Exception 既满足约定也消除缺陷。
+line-length = 200
+
+[lint]
+# E4/E7/E9：语法与明显逻辑问题；F：pyflakes（未定义名、重复字典键、无用导入/变量）。
+select = ["E4", "E7", "E9", "F"]
