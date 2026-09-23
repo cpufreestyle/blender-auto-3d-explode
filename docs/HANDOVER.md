@@ -39,6 +39,7 @@
 | `test:py` 静默漏测 | 收集模式 `'ai_paint_test.py'` → `'*_test.py'`，零依赖跑满 15 项（原先只跑 9 项还报 OK） | 同上 |
 | VLM 并发产物互踩 | 固定临时文件名改为每请求唯一（`createVlmJobPaths()` 提取到 `src/server-utils.js` 并可单测），请求结束在 `finally` 清理；Python 侧新增 `--code-out`，不再写死 `scripts/_vlm_generated_blender.py` | `cb48590` / #13 |
 | Blender 5.x 兼容 | 两个控制器脚本改为解析 `--` 之后的参数（原先照文档用法执行必报 `unrecognized arguments`）；21 处 `nodes["Principled BSDF"]` 改为按节点类型查找（中文界面下节点叫 `原理化 BSDF`，按名索引不是 KeyError 就是静默失效） | #14 |
+| 本地图片转3D「真实深度」 | `blender_image_to_3d.py` 新增 `--mode depth`：多线索单目深度先验（大气透视 / 地面垂直 / 中心主体 / 局部细节）+ 鲁棒百分位归一 + 尺度自适应的边缘感知平滑，默认带 0.08 真实厚度（侧墙 + 底盖，接缝处相邻块表面严格相邻不留沟壕）；manifest 记录 `depth_source`；numpy 缺失自动降级亮度法。同时修掉 relief/voxel 的高度场与贴图上下翻转（`img.pixels` 自下而上，原采样式取反了）。前端重建模式下拉默认改为「真实深度」；新增 `tests/img2depth_test.py` 14 项；CI Python job 显式装 numpy 否则深度测试整组 skip | 本轮 / #16 |
 
 ---
 
@@ -60,13 +61,12 @@ Python 侧工具**本机没装、也不必 pip 安装到系统环境**，用 `uv
 
 ```bash
 uvx ruff@0.16.8 check *.py scripts/*.py blender_scripts/*.py tests/*.py
-uvx pytest@8 tests/ -q      # 15 passed（= ai_paint 9 + vlm_out_path 6）
+uvx --with numpy pytest@8 tests/ -q   # 34 passed（= ai_paint 9 + vlm_out_path 6 + img2depth 14 + 其余 5）
 ```
 
-> ⚠️ **Python 测试入口三件套并不等价**（实测）：`npm run test:py` 只按 `-p 'ai_paint_test.py'`
-> 收集，跑 **9** 项；`python3 -m unittest discover -s tests` 因默认模式 `test*.py` 不匹配仓库里的
-> `*_test.py` 命名，跑 **0** 项且仍然输出 OK（静默空跑）；只有 CI 用的 `pytest tests/` 跑满 **15** 项。
-> 本地验 Python 侧请用 `uvx pytest@8 tests/`，别用 discover。
+> ⚠️ **numpy 必须显式给**：`img2depth_test` 的深度先验测试依赖 numpy，`uvx pytest@8` 默认隔离环境
+> 里没有，会整组 skip（静默少测 6 项）。加 `--with numpy` 或 `npm run test:py`（unittest，本机
+> python3 有 numpy）都能跑满 34 项。CI 的 Python job 也已显式 `pip install numpy`。
 
 - **必须安装 Blender**。本机实测二进制是 `/Applications/Blender.app/Contents/MacOS/Blender`
   （**大写 B**，小写 `blender` 找不到），版本 5.1.2；未加入 PATH。
@@ -199,7 +199,7 @@ Hyper3D 图生/文生共用模块私有的 `finishHyper3DTask`（轮询 → 取�
 
 | 优先级 | 事项 | 说明 |
 |---|---|---|
-| **Next** | 本地"真实深度"模式 | 当前本地是亮度挤出/像素量化，属"示意图 3D"，无背面、无遮挡。可接轻量单图深度估计（Depth Anything 一类）或复用 VLM 路径，但别破坏"离线即用 + 天生可拆解"这两个既有优点 |
+| ~~**Next**~~ | ~~本地"真实深度"模式~~ | ✅ 已完成（见 §1）：`--mode depth` 多线索单目深度先验 + 真实厚度，离线即用与天生可拆解两个优点均保留；relief/voxel 仍可选 |
 | Later | `main.js` 继续拆分 | 实测 2886 行（`AGENTS.md` 已同步为 2886）；已抽出 `model-loaders.js`、`quest3-parts.js`、`explode-geometry.js`，建议继续拆爆炸动画 / AR / 面板 |
 | Later | 统一图片转3D调度器 | 本地 / 云端 / VLM 三条路径散落在 `handleImageTo3D`，回退与超时逻辑重复，建议抽象 `generateImageTo3D()` |
 | Later | E2E / Blender 冒烟进 CI | 本轮只收敛了 workflow，没加新门禁。`blender_split_glb.py` 冒烟是最硬的证据，但 runner 上装 Blender 会明显变慢，值得单独评估 |
@@ -213,7 +213,7 @@ Hyper3D 图生/文生共用模块私有的 `finishHyper3DTask`（轮询 → 取�
 ```bash
 # 1) Python 质量门（与 CI 的 Lint Python 完全一致）
 uvx ruff@0.16.8 check *.py scripts/*.py blender_scripts/*.py tests/*.py   # 期望 All checks passed!
-uvx pytest@8 tests/ -q                                                    # 期望 20 passed
+uvx --with numpy pytest@8 tests/ -q                                        # 期望 34 passed（不加 --with numpy 会 skip 6 项）
 
 # 2) JS 质量门
 npm run lint:check  # 期望 0 errors（既有 26 条 warning 不阻断：CI 未加 --max-warnings 0）

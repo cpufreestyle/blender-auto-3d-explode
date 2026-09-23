@@ -1,6 +1,9 @@
 # 本地图片转 3D（离线 · 真重建）
 
-当没有配置 Tripo / Replicate / Meshy / Hyper3D 等云端额度时，App 会自动回退到**本地 TripoSR 单图真重建**：从单张 RGB 图推断 triplane → marching cubes 提取带体积/背面的水密网格 → 导出 GLB。无需联网、不消耗任何云端额度。
+`/api/image-to-3d` 的本地路线有两条，均不联网、不消耗任何云端额度：
+
+1. **零依赖可拆解重建（默认）** — `blender_image_to_3d.py`：调用本机已安装的 Blender，把单张图片变成带贴图的可拆解模型，默认切成 3×3 个独立网格（拼合即还原、爆炸即分离）。三种重建模式见下方「零依赖重建的三种模式」。
+2. **TripoSR 单图真重建（可选）** — `scripts/triposr_infer.py`：从单张 RGB 图推断 triplane → marching cubes 提取带体积 / 背面的水密网格 → 导出 GLB。需预置权重（见下），仅当显式勾选「真重建(TripoSR)」且权重就绪时启用；单网格、不可拆解。
 
 ## 已预置的离线依赖
 
@@ -28,8 +31,19 @@ curl -X POST http://localhost:3001/api/image-to-3d \
 ```
 响应头 `X-Manifest` 含 `{ "engine":"triposr", ... }`，`X-Total-Parts` 为部件数。
 
-## 与「亮度挤出浮雕」的区别
-旧的 `blender_image_to_3d.py` 是 2.5D 假 3D（按像素亮度挤出浮雕/像素块）。本地 TripoSR 是**前馈单图真重建**，输出带背面与体积的水密网格，二者完全不同。
+## 零依赖重建的三种模式（`blender_image_to_3d.py`）
+
+| 模式 | 原理 | 几何 | 适用 |
+| --- | --- | --- | --- |
+| `depth`（默认） | 多线索单目深度先验：大气透视（雾霾致远景变亮）/ 地面垂直（画面下方更近）/ 中心主体 / 局部细节，鲁棒百分位归一 + 边缘感知平滑 | 高度场 + 侧墙 + 底盖（默认厚度 0.08），背面也是实体 | 大多数照片，遮挡关系最接近真实 |
+| `relief` | 按像素亮度挤出高度图 | 单面薄片 | 教学演示「亮度 -> 起伏」 |
+| `voxel` | 亮度 8 级量化成像素块 | 单面薄片 | 像素风 / 乐高风示意 |
+
+manifest 的 `depth_source` 字段记录实际使用的深度来源（`monocular-prior-v1` = 深度先验；`luminance` / `luminance-quantized` = 亮度法，含 numpy 不可用时的自动降级）。`relief` / `voxel` 需要传 `--thickness` 才会加厚；`depth` 默认就有厚度。
+
+## 与 TripoSR 真重建的区别
+
+`blender_image_to_3d.py` 是 2.5D 假 3D（按像素亮度/深度先验挤出薄板或厚板，背面的凹凸是正面的镜像挤出，并非真实背面）。TripoSR 是**前馈单图真重建**，输出带真实背面与体积的水密网格，二者完全不同；前者零依赖、天生可拆解，后者需要 GPU/权重、单网格。
 
 ## 排错
 - **本地重建失败 / 长期无响应**：确认 `external/TripoSR/local_model/model.ckpt` 存在且完整（约 1.6 GB）；确认 `~/.cache/huggingface/hub/models--facebook--dino-vitb16` 存在。

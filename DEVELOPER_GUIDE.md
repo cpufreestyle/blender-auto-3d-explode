@@ -110,7 +110,7 @@ npm run build:analyze
 
 ### 本地图片转3D 真重建（TripoSR）
 
-`/api/image-to-3d` 的 `deploy: local` 模式走**真正的单图 3D 重建**：`scripts/triposr_infer.py` 调用 [VAST-AI-Research/TripoSR](https://github.com/VAST-AI-Research/TripoSR)（基于 LRM 的前馈单图重建），从单张 RGB 图推断 triplane → 用 marching cubes 提取带体积 / 背面的水密网格 → 导出 GLB。这与旧的 `blender_image_to_3d.py`（亮度挤出浮雕 / 像素块，属 2.5D 假3D）完全不同。
+`/api/image-to-3d` 的 `deploy: local` 模式走**真正的单图 3D 重建**：`scripts/triposr_infer.py` 调用 [VAST-AI-Research/TripoSR](https://github.com/VAST-AI-Research/TripoSR)（基于 LRM 的前馈单图重建），从单张 RGB 图推断 triplane → 用 marching cubes 提取带体积 / 背面的水密网格 → 导出 GLB。这与零依赖的 `blender_image_to_3d.py`（亮度浮雕 / 像素块 / 单目深度先验挤出，属 2.5D 假3D，但天生可拆解）完全不同。
 
 `/api/image-to-3d` 的 `deploy: replicate` 云端模式同样走真重建：默认高保真模型 `tencent/hunyuan3d-2`，前端下拉另可选 `camenduru/triposr`（快速真重建），**不再有任何浮雕 / 假3D 选项**，与本地 TripoSR 真重建保持一致。
 
@@ -129,7 +129,7 @@ bash scripts/setup_triposr.sh
 | `removeBg` | 用 rembg 自动抠图 | false |
 | `device` | `auto` / `cpu` / `cuda` | auto |
 
-**说明：** 纯离线推理，运行时无需任何云端 API/Token；权重首次从 HuggingFace 自动下载（约数百 MB，慢可设 `HF_ENDPOINT=https://hf-mirror.com`）；CPU> 上单张推理可能需数分钟，server 端超时已放宽到 15 分钟、前端 20 分钟；`blender_image_to_3d.py` 仍保留但 local 模式已不再调用它。
+**说明：** 纯离线推理，运行时无需任何云端 API/Token；权重首次从 HuggingFace 自动下载（约数百 MB，慢可设 `HF_ENDPOINT=https://hf-mirror.com`）；CPU> 上单张推理可能需数分钟，server 端超时已放宽到 15 分钟、前端 20 分钟；未勾选「真重建(TripoSR)」（或权重未就绪）时，local 模式走零依赖的 `blender_image_to_3d.py`（默认 `depth` 真实深度模式，可拆解），详见 `LOCAL_IMAGE_TO_3D.md`。
 
 **本地 MCP 服务端 `scripts/mcp_server.py`** 通过 TCP 连接 addon（默认 `localhost:9876`），把上述能力暴露为 **16 个 MCP 工具**（含 `execute_code` 逃生通道）。它通过 `.mcp.json` 的 `blender-fusion` 入口被 IDE 加载，与 stock `blender` 服务端并存。
 
