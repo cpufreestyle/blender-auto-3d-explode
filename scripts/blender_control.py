@@ -200,7 +200,6 @@ class BlenderController:
 
         # 创建新材质
         mat = bpy.data.materials.new(name=f"{obj_name}_Material")
-        mat.use_nodes = True
         # 按节点类型查找而非名字：Blender 5.x 会按界面语言本地化节点名（中文界面下是
         # 「原理化 BSDF」），按名字索引直接 KeyError，apply_material 整条路都会断
         bsdf = None

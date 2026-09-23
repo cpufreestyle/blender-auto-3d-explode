@@ -60,8 +60,9 @@ def find_bsdf(mat):
     "Principled BSDF" 这个名字索引会拿不到节点：要么静默跳过材质设置，要么新建一个
     节点却没接到材质输出上，材质就变成默认灰。按节点类型查找不受界面语言影响。
     """
-    if not mat.node_tree or not mat.node_tree.nodes:
-        mat.use_nodes = True
+    # Blender 5.x 起新建材质默认带节点树（use_nodes 属性 6.0 将移除），直接用 node_tree
+    if mat.node_tree is None:
+        return None
     for n in mat.node_tree.nodes:
         if n.type == "BSDF_PRINCIPLED":
             return n
@@ -72,7 +73,6 @@ def make_mat(name, color, roughness=0.5, metallic=0.0, emission=None, emission_s
              clearcoat=0.0, clearcoat_roughness=0.03, sheen=0.0, alpha=1.0, ior=1.45):
     """创建增强版 Principled BSDF 材质（支持涂层、光泽、透明度、折射率）"""
     mat = bpy.data.materials.new(name=name)
-    mat.use_nodes = True
     bsdf = find_bsdf(mat)
     if bsdf:
         bsdf.inputs['Base Color'].default_value = (*color, 1.0)
@@ -2669,7 +2669,6 @@ def setup_world_environment():
         world = bpy.data.worlds.new('World')
         bpy.context.scene.world = world
 
-    world.use_nodes = True
     nodes = world.node_tree.nodes
     links = world.node_tree.links
 
@@ -2793,7 +2792,7 @@ def enhance_all_materials():
     """增强所有材质 — 添加程序化法线贴图和清漆"""
     count = 0
     for mat in bpy.data.materials:
-        if not mat.use_nodes:
+        if mat.node_tree is None:
             continue
         bsdf = find_bsdf(mat)
         if not bsdf:
@@ -2849,7 +2848,6 @@ def add_ground_shadow_catcher():
 
     # 阴影捕捉材质
     mat = bpy.data.materials.new(name='ShadowCatcher_Mat')
-    mat.use_nodes = True
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
 

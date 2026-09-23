@@ -538,7 +538,6 @@ def _fill_missing_quest3_parts(model_center, half_x, half_y, half_z):
         mat = bpy.data.materials.get(mat_name)
         if mat is None:
             mat = bpy.data.materials.new(name=mat_name)
-            mat.use_nodes = True
             bsdf = mat.node_tree.nodes.get('Principled BSDF')
             if bsdf:
                 bsdf.inputs['Base Color'].default_value = (0.5, 0.7, 1.0, 1.0)

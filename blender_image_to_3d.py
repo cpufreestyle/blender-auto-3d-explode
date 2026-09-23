@@ -83,8 +83,9 @@ def find_bsdf(mat):
 
     不再按名字兜底：节点可以被改名，按名字可能命中一个并非 Principled BSDF 的节点。
     """
-    if not mat.node_tree or not mat.node_tree.nodes:
-        mat.use_nodes = True
+    # Blender 5.x 起新建材质默认带节点树（use_nodes 属性 6.0 将移除），直接用 node_tree
+    if mat.node_tree is None:
+        return None
     for n in mat.node_tree.nodes:
         if n.type == "BSDF_PRINCIPLED":
             return n
