@@ -53,12 +53,27 @@ def clear_scene():
     gc.collect()    
 
 
+def find_bsdf(mat):
+    """安全查找 Principled BSDF 节点（按节点类型而非名称）。
+
+    Blender 5.x 会按界面语言本地化节点名（中文界面下显示为「原理化 BSDF」），按
+    "Principled BSDF" 这个名字索引会拿不到节点：要么静默跳过材质设置，要么新建一个
+    节点却没接到材质输出上，材质就变成默认灰。按节点类型查找不受界面语言影响。
+    """
+    if not mat.node_tree or not mat.node_tree.nodes:
+        mat.use_nodes = True
+    for n in mat.node_tree.nodes:
+        if n.type == "BSDF_PRINCIPLED":
+            return n
+    return None
+
+
 def make_mat(name, color, roughness=0.5, metallic=0.0, emission=None, emission_strength=0.0,
              clearcoat=0.0, clearcoat_roughness=0.03, sheen=0.0, alpha=1.0, ior=1.45):
     """创建增强版 Principled BSDF 材质（支持涂层、光泽、透明度、折射率）"""
     mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get('Principled BSDF')
+    bsdf = find_bsdf(mat)
     if bsdf:
         bsdf.inputs['Base Color'].default_value = (*color, 1.0)
         bsdf.inputs['Roughness'].default_value = roughness
@@ -2780,7 +2795,7 @@ def enhance_all_materials():
     for mat in bpy.data.materials:
         if not mat.use_nodes:
             continue
-        bsdf = mat.node_tree.nodes.get('Principled BSDF')
+        bsdf = find_bsdf(mat)
         if not bsdf:
             continue
 

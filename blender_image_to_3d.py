@@ -59,13 +59,16 @@ def parse_args():
 
 
 def find_bsdf(mat):
-    """安全查找 Principled BSDF 节点（跨 Blender 版本，按类型而非名称）。"""
+    """安全查找 Principled BSDF 节点（跨 Blender 版本，按类型而非名称）。
+
+    不再按名字兜底：节点可以被改名，按名字可能命中一个并非 Principled BSDF 的节点。
+    """
     if not mat.node_tree or not mat.node_tree.nodes:
         mat.use_nodes = True
     for n in mat.node_tree.nodes:
         if n.type == "BSDF_PRINCIPLED":
             return n
-    return mat.node_tree.nodes.get("Principled BSDF")
+    return None
 
 
 def main():
