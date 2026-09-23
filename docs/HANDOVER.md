@@ -9,7 +9,7 @@
 > - 本地分支 `fix/python-ruff-lint` = `e2eb2fb`（基于 `dc0678b`），**尚未推送、尚未开 PR**
 > - CI 现状：`main` 上 **CI workflow 连续失败**，失败点是 `Python — Lint & Test` job 的 **Lint Python** 步骤；`Build and Test` workflow 为绿
 >
-> **2026-09-23 复核后**：上述待办已全部处理（见 §1 末尾「复核后落地」与 §7）。当前 `origin/main` = `cb48590`，CI 双 job 全绿。
+> **2026-09-23 复核后**：上述待办已全部处理（见 §1 末尾「复核后落地」与 §7）。当前 `origin/main` = `8c128cd`（图片转3D 统一调度器 #17 已合入），CI 双 job 全绿。
 
 ---
 
@@ -40,6 +40,7 @@
 | VLM 并发产物互踩 | 固定临时文件名改为每请求唯一（`createVlmJobPaths()` 提取到 `src/server-utils.js` 并可单测），请求结束在 `finally` 清理；Python 侧新增 `--code-out`，不再写死 `scripts/_vlm_generated_blender.py` | `cb48590` / #13 |
 | Blender 5.x 兼容 | 两个控制器脚本改为解析 `--` 之后的参数（原先照文档用法执行必报 `unrecognized arguments`）；21 处 `nodes["Principled BSDF"]` 改为按节点类型查找（中文界面下节点叫 `原理化 BSDF`，按名索引不是 KeyError 就是静默失效） | #14 |
 | 本地图片转3D「真实深度」 | `blender_image_to_3d.py` 新增 `--mode depth`：多线索单目深度先验（大气透视 / 地面垂直 / 中心主体 / 局部细节）+ 鲁棒百分位归一 + 尺度自适应的边缘感知平滑，默认带 0.08 真实厚度（侧墙 + 底盖，接缝处相邻块表面严格相邻不留沟壕）；manifest 记录 `depth_source`；numpy 缺失自动降级亮度法。同时修掉 relief/voxel 的高度场与贴图上下翻转（`img.pixels` 自下而上，原采样式取反了）。前端重建模式下拉默认改为「真实深度」；新增 `tests/img2depth_test.py` 14 项；CI Python job 显式装 numpy 否则深度测试整组 skip | 本轮 / #16 |
+| 图片转3D 统一调度器 | 新增 `src/image-to-3d-router.js`：`generateImageTo3D()` 唯一入口、统一契约 `{ glbBuffer, manifest }`、进程级能力 deps 注入；本地浮雕/体素/深度、TripoSR、四家云端、VLM 五路收敛，超时集中 `IMAGE_TO_3D_TIMEOUTS`；`server.js` 2220 → 1782 行，`handleGenToBlender` 的第三份云端分派副本也改走调度器。新增 45 项假 deps 单测挂进 `npm test`；回退时不用 `body.model` 当 Replicate 模型名的历史规则显式保留 | 本轮 / #17 |
 
 ---
 
@@ -201,7 +202,7 @@ Hyper3D 图生/文生共用模块私有的 `finishHyper3DTask`（轮询 → 取�
 |---|---|---|
 | ~~**Next**~~ | ~~本地"真实深度"模式~~ | ✅ 已完成（见 §1）：`--mode depth` 多线索单目深度先验 + 真实厚度，离线即用与天生可拆解两个优点均保留；relief/voxel 仍可选 |
 | Later | `main.js` 继续拆分 | 实测 2886 行（`AGENTS.md` 已同步为 2886）；已抽出 `model-loaders.js`、`quest3-parts.js`、`explode-geometry.js`，建议继续拆爆炸动画 / AR / 面板 |
-| Later | 统一图片转3D调度器 | 本地 / 云端 / VLM 三条路径散落在 `handleImageTo3D`，回退与超时逻辑重复，建议抽象 `generateImageTo3D()` |
+| ~~Later~~ | ~~统一图片转3D调度器~~ | ✅ 已完成（见 §1）：`generateImageTo3D()` 收敛在 `src/image-to-3d-router.js`，deps 注入可单测，回退/超时规则各只有一份 |
 | Later | E2E / Blender 冒烟进 CI | 本轮只收敛了 workflow，没加新门禁。`blender_split_glb.py` 冒烟是最硬的证据，但 runner 上装 Blender 会明显变慢，值得单独评估 |
 | Later | `Material.use_nodes` 迁移 | Blender 6.0 计划移除该属性（本机 5.1 已报 DeprecationWarning），涉及仓库所有材质创建处 |
 | Later | 清理 `scripts/_vlm_generated_blender.py` | 该文件是纳入版本控制的生成产物；改为按 `--out` 派生后已不再被覆盖，可考虑 gitignore 或直接删除 |
@@ -217,7 +218,7 @@ uvx --with numpy pytest@8 tests/ -q                                        # 期
 
 # 2) JS 质量门
 npm run lint:check  # 期望 0 errors（既有 26 条 warning 不阻断：CI 未加 --max-warnings 0）
-npm test         # 期望 unit 209/0、provider 38/0
+npm test         # 期望 unit 209/0、provider 38/0、router 45/0
 
 # 3) Blender 实跑（最硬的一条证据，证明 Python 侧行为没被改坏）
 /Applications/Blender.app/Contents/MacOS/Blender --background \
