@@ -2005,7 +2005,7 @@ function exportGLB() {
       (err) => {
         showToast("❌ GLB 导出失败：" + (err && err.message ? err.message : err), "error");
       },
-      { binary: true }
+      { binary: true },
     );
   } catch (err) {
     showToast("❌ GLB 导出失败：" + err.message, "error");

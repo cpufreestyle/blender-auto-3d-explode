@@ -550,6 +550,7 @@ input[type="range"]::-moz-range-thumb {
   border-top: 1px dashed rgb(255 255 255 / 12%);
   padding-top: 6px;
 }
+
 .adv-settings > summary {
   cursor: pointer;
   font-size: 12px;
@@ -584,7 +585,9 @@ input[type="range"]::-moz-range-thumb {
   background: rgb(10 12 18 / 55%);
   backdrop-filter: blur(2px);
 }
+
 .model-loading.hidden { display: none; }
+
 .model-loading-inner {
   display: flex; flex-direction: column; align-items: center; gap: 12px;
   padding: 14px 18px; border-radius: 12px;
