@@ -1,3 +1,6 @@
+# 仓库唯一的质量门。此前另有 .github/workflows/build-and-test.yml，对同一批文件重复做
+# JS/CSS lint + 测试 + 构建 + audit，两条 workflow 还会给出互相矛盾的信号（一个红一个绿），
+# 已删除并合并到本文件。新增门禁请加到这里，不要另起 workflow。
 name: CI
 
 on:
@@ -26,10 +29,11 @@ jobs:
         run: npm ci
 
       - name: Lint JavaScript
-        run: npm run lint
+        # 用不带 --fix 的变体：CI 要检查源码本身，而不是在 runner 上边跑边改
+        run: npm run lint:check
 
       - name: Lint CSS
-        run: npm run lint:css
+        run: npm run lint:css:check
 
       - name: Run tests
         run: npm test
@@ -71,5 +75,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pip install pytest
+          # 同样固定 pytest：大版本升级可能改变收集/断言语义，让与本次改动无关的提交变红。
+          # 本地复现（与 CI 同一批 15 项）：uvx pytest@8 tests/ -q
+          pip install "pytest==8.4.2"
           pytest tests/ -v
