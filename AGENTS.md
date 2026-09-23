@@ -19,16 +19,22 @@ npm run server
 # 运行全部单元测试
 npm test
 
+# 运行 Python 侧单元测试（15 项，零依赖，与 CI 的 pytest tests/ 同一批）
+npm run test:py
+
 # 运行 E2E 测试
 npm run test:e2e
 
-# ESLint 检查 + 自动修复
+# ESLint 检查 + 自动修复（会改文件，开发机上用）
 npm run lint
 
-# StyleLint CSS 检查
+# StyleLint CSS 检查 + 自动修复（会改文件，开发机上用）
 npm run lint:css
 
-# 完整验证（lint:all + test）
+# 只检查、不改文件的等价命令（CI 用的就是这组）
+npm run lint:all:check
+
+# 完整验证（lint:all:check + test，不会改动任何文件）
 npm run validate
 
 # 生产构建（webpack）
@@ -42,7 +48,7 @@ npm run format
 
 ### 1. 3D 场景引擎 — `main.js`
 
-前端入口，3300+ 行。负责 Three.js 场景初始化、WebGL/WebXR 检测、OrbitControls 相机控制、GLB/STL 模型加载、爆炸动画插值、乐高砖块拼接、AR 会话管理。所有用户交互与 UI 状态在此汇聚。
+前端入口，2886 行。负责 Three.js 场景初始化、WebGL/WebXR 检测、OrbitControls 相机控制、GLB/STL 模型加载、爆炸动画插值、乐高砖块拼接、AR 会话管理。所有用户交互与 UI 状态在此汇聚。
 
 ### 2. Node.js 后端 — `server.js` + `src/server-utils.js` + `src/body.js` + `src/logger.js`
 
@@ -58,9 +64,9 @@ npm run format
 
 纯数据模块，无副作用。`quest3-data.js` 存放 Quest 3 硬件规格与部件颜色/材质/位置定义；`quest3-steps.js` 定义分步骤拆解教学方案（步骤名、包含部件、所需工具、描述文案）。
 
-### 4. 几何体拆分与材质 — `src/geometry-split.js` + `src/lego-materials.js`
+### 4. 几何体拆分与材质 — `src/geometry-split.js` + `src/lego-materials.js` + `src/explode-geometry.js`
 
-纯函数模块。`geometry-split.js` 实现面提取、连通分量拆分、材质分组拆分、空间拆分（依赖 `src/utils.js` 的 UnionFind）；`lego-materials.js` 定义原生/乐高两套 THREE 材质及映射。
+纯函数模块。`geometry-split.js` 实现面提取、连通分量拆分、材质分组拆分、空间拆分（依赖 `src/utils.js` 的 UnionFind）；`lego-materials.js` 定义原生/乐高两套 THREE 材质及映射；`explode-geometry.js` 放爆炸视图的几何计算（方向/位置、多几何体合并），不引用 `main.js` 的模块级状态。
 
 ### 5. AI 提供商与图片转 3D — `src/providers/image-to-3d.js` + `src/provider-models.js`
 
