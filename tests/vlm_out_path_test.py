@@ -10,6 +10,7 @@ vlm_img_to_blender.py 的 --out 导出路径单测（无需 Blender / 无网络�
   python3 tests/vlm_out_path_test.py
   pytest tests/vlm_out_path_test.py -v
 """
+import importlib
 import os
 import sys
 import tempfile
@@ -31,9 +32,33 @@ class DefaultExportPathIsPlatformTemp(unittest.TestCase):
         expected = os.path.join(tempfile.gettempdir(), "vlm_img_to_3d.glb")
         self.assertEqual(m.EXPORT_PATH, expected)
 
-    def test_default_is_not_hardcoded_posix_tmp(self):
-        # 在非 POSIX 平台上，写死的 /tmp 路径是错的；默认值不得含硬编码前缀
-        self.assertFalse(m.EXPORT_PATH.startswith("/tmp/"))
+    def test_default_follows_platform_tempdir(self):
+        # 不能断言 EXPORT_PATH 不以 "/tmp/" 开头：POSIX 上 gettempdir() 本身就返回 /tmp，
+        # 那种写法只在本机 macOS（/var/folders/...）成立，到 Linux CI 必红。
+        # 真正的回归锁是「路径跟着平台临时目录走」：改 TMPDIR/TEMP/TMP 后重导入模块，
+        # 若源码里写死了 /tmp，新目录不会被采用，测试立刻失败。
+        with tempfile.TemporaryDirectory() as fake_tmp:
+            saved_env = {k: os.environ.get(k) for k in ("TMPDIR", "TEMP", "TMP")}
+            saved_cache = tempfile.tempdir
+            for key in ("TMPDIR", "TEMP", "TMP"):
+                os.environ[key] = fake_tmp
+            try:
+                # gettempdir() 有缓存；不清掉 tempfile.tempdir，重导入拿到的还是旧目录
+                tempfile.tempdir = None
+                importlib.reload(m)
+                self.assertEqual(
+                    os.path.dirname(m.EXPORT_PATH),
+                    os.path.abspath(fake_tmp),
+                    "默认导出路径必须取自 tempfile.gettempdir()，而不是写死的 /tmp",
+                )
+            finally:
+                tempfile.tempdir = saved_cache
+                for key, value in saved_env.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
+                importlib.reload(m)
 
 
 class BuildExportCodeThreadsPath(unittest.TestCase):
