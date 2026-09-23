@@ -211,7 +211,21 @@ def parse_args(argv=None):
     ap.add_argument("--model", default=None, help="覆盖模型名")
     ap.add_argument("--image", default=DEFAULT_IMG)
     ap.add_argument("--out", default=EXPORT_PATH, help="GLB 导出路径（默认平台临时目录）")
+    ap.add_argument(
+        "--code-out",
+        default=None,
+        help="最终生成代码的落盘路径（默认由 --out 派生，随产物目录走）",
+    )
     return ap.parse_args(argv)
+
+
+def generated_code_path(out_path):
+    """最终生成的 Blender 代码落盘路径，由 --out 派生。
+
+    不再写死 scripts/_vlm_generated_blender.py：固定名在并发调用下会互相覆盖，
+    还会把仓库工作区弄脏（该文件是纳入版本控制的）。
+    """
+    return os.path.splitext(os.path.abspath(out_path))[0] + "_generated.py"
 
 
 def run():
@@ -294,8 +308,8 @@ def run():
         except Exception as e:
             print(f"  导出失败: {e}")
 
-    out_path = os.path.join(HERE, "_vlm_generated_blender.py")
-    with open(out_path, "w") as f:
+    code_path = args.code_out or generated_code_path(args.out)
+    with open(code_path, "w") as f:
         f.write(last_code or "")
 
     print("\n" + "=" * 50)
@@ -306,7 +320,7 @@ def run():
     else:
         print("失败：未能在限定重试次数内生成可执行代码")
         print(f"最后一次错误: {last_err}")
-    print(f"最终代码已写入: {out_path}")
+    print(f"最终代码已写入: {code_path}")
 
 
 if __name__ == "__main__":

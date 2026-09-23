@@ -5,6 +5,8 @@ vlm_img_to_blender.py 的 --out 导出路径单测（无需 Blender / 无网络�
 锁定两个缺陷的回归：
   1. 导出路径曾硬编码 "/tmp/vlm_img_to_3d.glb"，在 win32 上不存在该目录；
   2. 路径需真正穿透进发给 Blender 的导出代码，否则 server.js 传的 --out 会被忽略。
+  3. 最终生成的代码同样不能落到固定文件名上（旧行为写死 scripts/ 下的名字，
+     并发调用会互相覆盖，还会弄脏仓库工作区）。
 
 运行:
   python3 tests/vlm_out_path_test.py
@@ -76,6 +78,41 @@ class BuildExportCodeThreadsPath(unittest.TestCase):
             m.build_export_code("/a/one.glb"),
             m.build_export_code("/a/two.glb"),
         )
+
+
+class GeneratedCodePathFollowsOut(unittest.TestCase):
+    """最终生成代码的落盘路径必须随 --out 走，不能是固定文件名。"""
+
+    def test_derives_from_out_path(self):
+        out = os.path.join(tempfile.gettempdir(), "a.glb")
+        expected = os.path.join(tempfile.gettempdir(), "a_generated.py")
+        self.assertEqual(m.generated_code_path(out), expected)
+
+    def test_two_out_paths_produce_two_paths(self):
+        # 固定名会让两个并发调用互相覆盖对方的代码文件
+        self.assertNotEqual(
+            m.generated_code_path("/tmp/one.glb"),
+            m.generated_code_path("/tmp/two.glb"),
+        )
+
+    def test_default_derived_path_is_next_to_output(self):
+        # 默认（不显式给 --code-out）时，代码文件挨着产物，而不是写死在 scripts/ 里
+        self.assertEqual(
+            os.path.dirname(m.generated_code_path(m.EXPORT_PATH)),
+            os.path.dirname(m.EXPORT_PATH),
+        )
+
+
+class ParseArgsAcceptsCodeOut(unittest.TestCase):
+    """调用方可显式指定最终代码的落盘路径（server.js 就是这么传的）。"""
+
+    def test_code_out_flag_is_accepted(self):
+        args = m.parse_args(["--out", "/d/o.glb", "--code-out", "/d/o_generated.py"])
+        self.assertEqual(args.code_out, "/d/o_generated.py")
+
+    def test_code_out_defaults_to_none(self):
+        # 缺省为空，由 generated_code_path(args.out) 派生
+        self.assertIsNone(m.parse_args([]).code_out)
 
 
 class ParseArgsAcceptsOut(unittest.TestCase):
