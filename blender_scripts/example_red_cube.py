@@ -21,7 +21,15 @@ cube.name = "AutoRedCube"
 # 创建材质
 mat = bpy.data.materials.new(name="RedMaterial")
 mat.use_nodes = True
-bsdf = mat.node_tree.nodes["Principled BSDF"]
+# 按节点类型查找而非名字：Blender 5.x 会按界面语言本地化节点名（中文界面下是
+# 「原理化 BSDF」），按名字索引直接 KeyError
+bsdf = None
+for n in mat.node_tree.nodes:
+    if n.type == "BSDF_PRINCIPLED":
+        bsdf = n
+        break
+if not bsdf:
+    bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
 bsdf.inputs['Base Color'].default_value = (0.8, 0.2, 0.2, 1.0)  # 红色
 bsdf.inputs['Roughness'].default_value = 0.3
 

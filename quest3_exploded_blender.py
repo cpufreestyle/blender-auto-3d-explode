@@ -40,6 +40,21 @@ from mathutils import Vector
 from typing import List, Tuple
 
 
+def find_bsdf(mat):
+    """安全查找 Principled BSDF 节点（按节点类型而非名称）。
+
+    Blender 5.x 会按界面语言本地化节点名（中文界面下显示为「原理化 BSDF」），按
+    "Principled BSDF" 这个名字索引会拿不到节点：要么静默跳过材质设置，要么新建一个
+    节点却没接到材质输出上，材质就变成默认灰。按节点类型查找不受界面语言影响。
+    """
+    if not mat.node_tree or not mat.node_tree.nodes:
+        mat.use_nodes = True
+    for n in mat.node_tree.nodes:
+        if n.type == "BSDF_PRINCIPLED":
+            return n
+    return None
+
+
 # ========== 材质定义 ==========
 
 def create_materials():
@@ -50,7 +65,7 @@ def create_materials():
     # 白色前面板（亚光塑料）
     mat = bpy.data.materials.new(name="FrontPlate")
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
     bsdf.inputs['Base Color'].default_value = (0.97, 0.97, 0.97, 1.0)
@@ -65,7 +80,7 @@ def create_materials():
     # 黑色主机身（哑光塑料）
     mat = bpy.data.materials.new(name="Body")
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
     bsdf.inputs['Base Color'].default_value = (0.12, 0.12, 0.13, 1.0)
@@ -76,7 +91,7 @@ def create_materials():
     # 深空蓝透镜外环（金属质感）
     mat = bpy.data.materials.new(name="LensBarrel")
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
     bsdf.inputs['Base Color'].default_value = (0.1, 0.18, 0.29, 1.0)
@@ -90,7 +105,7 @@ def create_materials():
     # 透镜玻璃（透明蓝色）
     mat = bpy.data.materials.new(name="LensGlass")
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
     bsdf.inputs['Base Color'].default_value = (0.6, 0.8, 1.0, 1.0)
@@ -104,7 +119,7 @@ def create_materials():
     # 摄像头（深色玻璃纤维）
     mat = bpy.data.materials.new(name="Camera")
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
     bsdf.inputs['Base Color'].default_value = (0.05, 0.05, 0.05, 1.0)
@@ -115,7 +130,7 @@ def create_materials():
     # 传感器镜头
     mat = bpy.data.materials.new(name="Sensor")
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
     bsdf.inputs['Base Color'].default_value = (0.04, 0.1, 0.2, 1.0)
@@ -127,7 +142,7 @@ def create_materials():
     # 头带臂（深灰色塑料）
     mat = bpy.data.materials.new(name="StrapArm")
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
     bsdf.inputs['Base Color'].default_value = (0.18, 0.18, 0.19, 1.0)
@@ -138,7 +153,7 @@ def create_materials():
     # 记忆海绵（深灰色，高粗糙度）
     mat = bpy.data.materials.new(name="Foam")
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
     bsdf.inputs['Base Color'].default_value = (0.1, 0.1, 0.11, 1.0)
@@ -149,7 +164,7 @@ def create_materials():
     # 主板 PCB（深绿色）
     mat = bpy.data.materials.new(name="PCB")
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    bsdf = find_bsdf(mat)
     if not bsdf:
         bsdf = mat.node_tree.nodes.new(type='ShaderNodeBsdfPrincipled')
     bsdf.inputs['Base Color'].default_value = (0.04, 0.25, 0.13, 1.0)
