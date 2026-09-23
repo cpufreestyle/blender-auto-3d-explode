@@ -403,7 +403,7 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
         // 部署方式 + 模型：本地走 TripoSR 真重建，云端走 Replicate（owner/name）
         const payload = { image: uploadedImageDataUrl, deploy };
         if (deploy === "local") {
-          payload.mode = imgTo3DModeLocal ? imgTo3DModeLocal.value : "relief"; // relief | voxel
+          payload.mode = imgTo3DModeLocal ? imgTo3DModeLocal.value : "depth"; // depth | relief | voxel
           payload.tiles = imgTo3DTilesLocal ? (parseInt(imgTo3DTilesLocal.value, 10) || 3) : 3; // 拆解块数，越大越易拆解
           payload.real = !!(imgTo3DReal && imgTo3DReal.checked); // 真重建需本机就绪 TripoSR
           payload.removeBg = imgTo3DRemoveBg ? imgTo3DRemoveBg.checked : true; // 去背景（真重建时用）

@@ -978,8 +978,8 @@ async function runLocalReliefImageTo3D(rep, body, imageBase64, res, startTime) {
     throw new Error("未找到本地重建脚本: " + reliefScript);
   }
 
-  const mode = (body.mode || rep.mode || "relief").toLowerCase(); // relief | voxel
-  if (mode !== "relief" && mode !== "voxel") {
+  const mode = (body.mode || rep.mode || "relief").toLowerCase(); // relief | voxel | depth
+  if (mode !== "relief" && mode !== "voxel" && mode !== "depth") {
     throw new Error(`不支持的本地重建 mode: ${mode}`);
   }
   const tiles = Math.min(Math.max(parseInt(body.tiles ?? rep.tiles ?? 3, 10), 1), 8);
@@ -987,6 +987,12 @@ async function runLocalReliefImageTo3D(rep, body, imageBase64, res, startTime) {
   const depth = Math.min(Math.max(parseFloat(body.depth ?? rep.depth ?? 0.35), 0.02), 2);
   // 默认内嵌原图贴图，保证生成结果保留颜色（设为 false 可得到纯灰白浮雕，便于教学高亮）
   const useTexture = !!(body.texture ?? rep.texture ?? true);
+  // depth 模式给模型真实厚度（侧墙 + 底盖），从背面看也是实体；relief/voxel 保持单面薄片
+  const thicknessArgs = [];
+  if (mode === "depth") {
+    const thickness = Math.min(Math.max(parseFloat(body.thickness ?? rep.thickness ?? 0.08), 0), 1);
+    thicknessArgs.push("--thickness", String(thickness));
+  }
 
   const args = [
     "--background", "--python", reliefScript, "--",
@@ -997,6 +1003,7 @@ async function runLocalReliefImageTo3D(rep, body, imageBase64, res, startTime) {
     "--tiles", String(tiles),
     "--resolution", String(resolution),
     "--depth", String(depth),
+    ...thicknessArgs,
   ];
   if (useTexture) args.push("--texture");
 
