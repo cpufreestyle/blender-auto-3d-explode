@@ -76,6 +76,7 @@ jobs:
       - name: Run tests
         run: |
           # 同样固定 pytest：大版本升级可能改变收集/断言语义，让与本次改动无关的提交变红。
-          # 本地复现（与 CI 同一批 15 项）：uvx pytest@8 tests/ -q
-          pip install "pytest==8.4.2"
+          # numpy 必须显式安装：img2depth_test 的深度先验测试依赖它，否则整组 skip。
+          # 本地复现：uvx --with numpy pytest@8 tests/ -q
+          pip install "pytest==8.4.2" "numpy"
           pytest tests/ -v
