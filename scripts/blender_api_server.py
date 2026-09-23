@@ -262,9 +262,16 @@ class BlenderAPIServer:
 
 def main():
     """主函数"""
+    # Blender 不会把脚本所在目录放进 sys.path，先引导再导入同目录 blender_control 里的
+    # 参数解析助手（与 start() 中导入 BlenderController 是同一套做法）。
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from blender_control import argv_after_double_dash
+
+    # 只认 `--` 之后的参数：Blender 的 sys.argv 里还混着 --background / --python 等
+    # 它自己的参数，整条交给 argparse 会报 unrecognized arguments。
     parser = argparse.ArgumentParser(description='Blender HTTP API 服务器')
     parser.add_argument('--port', type=int, default=8000, help='服务器端口（默认: 8000）')
-    args = parser.parse_args()
+    args = parser.parse_args(argv_after_double_dash())
 
     server = BlenderAPIServer(port=args.port)
     server.start()

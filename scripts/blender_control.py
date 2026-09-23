@@ -23,6 +23,7 @@ blender --background --python blender_control.py -- --config config.json
 import bpy
 import json
 import argparse
+import sys
 from math import radians
 from typing import Dict, Any
 
@@ -200,7 +201,16 @@ class BlenderController:
         # 创建新材质
         mat = bpy.data.materials.new(name=f"{obj_name}_Material")
         mat.use_nodes = True
-        bsdf = mat.node_tree.nodes["Principled BSDF"]
+        # 按节点类型查找而非名字：Blender 5.x 会按界面语言本地化节点名（中文界面下是
+        # 「原理化 BSDF」），按名字索引直接 KeyError，apply_material 整条路都会断
+        bsdf = None
+        for node in mat.node_tree.nodes:
+            if node.type == "BSDF_PRINCIPLED":
+                bsdf = node
+                break
+        if not bsdf:
+            print(f"❌ 材质节点树缺少 Principled BSDF 节点，跳过 {obj_name}")
+            return
 
         # 设置属性
         bsdf.inputs['Base Color'].default_value = color
@@ -396,13 +406,28 @@ def load_config(config_path: str) -> Dict[str, Any]:
         return {}
 
 
+def argv_after_double_dash(argv=None):
+    """取 Blender `--` 之后的参数（只属于本脚本的那部分）。
+
+    Blender 后台模式的调用形态是 `blender -b --python 本脚本 -- <args>`，此刻
+    sys.argv 里还混着 Blender 自己的参数（--background / --python ...）。整条交给
+    argparse 必然报 unrecognized arguments，所以只取 `--` 之后的部分；
+    直接以 `python3 本脚本 <args>` 运行时则退回 argv[1:]。
+    """
+    if argv is None:
+        argv = sys.argv
+    if "--" in argv:
+        return argv[argv.index("--") + 1:]
+    return argv[1:]
+
+
 def main():
     """主函数"""
-    # 解析命令行参数
+    # 解析命令行参数（只认 -- 之后的部分，见 argv_after_double_dash）
     parser = argparse.ArgumentParser(description='Blender Python API 控制器')
     parser.add_argument('--config', type=str, help='配置文件路径')
     parser.add_argument('--demo', action='store_true', help='运行演示模式')
-    args = parser.parse_args()
+    args = parser.parse_args(argv_after_double_dash())
 
     # 创建控制器
     controller = BlenderController()
