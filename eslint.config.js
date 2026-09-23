@@ -11,6 +11,7 @@ export default [
   {
     files: [
       'main.js',
+      'src/ar-preview.js',
       'src/quest3-data.js',
       'src/quest3-steps.js',
       'src/utils.js'
