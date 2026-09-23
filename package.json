@@ -7,7 +7,7 @@
     "dev": "npx serve .",
     "server": "node server.js",
     "start": "node server.js",
-    "test": "node tests/unit-test.mjs && node tests/provider-test.mjs",
+    "test": "node tests/unit-test.mjs && node tests/provider-test.mjs && node tests/image-to-3d-router-test.mjs",
     "test:unit": "node tests/unit-test.mjs",
     "test:provider": "node tests/provider-test.mjs",
     "test:py": "python3 -m unittest discover -s tests -p '*_test.py'",
