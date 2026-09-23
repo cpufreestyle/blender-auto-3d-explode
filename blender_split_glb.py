@@ -538,7 +538,9 @@ def _fill_missing_quest3_parts(model_center, half_x, half_y, half_z):
         mat = bpy.data.materials.get(mat_name)
         if mat is None:
             mat = bpy.data.materials.new(name=mat_name)
-            bsdf = mat.node_tree.nodes.get('Principled BSDF')
+            # 按节点类型查找而非名字：Blender 5.x 会按界面语言本地化节点名（中文界面下是
+            # 「原理化 BSDF」），按名字索引在本机静默返回 None，占位高亮色会失效
+            bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
             if bsdf:
                 bsdf.inputs['Base Color'].default_value = (0.5, 0.7, 1.0, 1.0)
                 bsdf.inputs['Alpha'].default_value = 0.3
