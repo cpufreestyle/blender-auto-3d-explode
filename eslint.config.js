@@ -12,6 +12,7 @@ export default [
     files: [
       'main.js',
       'src/ar-preview.js',
+      'src/explode-controller.js',
       'src/export-panel.js',
       'src/upload-panel.js',
       'src/quest3-data.js',
@@ -108,6 +109,10 @@ export default [
         clearTimeout: 'readonly',
         setInterval: 'readonly',
         clearInterval: 'readonly',
+        requestAnimationFrame: 'readonly',
+        cancelAnimationFrame: 'readonly',
+        performance: 'readonly',
+        globalThis: 'readonly',
         TextDecoder: 'readonly',
         TextEncoder: 'readonly',
         atob: 'readonly',

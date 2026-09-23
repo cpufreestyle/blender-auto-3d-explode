@@ -14,7 +14,6 @@ import {
   Fog,
   GridHelper,
   Group,
-  MathUtils,
   Mesh,
   MeshBasicMaterial,
   BasicShadowMap,
@@ -30,11 +29,10 @@ import {
   WebGLRenderer,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { createExplodeController } from "./src/explode-controller.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { defaultStepGroups } from "./src/quest3-steps.js";
 import {
-  easeOutCubic,
-  smoothStep,
   isQuest3Model,
   computeStepGroupCount,
   sortPartsForDisassembly,
@@ -175,7 +173,6 @@ let currentStep = 0; // 实际显示步骤（动画中）
 let displayedStep = 0; // 当前 UI 显示的步骤（已完成）
 let animatingStep = 0; // 动画目标步骤
 let explodeLoop = false; // 爆炸/合体动画是否自动循环播放
-let needsExplodeUpdate = true; // 脏标记：需要重新计算部件位置
 let isExploded = false; // 是否已完全炸开
 let autoExplodeTimer = null; // 「少点击」优化：完成拆解/生成后自动播一次爆炸动画
 
@@ -183,6 +180,34 @@ let autoExplodeTimer = null; // 「少点击」优化：完成拆解/生成后�
 const explodeBtn = document.getElementById("explode-btn");
 const timelineSlider = document.getElementById("timeline-slider");
 const toolsListEl = document.getElementById("tools-list");
+
+// 步骤 / 爆炸控制相关的 DOM 元素（实现迁至 src/explode-controller.js）
+const stepUi = {
+  explodeBtn,
+  timelineSlider,
+  toolsListEl,
+  prevBtn: document.getElementById("prev-step"),
+  nextBtn: document.getElementById("next-step"),
+  resetBtn: document.getElementById("reset-step"),
+  stepNumberEl: document.getElementById("step-number"),
+  stepNameEl: document.getElementById("step-name"),
+  stepDescEl: document.getElementById("step-desc"),
+  progressFillEl: document.getElementById("progress-fill"),
+  autoRotateCheck: document.getElementById("auto-rotate"),
+  depthSlider: document.getElementById("explode-depth"),
+  depthValueEl: document.getElementById("depth-value"),
+  timelineStepEl: document.getElementById("timeline-step"),
+  timelinePlayBtn: document.getElementById("timeline-play"),
+  timelineResetBtn: document.getElementById("timeline-reset"),
+  timelineSpeedSelect: document.getElementById("timeline-speed"),
+  explodeLoopBtn: document.getElementById("explode-loop"),
+  explodeLoopSpeed: document.getElementById("explode-loop-speed"),
+};
+// 早声明、后赋值：finalizeCustomModelLoad 等前部函数要在运行时调用它，
+// 而 createExplodeController 需要 axisMat（下方才创建）等依赖
+let explodeCtl = null;
+// 主模块另有两处直接使用（步骤描述淡入 / 自动旋转快捷键）
+const { stepDescEl, autoRotateCheck } = stepUi;
 
 // ===== 自动适配相机到模型 =====
 function fitCameraToModel(modelGroup, smooth = true) {
@@ -648,7 +673,7 @@ function finalizeCustomModelLoad(fileName, opts = {}) {
 
   // 更新 UI
   updateCustomModelUI(customModelParts.length, fileName);
-  updateStepUI();
+  explodeCtl.updateStepUI();
 
   // 自动缩放
   autoScaleModel(modelType);
@@ -663,7 +688,7 @@ function finalizeCustomModelLoad(fileName, opts = {}) {
   maybeApplyAssemblySequence(fileName);
 
   // 回到合体状态
-  goToStep(0);
+  explodeCtl.goToStep(0);
   isExploded = false;
   explodeBtn.classList.remove("exploded");
   explodeBtn.textContent = "💥 爆炸";
@@ -674,7 +699,7 @@ function finalizeCustomModelLoad(fileName, opts = {}) {
     clearTimeout(autoExplodeTimer);
     autoExplodeTimer = setTimeout(() => {
       autoExplodeTimer = null;
-      if (!isExploded && !explodeLoop) toggleExplode();
+      if (!isExploded && !explodeLoop) explodeCtl.toggleExplode();
     }, 500);
   }
 }
@@ -797,7 +822,7 @@ async function maybeApplyAssemblySequence(fileName) {
   stepGroups = generateCustomStepGroups(customModelParts, fileName);
   totalSteps = stepGroups.length;
   if (currentStep >= totalSteps) currentStep = totalSteps - 1;
-  if (typeof updateStepUI === "function") updateStepUI();
+  if (typeof explodeCtl.updateStepUI === "function") explodeCtl.updateStepUI();
   showStatus(`🔧 已根据 Blender 装配分析优化拆解顺序（匹配 ${overlap.length} 个部件）`, "success");
 
   // 同一份 Blender 数据可用：自动拉取可制造性评分并展开面板
@@ -1143,7 +1168,7 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
       totalSteps = previousTotalSteps;
       currentStep = previousCurrentStep;
       displayedStep = previousDisplayedStep;
-      updateStepUI();
+      explodeCtl.updateStepUI();
       fitCameraToModel(customModelGroup, false);
     } else {
       questGroup.visible = true;
@@ -1152,7 +1177,7 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
       totalSteps = stepGroups.length;
       currentStep = 0;
       displayedStep = 0;
-      updateStepUI();
+      explodeCtl.updateStepUI();
       fitCameraToModel(questGroup, false);
     }
   } finally {
@@ -1315,7 +1340,7 @@ function clearCustomModel() {
   });
 
   // 更新 UI
-  updateStepUI();
+  explodeCtl.updateStepUI();
   fitCameraToModel(questGroup, false);
 
   showStatus("已清除自定义模型，恢复默认", "info");
@@ -1337,22 +1362,6 @@ fitCameraToModel(questGroup, false);
 // ===== 分步骤拆解（教学导向，参考 iFixit 风格）=====
 // defaultStepGroups 已从 ./src/quest3-steps.js 导入
 // stepGroups / totalSteps 声明见文件上方「模块共享状态与引用」
-
-// 工具清单更新
-function updateToolsList(step) {
-  if (!toolsListEl) return;
-
-  const tools = step.tools || [];
-
-  if (tools.length === 0) {
-    toolsListEl.innerHTML = "<div class=\"tools-none\">✅ 本步骤无需工具</div>";
-  } else {
-    toolsListEl.innerHTML = tools.map(tool => `<div class="tool-item">${tool}</div>`).join("");
-  }
-}
-
-// defaultStepGroups 已从 ./src/quest3-steps.js 导入
-// totalSteps 声明见文件上方「模块共享状态与引用」
 
 // 给每个部件分配步骤序号（默认最后一步）
 parts.forEach(part => {
@@ -1379,214 +1388,44 @@ console.log(
   parts.map(p => `${p.mesh.userData.name}->步骤${p.stepIndex}`),
 );
 
-// ===== 步骤控制 UI =====
-// currentStep / displayedStep / animatingStep 声明见文件上方「模块共享状态与引用」
-let animationStart = 0; // 动画开始时间
-let animationFrom = 0; // 动画起始步骤
-let mouseFactor = 0; // 鼠标控制炸开因子 (0-1)
-let mouseControlEnabled = false; // 是否启用鼠标控制
-const stepDuration = 600; // 每步动画时长（毫秒）
-let isAnimating = false;
-
-// ===== 一键爆炸/合体的平滑动画（所有部件同时炸开/合体）=====
-let explodeAnimActive = false; // 是否正在播放爆炸/合体动画
-let explodeAnimFrom = 0; // 起始全局炸开因子 (0=合体, 1=完全炸开)
-let explodeAnimTo = 0; // 目标全局炸开因子
-let explodeAnimStart = 0; // 动画开始时间戳
-let explodeAnimFactor = 0; // 当前全局炸开因子
-let explodeAllMode = false; // true 时所有部件按同一因子同时炸开（忽略分步）
-let explodeAnimDuration = 1100; // 爆炸动画时长（毫秒，受循环速度档控制）
-let loopHoldMs = 900; // 循环播放时炸开/合体之间的停留时间（毫秒）
-let explodeLoopTimer = null; // 循环反向定时器，便于手动接管时取消
-// explodeLoop / explodeBtn / isExploded / autoExplodeTimer / needsExplodeUpdate
-// 声明见文件上方「模块共享状态与引用」
-
-const prevBtn = document.getElementById("prev-step");
-const nextBtn = document.getElementById("next-step");
-const resetBtn = document.getElementById("reset-step");
-const stepNumberEl = document.getElementById("step-number");
-const stepNameEl = document.getElementById("step-name");
-const stepDescEl = document.getElementById("step-desc");
-const progressFillEl = document.getElementById("progress-fill");
-const autoRotateCheck = document.getElementById("auto-rotate");
-
-// 新增 UI 元素
-const depthSlider = document.getElementById("explode-depth");
-const depthValueEl = document.getElementById("depth-value");
-// timelineSlider / toolsListEl 声明见文件上方「模块共享状态与引用」
-const timelineStepEl = document.getElementById("timeline-step");
-const timelinePlayBtn = document.getElementById("timeline-play");
-const timelineResetBtn = document.getElementById("timeline-reset");
-const timelineSpeedSelect = document.getElementById("timeline-speed");
-
-console.log("UI elements:", {
-  prevBtn: !!prevBtn,
-  nextBtn: !!nextBtn,
-  resetBtn: !!resetBtn,
-  stepNumberEl: !!stepNumberEl,
-  stepNameEl: !!stepNameEl,
-  stepDescEl: !!stepDescEl,
-  progressFillEl: !!progressFillEl,
-  autoRotateCheck: !!autoRotateCheck,
+// ===== 步骤控制 / 爆炸动画控制器 =====
+// 实现迁至 src/explode-controller.js。
+//   - camera / controls / renderer / parts / axisMat 是本文件的 const 稳定引用；
+//   - stepUi 是上方集中的 DOM 元素集合；
+//   - getState / setState 桥接「模块共享状态与引用」里那批会被多处重赋值的 let：
+//     控制器读 s.xxx 走 getState 现取，写 s.xxx 走 setState 立即回写，
+//     因此两边看到的是同一份状态，不会各写一份写成岔路。
+explodeCtl = createExplodeController({
+  camera,
+  controls,
+  renderer,
+  parts,
+  axisMat,
+  ui: stepUi,
+  getState: () => ({
+    stepGroups,
+    totalSteps,
+    currentStep,
+    displayedStep,
+    animatingStep,
+    isExploded,
+    explodeLoop,
+    hasCustomModel,
+    customModelParts,
+  }),
+  setState: patch => {
+    // 与控制器里的 SHARED_STATE_KEYS 一一对应；目前控制器只写前五项，其余为对称保留
+    if ("stepGroups" in patch) stepGroups = patch.stepGroups;
+    if ("totalSteps" in patch) totalSteps = patch.totalSteps;
+    if ("currentStep" in patch) currentStep = patch.currentStep;
+    if ("displayedStep" in patch) displayedStep = patch.displayedStep;
+    if ("animatingStep" in patch) animatingStep = patch.animatingStep;
+    if ("isExploded" in patch) isExploded = patch.isExploded;
+    if ("explodeLoop" in patch) explodeLoop = patch.explodeLoop;
+    if ("hasCustomModel" in patch) hasCustomModel = patch.hasCustomModel;
+    if ("customModelParts" in patch) customModelParts = patch.customModelParts;
+  },
 });
-
-// easeOutCubic 已从 src/utils.js 导入
-
-// 部件高亮相关
-const highlightEmissive = new Color(0x4a9eff);
-const highlightScale = 1.08;
-let highlightedPart = null; // 当前高亮的部件
-
-function highlightPart(partName) {
-  // 清除之前的高亮
-  if (highlightedPart) {
-    if (highlightedPart.mesh.material && highlightedPart.mesh.material.emissive) {
-      highlightedPart.mesh.material.emissive.setHex(0x000000);
-    }
-    highlightedPart.mesh.scale.setScalar(1);
-  }
-
-  // 设置新高亮
-  if (partName) {
-    // 先在默认部件中查找
-    let part = parts.find(p => p.name === partName);
-    // 如果没找到且正在使用自定义模型，在自定义部件中查找
-    if (!part && hasCustomModel) {
-      part = customModelParts.find(p => p.name === partName);
-    }
-    if (part) {
-      highlightedPart = part;
-      if (part.mesh.material && part.mesh.material.emissive) {
-        part.mesh.material.emissive.copy(highlightEmissive);
-      }
-      part.mesh.scale.setScalar(highlightScale);
-    }
-  } else {
-    highlightedPart = null;
-  }
-}
-
-function updateStepUI() {
-  // 在鼠标控制模式下，显示当前的鼠标控制步骤
-  const displayStep = mouseControlEnabled ? Math.round(mouseFactor * totalSteps) : displayedStep;
-  stepNumberEl.textContent = `步骤 ${displayStep} / ${totalSteps}`;
-  stepNameEl.textContent = stepGroups[Math.min(displayStep, totalSteps - 1)].name;
-
-  // 更新步骤说明
-  const stepIndex = Math.min(displayStep, totalSteps - 1);
-  const step = stepGroups[stepIndex];
-  if (step && stepDescEl) {
-    stepDescEl.innerHTML = step.description || "";
-  }
-
-  // 更新工具清单
-  updateToolsList(step);
-
-  // 更新部件高亮
-  if (step && step.parts.length > 0) {
-    highlightPart(step.parts[0]);
-  } else {
-    highlightPart(null);
-  }
-
-  progressFillEl.style.width = `${(displayStep / totalSteps) * 100}%`;
-
-  // 动画过程中禁用按钮，防止连续点击导致步骤混乱
-  prevBtn.disabled = isAnimating || (mouseControlEnabled ? false : displayedStep <= 0);
-  nextBtn.disabled = isAnimating || (mouseControlEnabled ? false : displayedStep >= totalSteps);
-  resetBtn.disabled = isAnimating || mouseControlEnabled;
-
-  // 更新时间轴
-  if (timelineSlider) {
-    timelineSlider.value = displayStep;
-    timelineStepEl.textContent = displayStep;
-  }
-}
-
-// 退出鼠标控制模式，将当前 mouseFactor 同步到 currentStep/displayedStep
-function exitMouseControl() {
-  mouseControlEnabled = false;
-  needsExplodeUpdate = true; // 标记需要重新计算
-  isExploded = false;
-  explodeBtn?.classList.remove("exploded");
-  if (explodeBtn) explodeBtn.textContent = "💥 爆炸";
-  // 把 mouseFactor 对应的步骤同步到 displayedStep，保证动画从当前位置开始
-  displayedStep = Math.round(mouseFactor * totalSteps);
-  currentStep = mouseFactor * totalSteps;
-}
-
-function goToStep(newStep) {
-  newStep = MathUtils.clamp(newStep, 0, totalSteps);
-  if (newStep === displayedStep || isAnimating) return;
-
-  stopExplodeLoop(); // 手动分步控制接管，停止循环播放
-  needsExplodeUpdate = true; // 标记需要重新计算部件位置
-  animationFrom = currentStep;
-  animatingStep = newStep;
-  animationStart = performance.now();
-  isAnimating = true;
-  updateStepUI();
-}
-
-function finishAnimation() {
-  isAnimating = false;
-  currentStep = animatingStep;
-  displayedStep = animatingStep;
-  updateStepUI();
-}
-
-// 时间轴控制
-let isPlaying = false;
-let playInterval = null;
-
-if (timelineSlider) {
-  timelineSlider.addEventListener("input", e => {
-    if (mouseControlEnabled) exitMouseControl();
-    const step = parseInt(e.target.value);
-    goToStep(step);
-  });
-}
-
-if (timelinePlayBtn) {
-  timelinePlayBtn.addEventListener("click", () => {
-    if (mouseControlEnabled) exitMouseControl();
-    if (isPlaying) {
-      // 暂停
-      clearInterval(playInterval);
-      isPlaying = false;
-      timelinePlayBtn.textContent = "▶️ 播放";
-    } else {
-      // 播放
-      isPlaying = true;
-      timelinePlayBtn.textContent = "⏸️ 暂停";
-
-      const speed = parseFloat(timelineSpeedSelect?.value || 1);
-      const interval = 700 / speed; // 每步时间
-
-      playInterval = setInterval(() => {
-        if (displayedStep >= totalSteps) {
-          clearInterval(playInterval);
-          isPlaying = false;
-          timelinePlayBtn.textContent = "▶️ 播放";
-          return;
-        }
-        goToStep(displayedStep + 1);
-      }, interval);
-    }
-  });
-}
-
-if (timelineResetBtn) {
-  timelineResetBtn.addEventListener("click", () => {
-    if (mouseControlEnabled) exitMouseControl();
-    if (isPlaying) {
-      clearInterval(playInterval);
-      isPlaying = false;
-      timelinePlayBtn.textContent = "▶️ 播放";
-    }
-    goToStep(0);
-  });
-}
 
 // 移动端检测
 if (isMobile) {
@@ -1605,107 +1444,10 @@ if (isMobile) {
   };
 }
 
-// 点击步骤按钮时，自动退出鼠标控制模式，让步骤动画接管
-prevBtn.addEventListener("click", () => {
-  if (mouseControlEnabled) exitMouseControl();
-  goToStep(displayedStep - 1);
-});
-nextBtn.addEventListener("click", () => {
-  if (mouseControlEnabled) exitMouseControl();
-  goToStep(displayedStep + 1);
-});
-resetBtn.addEventListener("click", () => {
-  if (mouseControlEnabled) exitMouseControl();
-  goToStep(0);
-});
-
-// 爆炸按钮：在完全合体和完全爆炸之间切换
-// （explodeBtn / isExploded / autoExplodeTimer 的声明见上方「爆炸/拆解状态」区，此处不再重复声明）
-
 // 装配分析面板按钮
 const assemblyAnalyzeBtn = document.getElementById("assembly-analyze-btn");
 if (assemblyAnalyzeBtn) {
   assemblyAnalyzeBtn.addEventListener("click", () => runAssemblyAnalysis());
-}
-
-function toggleExplode() {
-  isExploded = !isExploded;
-  // 退出其它控制模式，由本次爆炸动画接管
-  mouseControlEnabled = false;
-  explodeAllMode = true;
-  isAnimating = false;
-  clearInterval(playInterval);
-  if (timelinePlayBtn) timelinePlayBtn.textContent = "▶️ 播放";
-  isPlaying = false;
-
-  if (isExploded) {
-    // 进入爆炸模式：所有部件平滑炸开到完全展开
-    explodeBtn.classList.add("exploded");
-    explodeBtn.textContent = "🔄 合体";
-    explodeAnimFrom = explodeAnimFactor; // 从当前状态开始
-    explodeAnimTo = 1;
-  } else {
-    // 退出爆炸模式：所有部件平滑合体
-    explodeBtn.classList.remove("exploded");
-    explodeBtn.textContent = "💥 爆炸";
-    explodeAnimFrom = explodeAnimFactor;
-    explodeAnimTo = 0;
-  }
-  explodeAnimStart = performance.now();
-  explodeAnimActive = true;
-  needsExplodeUpdate = true;
-  updateStepUI();
-}
-
-explodeBtn.addEventListener("click", toggleExplode);
-
-// ===== 爆炸循环播放 =====
-const explodeLoopBtn = document.getElementById("explode-loop");
-const explodeLoopSpeed = document.getElementById("explode-loop-speed");
-
-// 更新循环按钮的视觉状态
-function setExplodeLoopUI() {
-  if (!explodeLoopBtn) return;
-  explodeLoopBtn.classList.toggle("active", explodeLoop);
-  explodeLoopBtn.textContent = explodeLoop ? "🔁 循环中" : "🔁 循环";
-}
-
-// 停止循环播放，并切回分步/滑块控制
-function stopExplodeLoop() {
-  explodeLoop = false;
-  if (explodeLoopTimer) {
-    clearTimeout(explodeLoopTimer);
-    explodeLoopTimer = null;
-  }
-  explodeAnimActive = false; // 中止进行中的循环动画
-  explodeAllMode = false;
-  setExplodeLoopUI();
-}
-
-if (explodeLoopBtn) {
-  explodeLoopBtn.addEventListener("click", () => {
-    explodeLoop = !explodeLoop;
-    if (explodeLoop && !isExploded) {
-      // 开启循环且当前为合体状态，立即开始炸开并循环
-      setExplodeLoopUI();
-      toggleExplode();
-    } else if (explodeLoop) {
-      // 已是炸开状态，继续循环（先合体再往复）
-      setExplodeLoopUI();
-    } else {
-      // 关闭循环：停在当前状态
-      stopExplodeLoop();
-    }
-  });
-}
-
-// 循环速度档：影响动画时长与炸开/合体之间的停留时间
-if (explodeLoopSpeed) {
-  explodeLoopSpeed.addEventListener("change", e => {
-    const v = parseFloat(e.target.value) || 1;
-    explodeAnimDuration = Math.round(1100 / v);
-    loopHoldMs = Math.round(900 / v);
-  });
 }
 
 // 从生成库加载已拆解模型（models/generated/）
@@ -1744,40 +1486,6 @@ if (generatedSelect && generatedLoadBtn) {
   });
 }
 
-// 爆炸深度滑块
-if (depthSlider && depthValueEl) {
-  depthSlider.addEventListener("input", e => {
-    const depth = parseInt(e.target.value);
-    depthValueEl.textContent = `${depth}%`;
-
-    // 退出鼠标/整体炸开控制模式，让滑块接管
-    if (mouseControlEnabled) exitMouseControl();
-    stopExplodeLoop(); // 深度滑块接管，停止循环播放
-
-    // 计算炸开因子 (0-1)
-    const factor = depth / 100;
-
-    // 如果不在动画中，直接应用
-    if (!isAnimating) {
-      needsExplodeUpdate = true; // 标记需要重新计算
-      currentStep = factor * totalSteps;
-      displayedStep = Math.round(currentStep);
-      explodeAnimFactor = factor; // 同步整体炸开因子，供后续动画续接
-      updateStepUI();
-    }
-
-    // 更新爆炸状态
-    if (depth > 0 && !isExploded) {
-      isExploded = true;
-      explodeBtn.classList.add("exploded");
-      explodeBtn.textContent = "🔄 合体";
-    } else if (depth === 0 && isExploded) {
-      isExploded = false;
-      explodeBtn.classList.remove("exploded");
-      explodeBtn.textContent = "💥 爆炸";
-    }
-  });
-}
 
 // ===== 导出与轻提示（截图 / 教案 / GLB）=====
 // 依赖注入：renderer/scene/camera/questGroup/customModelGroup 是 const 稳定引用；
@@ -1808,20 +1516,20 @@ document.addEventListener("keydown", e => {
   switch (e.key) {
     case "ArrowRight":
       e.preventDefault();
-      goToStep(displayedStep + 1);
+      explodeCtl.goToStep(displayedStep + 1);
       break;
     case "ArrowLeft":
       e.preventDefault();
-      goToStep(displayedStep - 1);
+      explodeCtl.goToStep(displayedStep - 1);
       break;
     case " ":
       e.preventDefault();
-      toggleExplode();
+      explodeCtl.toggleExplode();
       break;
     case "r":
     case "R":
       e.preventDefault();
-      goToStep(0);
+      explodeCtl.goToStep(0);
       break;
     case "a":
     case "A":
@@ -1832,7 +1540,7 @@ document.addEventListener("keydown", e => {
     case "f":
     case "F":
       e.preventDefault();
-      focusCurrentPart();
+      explodeCtl.focusCurrentPart();
       break;
     case "s":
     case "S":
@@ -1842,166 +1550,12 @@ document.addEventListener("keydown", e => {
   }
 });
 
-// 聚焦当前步骤的部件
-function focusCurrentPart() {
-  const step = stepGroups[Math.min(displayedStep, totalSteps - 1)];
-  if (!step || step.parts.length === 0) return;
-
-  // 找到第一个部件的位置
-  const partName = step.parts[0];
-  let part = parts.find(p => p.name === partName);
-  if (!part && hasCustomModel) {
-    part = customModelParts.find(p => p.name === partName);
-  }
-  if (!part) return;
-
-  // 平滑移动相机到部件位置
-  const targetPos = part.mesh.position.clone();
-  const cameraOffset = new Vector3(2, 1.5, 2);
-  const newCameraPos = targetPos.clone().add(cameraOffset);
-
-  // 简单的动画
-  const startPos = camera.position.clone();
-  const startTarget = controls.target.clone();
-  const duration = 800;
-  const startTime = performance.now();
-
-  function animateCamera(now) {
-    const elapsed = now - startTime;
-    const progress = Math.min(elapsed / duration, 1);
-    const eased = 1 - Math.pow(1 - progress, 3);
-
-    camera.position.lerpVectors(startPos, newCameraPos, eased);
-    controls.target.lerpVectors(startTarget, targetPos, eased);
-
-    if (progress < 1) {
-      requestAnimationFrame(animateCamera);
-    }
-  }
-
-  requestAnimationFrame(animateCamera);
-}
-
-// 鼠标移动控制炸开范围
-renderer?.domElement?.addEventListener("mousemove", e => {
-  if (!mouseControlEnabled) return;
-
-  stopExplodeLoop(); // 鼠标接管，停止循环播放
-
-  // 计算鼠标在屏幕上的相对位置（0-1）
-  const el = renderer && renderer.domElement;
-  if (!el) return; // 渲染器/画布尚未就绪（预览或 WebGL 不可用时）时安全跳过
-  const rect = el.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-  const y = (e.clientY - rect.top) / rect.height;
-
-  // 使用鼠标Y轴位置控制炸开范围：鼠标越往下，炸开越大
-  mouseFactor = Math.max(0.1, y * 1.2); // 最小保持 0.1 的炸开
-  explodeAnimFactor = mouseFactor; // 同步整体炸开因子，供后续动画续接
-
-  // 更新当前步骤显示
-  currentStep = mouseFactor * totalSteps;
-  displayedStep = Math.round(currentStep);
-  updateStepUI();
-});
-
-// 鼠标离开画布时，保持当前炸开程度（无需额外处理）
-
-// 双击恢复按钮控制
-explodeBtn.addEventListener("dblclick", () => {
-  if (isExploded) {
-    mouseControlEnabled = false;
-    explodeBtn.textContent = "🔄 合体";
-    console.log("已切换回按钮控制模式");
-  }
-});
-
 autoRotateCheck.addEventListener("change", e => {
   controls.autoRotate = e.target.checked;
 });
 
-updateStepUI();
+explodeCtl.updateStepUI();
 
-// ===== 部件动画插值 =====
-// smoothStep 已从 src/utils.js 导入
-
-// 优化：脏标记，避免每帧都重新计算部件位置（needsExplodeUpdate 声明见上方「爆炸/拆解状态」区）
-
-function updateExplodedView(now) {
-  if (isAnimating) {
-    const elapsed = now - animationStart;
-    let progress = elapsed / stepDuration;
-
-    if (progress >= 1) {
-      progress = 1;
-      finishAnimation();
-    }
-
-    const eased = easeOutCubic(progress);
-    currentStep = animationFrom + (animatingStep - animationFrom) * eased;
-    needsExplodeUpdate = true; // 动画中每帧都需要更新
-  } else if (explodeAnimActive) {
-    // 一键爆炸/合体的整体平滑动画
-    const elapsed = now - explodeAnimStart;
-    let progress = elapsed / explodeAnimDuration;
-    if (progress >= 1) {
-      progress = 1;
-      explodeAnimActive = false;
-      explodeAnimFactor = explodeAnimTo; // 锁定到目标状态
-      // 循环播放：停留片刻后自动反向（合体↔炸开）
-      if (explodeLoop) {
-        explodeLoopTimer = setTimeout(() => {
-          explodeLoopTimer = null;
-          if (explodeLoop) toggleExplode();
-        }, loopHoldMs);
-      }
-    } else {
-      const eased = easeOutCubic(progress);
-      explodeAnimFactor = explodeAnimFrom + (explodeAnimTo - explodeAnimFrom) * eased;
-    }
-    needsExplodeUpdate = true; // 动画中每帧都需要更新
-  }
-
-  // 优化：如果状态未变化，跳过部件位置计算
-  if (!needsExplodeUpdate) return;
-
-  // 整体炸开模式下，所有部件使用同一因子；否则按分步/鼠标因子
-  const globalFactor = explodeAllMode ?
-    explodeAnimFactor :
-    mouseControlEnabled ?
-      mouseFactor :
-      currentStep / totalSteps;
-  axisMat.opacity = globalFactor * 0.5;
-
-  // 统一的部件更新函数（避免重复代码）
-  const updatePart = part => {
-    const partFactor = explodeAllMode ?
-      explodeAnimFactor :
-      smoothStep(
-        part.stepIndex - 1,
-        part.stepIndex,
-        mouseControlEnabled ? mouseFactor * totalSteps : currentStep,
-      );
-
-    part.mesh.position.lerpVectors(part.homePos, part.explodePos, partFactor);
-    part.mesh.rotation.x = MathUtils.lerp(part.homeRot.x, part.explodeRot.x, partFactor);
-    part.mesh.rotation.y = MathUtils.lerp(part.homeRot.y, part.explodeRot.y, partFactor);
-    part.mesh.rotation.z = MathUtils.lerp(part.homeRot.z, part.explodeRot.z, partFactor);
-  };
-
-  // Quest 3 默认部件
-  parts.forEach(updatePart);
-
-  // 自定义模型部件（渐进式拆解，每个部件有自己的 stepIndex）
-  if (hasCustomModel && customModelParts.length > 0) {
-    customModelParts.forEach(updatePart);
-  }
-
-  // 非动画、非鼠标、非整体炸开动画时，标记为已更新（冻结当前状态）
-  if (!isAnimating && !mouseControlEnabled && !explodeAnimActive) {
-    needsExplodeUpdate = false;
-  }
-}
 
 // ===== 响应窗口大小 =====
 window.addEventListener("resize", () => {
@@ -2015,7 +1569,7 @@ function animate(now) {
   requestAnimationFrame(animate);
   // 后台标签页不做任何计算与渲染（浏览器已节流 rAF，这里再兜一层）
   if (document.hidden) return;
-  updateExplodedView(now);
+  explodeCtl.updateExplodedView(now);
 
   // 粒子动画（缓慢旋转）— 仅在可见时更新
   if (particlesMesh && particlesMesh.visible) {
@@ -2179,12 +1733,9 @@ function updateStepDescAnimation() {
   }
 }
 
-// 在 updateStepUI 的最后调用动画
-const originalUpdateStepUI = updateStepUI;
-updateStepUI = function() {
-  originalUpdateStepUI();
-  updateStepDescAnimation();
-};
+// 在 updateStepUI 的最后调用动画（替代原先对 updateStepUI 的猴子补丁）。
+// 挂载时机与原版一致：首屏那次 updateStepUI() 之后才挂上钩子。
+explodeCtl.setStepUIHook(updateStepDescAnimation);
 
 // ===== WebXR AR 预览（实现迁至 src/ar-preview.js）=====
 // ar* 状态与启停逻辑收敛在 createARPreview 闭包内；主模块只保留引导代码。
