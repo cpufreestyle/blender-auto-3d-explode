@@ -749,6 +749,41 @@ describe("elapsedSeconds 耗时秒数字符串", () => {
   assertApprox(auto, 2.0, 0.3, "省略 now 参数时按 Date.now() 计算");
 });
 
+// ── createVlmJobPaths 临时文件路径（VLM 并发互踩缺陷的回归锁）──
+describe("createVlmJobPaths 每次请求唯一临时路径", () => {
+  assert(
+    typeof serverUtils.createVlmJobPaths === "function",
+    "createVlmJobPaths 已从 server-utils 导出",
+  );
+  if (typeof serverUtils.createVlmJobPaths !== "function") return;
+
+  // Mock path 模块（与 cleanupOldTempFiles 用例同一套注入风格）
+  const mockPath = { join: (dir, file) => `${dir}/${file}` };
+  const tmpDir = "/tmp/test";
+
+  const job = serverUtils.createVlmJobPaths(tmpDir, mockPath);
+  assertEqual(job.image, `${tmpDir}/vlm-in-${job.jobId}.png`, "图片路径落在给定临时目录");
+  assertEqual(job.glb, `${tmpDir}/vlm-img3d-${job.jobId}.glb`, "产物 GLB 路径唯一");
+  assertEqual(job.code, `${tmpDir}/vlm-code-${job.jobId}.py`, "生成代码路径唯一");
+
+  // 并发请求不得共享任何一个文件名，否则会互相覆盖输入图片与产物
+  const a = serverUtils.createVlmJobPaths(tmpDir, mockPath);
+  const b = serverUtils.createVlmJobPaths(tmpDir, mockPath);
+  assert(a.jobId !== b.jobId, "两次调用 jobId 不同");
+  assert(a.image !== b.image, "两次调用图片路径不同");
+  assert(a.glb !== b.glb, "两次调用产物路径不同");
+  assert(a.code !== b.code, "两次调用代码路径不同");
+
+  // 旧行为是固定名，旧名不得再出现
+  assert(a.image !== `${tmpDir}/vlm_in.png`, "不再使用固定名 vlm_in.png");
+  assert(a.glb !== `${tmpDir}/vlm_img_to_3d.glb`, "不再使用固定名 vlm_img_to_3d.glb");
+
+  // 允许注入 jobId：便于复现与断言具体文件名
+  const fixed = serverUtils.createVlmJobPaths(tmpDir, mockPath, "job-123");
+  assertEqual(fixed.image, `${tmpDir}/vlm-in-job-123.png`, "注入 jobId 时路径可预测");
+  assertEqual(serverUtils.createVlmJobPaths(tmpDir, mockPath, "x").code, `${tmpDir}/vlm-code-x.py`, "注入 jobId 时代码路径可预测");
+});
+
 // ===== 结果汇总 =====
 console.log("\n" + "═".repeat(60));
 console.log(`  结果: ${passed} 通过, ${failed} 失败`);

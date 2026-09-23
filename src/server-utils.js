@@ -281,3 +281,30 @@ export function waitForChildExit(child, timeoutMs = 0, label = "子进程") {
 export function elapsedSeconds(startTime, now = Date.now()) {
   return ((now - startTime) / 1000).toFixed(2);
 }
+
+// ── VLM 图片转3D 临时文件路径 ────────────────────────
+
+/**
+ * 为一次 VLM 图片转3D 生成一组互不冲突的临时文件路径。
+ *
+ * 固定文件名（vlm_in.png / vlm_img_to_3d.glb / _vlm_generated_blender.py）在并发
+ * 请求下会互相覆盖：后到的请求会读到前一个请求写入的图片，或者读到对方的产物 GLB。
+ * 随机后缀让同一时刻并发的多个请求各自独立。
+ *
+ * @param {string} tmpDir - 临时目录，通常传 os.tmpdir()
+ * @param {object} path - path 模块（注入以便测试）
+ * @param {string} [jobId] - 唯一标识，默认取 pid + 时间戳 + 随机串
+ * @returns {{jobId: string, image: string, glb: string, code: string}}
+ */
+export function createVlmJobPaths(tmpDir, path, jobId = defaultVlmJobId()) {
+  return {
+    jobId,
+    image: path.join(tmpDir, `vlm-in-${jobId}.png`),
+    glb: path.join(tmpDir, `vlm-img3d-${jobId}.glb`),
+    code: path.join(tmpDir, `vlm-code-${jobId}.py`),
+  };
+}
+
+function defaultVlmJobId() {
+  return `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}

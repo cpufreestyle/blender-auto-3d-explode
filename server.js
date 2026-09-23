@@ -31,6 +31,7 @@ import {
   isAllowedExtension,
   waitForChildExit,
   elapsedSeconds,
+  createVlmJobPaths,
   ALLOWED_EXTENSIONS,
   MAX_FILE_SIZE,
 } from "./src/server-utils.js";
@@ -799,15 +800,27 @@ const VLM_IMAGE_TO_3D_TIMEOUT_MS = 30 * 60 * 1000;
  * 调用 scripts/vlm_img_to_blender.py：视觉模型看图→生成 Blender 代码→沙箱执行+自动修复→导出 GLB
  */
 async function runVLMImageTo3D(vlmCfg, body, imageBase64, res, startTime) {
+  // 每次请求一组唯一路径：固定名（vlm_in.png / vlm_img_to_3d.glb）在并发请求下会互相
+  // 覆盖输入图片与产物 GLB，后到的请求会读到前一个请求的文件
+  const { image: imgPath, glb: glbPath, code: codePath } = createVlmJobPaths(os.tmpdir(), path);
   try {
     const provider = vlmCfg?.provider || "stepfun";
     const model = vlmCfg?.model || "step-3.7-flash";
-    const imgPath = path.join(os.tmpdir(), "vlm_in.png");
-    const glbPath = path.join(os.tmpdir(), "vlm_img_to_3d.glb");
     fs.writeFileSync(imgPath, Buffer.from(imageBase64, "base64"));
 
     const script = path.join(__dirname, "scripts", "vlm_img_to_blender.py");
-    const args = ["--provider", provider, "--model", model, "--image", imgPath, "--out", glbPath];
+    const args = [
+      "--provider",
+      provider,
+      "--model",
+      model,
+      "--image",
+      imgPath,
+      "--out",
+      glbPath,
+      "--code-out",
+      codePath,
+    ];
     console.log(`  🤖 图片转3D(VLM): spawn ${provider}/${model}`);
 
     const child = spawn("python3", [script, ...args], { cwd: __dirname });
@@ -835,6 +848,16 @@ async function runVLMImageTo3D(vlmCfg, body, imageBase64, res, startTime) {
   } catch (err) {
     console.error(`  ❌ 图片转3D(VLM) 失败: ${err.message}`);
     sendJSON(res, 500, { success: false, error: err.message });
+  } finally {
+    // 产物已读进内存（或本次请求已失败），把这三个文件收掉，别让系统临时目录
+    // 按请求数堆积；万一进程被杀，server-utils 的 TTL 清理会兜底
+    for (const file of [imgPath, glbPath, codePath]) {
+      try {
+        fs.rmSync(file, { force: true });
+      } catch {
+        // 清理失败不影响已经返回给客户端的结果
+      }
+    }
   }
 }
 
