@@ -80,3 +80,51 @@ jobs:
           # 本地复现：uvx --with numpy pytest@8 tests/ -q
           pip install "pytest==8.4.2" "numpy"
           pytest tests/ -v
+
+  # Blender 冒烟门禁：仓库所有 Blender 脚本的单测都把 bpy stub 掉，只能覆盖纯逻辑；
+  # 真正会炸的是 Blender 版本行为（导入算子名、节点名本地化、use_nodes 弃用等）。
+  # 这里用与开发机同版本的官方 Blender 5.1.2 跑两条最硬的路径并对产物断言：
+  #   1) blender_split_glb.py 拆分 models/quest3_model.glb（15 部件 / GLB 体积合理）
+  #   2) quest3_exploded_blender.py 程序化建模（15 个模型对象 / 材质节点树完好）
+  # 逻辑在 scripts/ci_blender_smoke.py，本机可用同一脚本复现：
+  #   python3 scripts/ci_blender_smoke.py --blender /Applications/Blender.app/Contents/MacOS/Blender
+  # 安装方式：下载官方 tarball 并缓存（apt 里的 blender 版本不可控，断言会随版本漂移）。
+  blender-smoke:
+    name: Blender — Split & Model Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Blender runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-6 libxi6 libxrender1 libxfixes3 libxkbcommon0 \
+            libsm6 libice6 libgl1 libegl1 libxcb-xinerama0 libxcb-cursor0 libfontconfig1
+
+      - name: Cache Blender tarball
+        id: blender-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/blender-dist
+          key: blender-5.1.2-linux-x64
+
+      - name: Download Blender 5.1.2
+        if: steps.blender-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/blender-dist
+          curl -fsSL --retry 3 -o /tmp/blender-dist/blender-5.1.2-linux-x64.tar.xz \
+            https://download.blender.org/release/Blender5.1/blender-5.1.2-linux-x64.tar.xz
+
+      - name: Extract Blender and add to PATH
+        run: |
+          # 目录名从 tarball 实际内容推导，不写死（官方包名前缀随版本变化）
+          BLENDER_DIR=$(tar -tJf /tmp/blender-dist/blender-5.1.2-linux-x64.tar.xz | head -1 | cut -d/ -f1)
+          echo "blender dir: $BLENDER_DIR"
+          tar -xJf /tmp/blender-dist/blender-5.1.2-linux-x64.tar.xz -C /tmp/blender-dist
+          # GITHUB_PATH 只对后续 step 生效，本步先用绝对路径自检
+          "/tmp/blender-dist/$BLENDER_DIR/blender" --version
+          echo "/tmp/blender-dist/$BLENDER_DIR" >> "$GITHUB_PATH"
+
+      - name: Run Blender smoke
+        run: python3 scripts/ci_blender_smoke.py --blender blender
