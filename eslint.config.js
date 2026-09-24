@@ -14,6 +14,7 @@ export default [
       'src/ar-preview.js',
       'src/assembly-analysis.js',
       'src/model-disposal.js',
+      'src/model-fit.js',
       'src/explode-controller.js',
       'src/export-panel.js',
       'src/upload-panel.js',
