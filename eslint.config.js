@@ -12,6 +12,7 @@ export default [
     files: [
       'main.js',
       'src/ar-preview.js',
+      'src/assembly-analysis.js',
       'src/explode-controller.js',
       'src/export-panel.js',
       'src/upload-panel.js',
@@ -109,6 +110,7 @@ export default [
         clearTimeout: 'readonly',
         setInterval: 'readonly',
         clearInterval: 'readonly',
+        fetch: 'readonly',
         requestAnimationFrame: 'readonly',
         cancelAnimationFrame: 'readonly',
         performance: 'readonly',
