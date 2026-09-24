@@ -31,9 +31,10 @@ import {
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { createExplodeController } from "./src/explode-controller.js";
 import { createAssemblyAnalysis } from "./src/assembly-analysis.js";
+import { createModelDisposal, disposeNodeTree } from "./src/model-disposal.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { defaultStepGroups } from "./src/quest3-steps.js";
-import { isQuest3Model } from "./src/utils.js";
+import { isQuest3Model, yieldToMain } from "./src/utils.js";
 import { createARPreview } from "./src/ar-preview.js";
 import { createExportPanel } from "./src/export-panel.js";
 import {
@@ -204,6 +205,7 @@ const stepUi = {
 // 而 createExplodeController 需要 axisMat（下方才创建）等依赖
 let explodeCtl = null;
 let assembly = null; // 装配顺序对接 / 自定义步骤生成（src/assembly-analysis.js）
+let modelDisposal = null; // 自定义模型拆卸与 GPU 资源释放（src/model-disposal.js）
 // 主模块另有两处直接使用（步骤描述淡入 / 自动旋转快捷键）
 const { stepDescEl, autoRotateCheck } = stepUi;
 
@@ -526,72 +528,25 @@ let currentModelName = "Meta Quest 3";
 
 // ===== 自定义模型公共工具函数（提取重复逻辑）=====
 
-/**
- * 清除自定义模型组中的所有子对象
- * 同时 dispose 几何体和材质以释放 GPU 内存
- */
-function clearCustomModelGroup() {
-  // material.dispose() 不会释放贴图的 GPU 资源，需先单独 dispose 所有纹理
-  const disposeMaterialTextures = m => {
-    for (const value of Object.values(m)) {
-      if (value && value.isTexture) value.dispose();
-    }
-  };
-  const disposeMaterial = m => {
-    disposeMaterialTextures(m);
-    m.dispose();
-  };
-  while (customModelGroup.children.length > 0) {
-    const child = customModelGroup.children[0];
-    // traverse 覆盖嵌套的 Group/Mesh（GLTF 场景可能是多层结构）
-    child.traverse(node => {
-      if (node.geometry) node.geometry.dispose();
-      if (node.material) {
-        if (Array.isArray(node.material)) {
-          node.material.forEach(disposeMaterial);
-        } else {
-          disposeMaterial(node.material);
-        }
-      }
-    });
-    child.userData = {};
-    customModelGroup.remove(child);
-  }
-  customModelParts = [];
-  customModelGroup.scale.set(1, 1, 1);
-  customModelGroup.position.set(0, 0, 0);
-  // 清除上一个模型的装配顺序，避免误用
-  assemblySequenceOrder = null;
-}
+// ===== 自定义模型公共工具函数（提取重复逻辑）=====
+// 实现迁至 src/model-disposal.js：
+//   - disposeSceneRecursively -> disposeNodeTree；原两个函数各自内联的同一份
+//     「先 dispose 材质贴图、再 dispose 材质与几何体」遍历已去重为一份；
+//   - clearCustomModelGroup -> modelDisposal.clearCustomModelGroup（下方创建，
+//     收尾重置的 customModelParts / assemblySequenceOrder 经 s.* 桥接回写）；
+//   - yieldToMain 迁至 src/utils.js，调用点不变。
+modelDisposal = createModelDisposal({
+  customModelGroup,
+  getState: () => ({ customModelParts, assemblySequenceOrder }),
+  setState: patch => {
+    if ("customModelParts" in patch) customModelParts = patch.customModelParts;
+    if ("assemblySequenceOrder" in patch) assemblySequenceOrder = patch.assemblySequenceOrder;
+  },
+});
 
-function disposeSceneRecursively(node) {
-  if (!node) return;
-  const disposeMaterialTextures = m => {
-    for (const value of Object.values(m)) {
-      if (value && value.isTexture) value.dispose();
-    }
-  };
-  const disposeMaterial = m => {
-    disposeMaterialTextures(m);
-    m.dispose();
-  };
-  node.traverse(child => {
-    if (child.geometry) child.geometry.dispose();
-    if (child.material) {
-      if (Array.isArray(child.material)) {
-        child.material.forEach(disposeMaterial);
-      } else {
-        disposeMaterial(child.material);
-      }
-    }
-  });
-}
 
 let isLoadingCustomModel = false;
 
-function yieldToMain() {
-  return new Promise(resolve => setTimeout(resolve, 0));
-}
 
 /**
  * 自动放大微小模型
@@ -817,7 +772,7 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
     showStatus(`📦 正在解析模型（${splitMethod}）...`, "info");
 
     // 先释放旧模型，降低解析新模型时的显存/内存峰值
-    clearCustomModelGroup();
+    modelDisposal.clearCustomModelGroup();
 
     const LoaderClass = await loadGLTFLoader();
     const loader = new LoaderClass();
@@ -846,7 +801,7 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
     }
 
     // 原始 GLTF 场景的几何体/材质已复制/拆分为新部件，释放原始场景以回收 GPU 资源
-    disposeSceneRecursively(model);
+    disposeNodeTree(model);
 
     if (splitParts.length === 0) {
       throw new Error("模型中未找到可渲染的网格");
@@ -999,7 +954,7 @@ async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
     console.error("加载模型失败：", err);
     showStatus(`❌ 加载失败：${err.message}`, "error");
     // 加载失败：尽量回滚到上一个可用状态，避免空白/混合显示
-    clearCustomModelGroup();
+    modelDisposal.clearCustomModelGroup();
     if (previousHasCustomModel && previousCustomModelParts.length) {
       customModelParts = previousCustomModelParts;
       customModelGroup.visible = true;
@@ -1108,7 +1063,7 @@ function updateCustomModelUI(partCount, fileName) {
 }
 
 function clearCustomModel() {
-  clearCustomModelGroup();
+  modelDisposal.clearCustomModelGroup();
   hasCustomModel = false;
   currentModelName = "Meta Quest 3";
 
@@ -1502,7 +1457,7 @@ const uploadDeps = {
   customModelGroup,
   getCustomModelParts: () => customModelParts,
   loadCustomModel,
-  clearCustomModelGroup,
+  clearCustomModelGroup: modelDisposal.clearCustomModelGroup,
   finalizeCustomModelLoad,
   clearCustomModel,
 };

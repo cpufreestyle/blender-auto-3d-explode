@@ -13,6 +13,7 @@ export default [
       'main.js',
       'src/ar-preview.js',
       'src/assembly-analysis.js',
+      'src/model-disposal.js',
       'src/explode-controller.js',
       'src/export-panel.js',
       'src/upload-panel.js',
