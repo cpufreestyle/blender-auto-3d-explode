@@ -15,6 +15,7 @@ export default [
       'src/assembly-analysis.js',
       'src/camera-fit.js',
       'src/gltf-loader.js',
+      'src/lighting.js',
       'src/custom-model-finalize.js',
       'src/custom-model-loader.js',
       'src/custom-model-panel.js',

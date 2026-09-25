@@ -1,17 +1,15 @@
 import {
-  AmbientLight,
   CylinderGeometry,
-  DirectionalLight,
   Group,
   Mesh,
   MeshBasicMaterial,
-  SpotLight,
   TOUCH,
   WebGLRenderer,
 } from "three";
 import { createCameraFitter } from "./src/camera-fit.js";
 import { createGLTFLoaderProvider } from "./src/gltf-loader.js";
 import { createStatusUI } from "./src/status-ui.js";
+import { createLighting } from "./src/lighting.js";
 import { createExplodeController } from "./src/explode-controller.js";
 import { createModelStyleSwitcher } from "./src/model-style.js";
 import { createAssemblyAnalysis } from "./src/assembly-analysis.js";
@@ -138,37 +136,10 @@ const { stepDescEl, autoRotateCheck } = stepUi;
 const { fitCameraToModel } = createCameraFitter({ camera, controls });
 
 // ===== 增强灯光系统 =====
-const ambientLight = new AmbientLight(0xffffff, 0.45);
-scene.add(ambientLight);
-
-const mainLight = new DirectionalLight(0xffffff, lowPowerMode ? 1.2 : 1.5);
-mainLight.position.set(6, 10, 7);
-mainLight.castShadow = true;
-// 阴影贴图：桌面 1024（2048 观感提升有限、开销却是 4 倍），低功耗 512
-mainLight.shadow.mapSize.set(lowPowerMode ? 512 : 1024, lowPowerMode ? 512 : 1024);
-mainLight.shadow.bias = -0.0001;
-mainLight.shadow.camera.near = 0.5;
-mainLight.shadow.camera.far = 30;
-scene.add(mainLight);
-
-const fillLight = new DirectionalLight(0x99bbff, lowPowerMode ? 0.4 : 0.6);
-fillLight.position.set(-6, 4, -5);
-scene.add(fillLight);
-
-const rimLight = new SpotLight(0xffffff, lowPowerMode ? 1.0 : 1.8);
-rimLight.position.set(0, 8, -7);
-rimLight.angle = Math.PI / 5;
-rimLight.penumbra = 0.5;
-rimLight.decay = 2;
-rimLight.distance = 35;
-// 移除 rimLight.castShadow 以减少移动端 GPU 填充率消耗（仅保留 mainLight 投射阴影）
-scene.add(rimLight);
-
-// 补充底部反射光
-const bottomLight = new DirectionalLight(0x334466, lowPowerMode ? 0.15 : 0.3);
-bottomLight.position.set(0, -5, 0);
-scene.add(bottomLight);
-
+// 实现迁至 src/lighting.js：五盏灯（环境光 / 主光 / 补光 / 轮廓光 /
+// 底部反射光）的构造、position 布置与 lowPowerMode 分档参数整段搬迁，
+// 行为不变。返回值未接收：原 main.js 也不持有这些引用（scene 遍历取用）。
+createLighting({ scene, lowPowerMode });
 // 材质与乐高外观系统已抽到 ./src/lego-materials.js（导出 materials / legoMaterials / getLegoMaterialForMesh 等）
 
 // ===== 乐高 / 原生 外观切换（2026-07 新增）=====
