@@ -273,7 +273,7 @@ describe("任务失败状态正确上抛（Meshy FAILED）", async() => {
   let threw = false;
   try {
     await runMeshyImageTo3D({ apiKey: "test-key" }, SAMPLE_BODY, SAMPLE_B64);
-  } catch (e) {
+  } catch {
     threw = true;
   }
   assert(threw, "Meshy 返回 FAILED 时应抛出异常");
