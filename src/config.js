@@ -9,8 +9,3 @@
 export const API_BASE =
   (typeof window !== "undefined" && window.APP_CONFIG?.API_BASE) ||
   "http://localhost:3001";
-
-/**
- * 服务器端口号（用于静态资源服务器配置）
- */
-export const SERVER_PORT = 3001;
