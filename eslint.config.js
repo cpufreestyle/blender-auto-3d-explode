@@ -37,6 +37,8 @@ export default [
       'src/quest3-model.js',
       'src/quest3-steps.js',
       'src/panels/image-features.js',
+      'src/panels/glb-request.js',
+      'src/panels/prompt-icon.js',
       'src/render-loop.js',
       'src/utils.js'
     ],
