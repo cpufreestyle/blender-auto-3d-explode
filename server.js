@@ -19,7 +19,6 @@
  */
 
 import http from "http";
-import net from "net";
 import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
@@ -48,49 +47,17 @@ import os from "os";
 import { createStaticServer } from "./src/static-server.js";
 import { createBlenderMcpClient } from "./src/blender-mcp-client.js";
 import { callAI } from "./src/ai-call.js";
+import { detectProxy } from "./src/proxy-detect.js";
 import { fileURLToPath } from "url";
-import { ProxyAgent, setGlobalDispatcher } from "undici";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── 零配置代理自动探测 ──────────────────────────────
-// 让 server 开箱即用：若已设置 HTTP(S)_PROXY 则直接用；否则探测本机常见代理端口
-// （Clash 7897/7890、1080、8080），命中即用 undici ProxyAgent 接管全局 fetch。
-// 这样外网 API（TokenDance / Tripo / Meshy 等）无需再手动 --require proxy-bootstrap.cjs。
-async function detectProxy() {
-  const envProxy =
-    process.env.HTTPS_PROXY || process.env.HTTP_PROXY ||
-    process.env.https_proxy || process.env.http_proxy;
-  if (envProxy) {
-    try {
-      setGlobalDispatcher(new ProxyAgent({ uri: envProxy, connect: { rejectUnauthorized: false } }));
-      console.log(`  🌐 使用环境变量代理: ${envProxy}`);
-      return;
-    } catch (e) {
-      console.warn(`  ⚠️ 环境变量代理无效，忽略: ${e.message}`);
-    }
-  }
-  const candidates = ["127.0.0.1:7897", "127.0.0.1:7890", "127.0.0.1:1080", "127.0.0.1:8080"];
-  for (const c of candidates) {
-    const [host, port] = c.split(":");
-    const reachable = await new Promise((resolve) => {
-      const sock = net.createConnection({ host, port: Number(port), timeout: 400 });
-      sock.once("connect", () => { try { sock.destroy(); } catch {} resolve(true); });
-      sock.once("error", () => { try { sock.destroy(); } catch {} resolve(false); });
-      sock.once("timeout", () => { try { sock.destroy(); } catch {} resolve(false); });
-    });
-    if (reachable) {
-      try {
-        setGlobalDispatcher(new ProxyAgent({ uri: `http://${c}`, connect: { rejectUnauthorized: false } }));
-        console.log(`  🌐 已自动启用本机代理: http://${c}`);
-        return;
-      } catch { }
-    }
-  }
-  console.log("  ℹ️ 未检测到本机代理；外网 API（TokenDance/Tripo 等）如需访问请启动代理或设置 HTTP_PROXY");
-}
+// 实现抽至 src/proxy-detect.js；仍须在下面把 console.* 重定向到结构化
+// logger 之前 await 完，否则启动期探测日志会被套上时间戳/级别前缀。
 await detectProxy();
+
 
 // 统一日志：将 console.* 重定向到结构化 logger（保留原有消息内容，追加时间戳/级别）。
 // 放在此处（findBlender 调用之前），使全部后续 console.* 均获得结构化输出。

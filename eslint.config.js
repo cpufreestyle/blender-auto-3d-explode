@@ -166,7 +166,15 @@ export default [
   },
   // ── 服务端文件：Node.js 环境 ──────────────────────
   {
-    files: ['server.js', 'src/server-utils.js', 'src/ai-config.js'],
+    files: [
+      'server.js',
+      'src/server-utils.js',
+      'src/ai-config.js',
+      'src/ai-call.js',
+      'src/blender-mcp-client.js',
+      'src/static-server.js',
+      'src/proxy-detect.js',
+    ],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
