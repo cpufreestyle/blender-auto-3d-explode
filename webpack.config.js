@@ -56,7 +56,11 @@ export default (env = {}, argv) => {
       new CopyPlugin({
         patterns: [
           { from: "style.css", to: "style.css" },
-          { from: "ai-config.html", to: "ai-config.html" }
+          { from: "ai-config.html", to: "ai-config.html" },
+          // 两个静态页的内联 module 脚本按绝对路径 import 这两个模块，
+          // dist 里也要给出真身（主包内那份是打包版，不参与此路径解析）
+          { from: "src/config.js", to: "src/config.js" },
+          { from: "src/panels/config-check.js", to: "src/panels/config-check.js" }
         ]
       }),
       ...(isProduction ? [new CompressionPlugin()] : []),

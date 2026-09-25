@@ -725,10 +725,12 @@
         <div id="status" class="status"></div>
     </div>
     
-    <script>
-        // 后端 API 地址（与 src/config.js 保持一致；修改时请同步）
-        // 因为页面可能从 8080 静态服务器打开，必须用绝对地址才能命中真正的 API 服务
-        const API_BASE = document.querySelector('meta[name="api-base"]')?.content || "http://localhost:3001";
+    <script type="module">
+        // 服务器地址与「配置算没写好」的判断规则都走共享模块（单一数据源），
+        // 页面内不再留副本：换后端地址只改 src/config.js，改提醒规则只改
+        // src/panels/config-check.js；两个模块都是纯求值，import 无副作用
+        import { API_BASE } from "/src/config.js";
+        import { configNeedsHighlight } from "/src/panels/config-check.js";
 
         // 记录上一次选中的「文本 LLM」提供商，避免图片转3D 入口项覆盖它
         let lastTextProvider = 'openai';
@@ -854,16 +856,13 @@
             }
         }
 
-        // 根据已加载配置判断是否缺失关键项，控制顶部提醒横幅的显示
+        // 根据已加载配置判断是否缺失关键项，控制顶部提醒横幅的显示。
+        // 判断规则与首页「配置 AI」按钮的待配置提醒同源：用同一份
+        // configNeedsHighlight，两处不会再各写一份而悄悄走偏
         function updateConfigReminder(config) {
             const banner = document.getElementById('config-reminder');
             if (!banner) return;
-            const provider = config && config.provider;
-            const hasProvider = !!provider && provider !== 'img3d';
-            const key = provider && config[provider] && config[provider].key;
-            const hasKey = !!(key && key !== '***');
-            const needRemind = !hasProvider || !hasKey;
-            banner.classList.toggle('hidden', !needRemind);
+            banner.classList.toggle('hidden', !configNeedsHighlight(config));
         }
         
         // 保存配置
@@ -1036,6 +1035,12 @@
             setTimeout(() => status.className = 'status', 3000);
         }
         
+        // 页面里有 5 个 onclick= 内联属性按全局函数查找，而 module 顶层
+        // 声明不会挂到 window 上：把三个入口显式挂回去，保持原有调用方式
+        window.saveConfig = saveConfig;
+        window.testConnection = testConnection;
+        window.testProvider = testProvider;
+
         // 页面加载时读取配置
         loadConfig();
     </script>
