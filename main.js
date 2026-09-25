@@ -34,6 +34,7 @@ import { createAssemblyAnalysis } from "./src/assembly-analysis.js";
 import { createModelDisposal, disposeNodeTree } from "./src/model-disposal.js";
 import { createModelFit } from "./src/model-fit.js";
 import { createCustomModelLoader } from "./src/custom-model-loader.js";
+import { createCustomModelPanel } from "./src/custom-model-panel.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { defaultStepGroups } from "./src/quest3-steps.js";
 import { isQuest3Model, yieldToMain } from "./src/utils.js";
@@ -210,6 +211,7 @@ let assembly = null; // 装配顺序对接 / 自定义步骤生成（src/assembl
 let modelDisposal = null; // 自定义模型拆卸与 GPU 资源释放（src/model-disposal.js）
 let modelFit = null; // 模型加载后归一化（src/model-fit.js）
 let customModelLoader = null; // 自定义模型加载主链路（src/custom-model-loader.js）
+let customModelPanel = null; // 自定义模型面板 UI 同步与清除复位（src/custom-model-panel.js）
 // 主模块另有两处直接使用（步骤描述淡入 / 自动旋转快捷键）
 const { stepDescEl, autoRotateCheck } = stepUi;
 
@@ -589,7 +591,7 @@ function finalizeCustomModelLoad(fileName, opts = {}) {
   animatingStep = 0;
 
   // 更新 UI
-  updateCustomModelUI(customModelParts.length, fileName);
+  customModelPanel.updateCustomModelUI(customModelParts.length, fileName);
   explodeCtl.updateStepUI();
 
   // 自动缩放
@@ -759,131 +761,49 @@ customModelLoader = createCustomModelLoader({
   isLowPowerMode: () => lowPowerMode,
 });
 
-function updateCustomModelUI(partCount, fileName) {
-  const countEl = document.getElementById("part-count");
-  if (countEl) countEl.textContent = partCount;
-
-  // 记录模型名（去掉扩展名），供截图 / 教案导出命名
-  if (fileName) currentModelName = String(fileName).replace(/\.[^.]+$/, "");
-
-  const uploadSection = document.querySelector(".panel");
-  if (uploadSection) {
-    const fileNameEl = document.getElementById("uploaded-file-name");
-    if (fileNameEl) fileNameEl.textContent = `当前模型：${fileName}`;
-  }
-
-  const clearBtn = document.getElementById("clear-model-btn");
-  if (clearBtn) clearBtn.style.display = "inline-block";
-
-  // 更新时间轴总数
-  const timelineTotalEl = document.getElementById("timeline-total");
-  if (timelineTotalEl) timelineTotalEl.textContent = totalSteps;
-
-  // 更新时间轴滑块范围
-  if (timelineSlider) {
-    timelineSlider.max = totalSteps;
-  }
-
-  // ========== 动态生成部件清单 ==========
-  const partsGrid = document.querySelector(".parts-grid");
-  if (partsGrid && customModelParts.length > 0) {
-    partsGrid.innerHTML = "";
-    customModelParts.forEach(part => {
-      const item = document.createElement("div");
-      item.className = "part-item";
-      item.dataset.part = part.name;
-      // 提取材质颜色作为圆点颜色
-      let dotColor = "#888";
-      if (part.mesh && part.mesh.material) {
-        const mat = part.mesh.material;
-        if (mat.color) dotColor = "#" + mat.color.getHexString();
-      }
-      item.innerHTML = `<span class="part-dot" style="background:${dotColor}"></span>${part.name}`;
-      partsGrid.appendChild(item);
-    });
-  }
-}
-
-function clearCustomModel() {
-  modelDisposal.clearCustomModelGroup();
-  hasCustomModel = false;
-  currentModelName = "Meta Quest 3";
-
-  // 恢复默认模型可见性
-  questGroup.visible = true;
-
-  // 恢复默认步骤系统
-  stepGroups = defaultStepGroups;
-  totalSteps = stepGroups.length;
-  currentStep = 0;
-  displayedStep = 0;
-  animatingStep = 0;
-
-  // 恢复 UI
-  const countEl = document.getElementById("part-count");
-  if (countEl) countEl.textContent = "15";
-
-  // 恢复默认部件清单
-  const partsGrid = document.querySelector(".parts-grid");
-  if (partsGrid) {
-    partsGrid.innerHTML = `
-      <div class="part-item" data-part="前面板"><span class="part-dot" style="background:#f2f2f2"></span>前面板</div>
-      <div class="part-item" data-part="主机身"><span class="part-dot" style="background:#222225"></span>主机身</div>
-      <div class="part-item" data-part="左透镜模组"><span class="part-dot" style="background:#1e3a5f"></span>透镜 x2</div>
-      <div class="part-item" data-part="左摄像头"><span class="part-dot" style="background:#0a0a0a"></span>摄像头 x4</div>
-      <div class="part-item" data-part="左头带臂"><span class="part-dot" style="background:#3a3a3c"></span>头带臂 x2</div>
-      <div class="part-item" data-part="面罩海绵"><span class="part-dot" style="background:#2c2c2e"></span>海绵</div>
-      <div class="part-item" data-part="主板/显示屏"><span class="part-dot" style="background:#0d4a22"></span>主板</div>
-      <div class="part-item" data-part="头带"><span class="part-dot" style="background:#3a3a3c"></span>头带</div>
-    `;
-  }
-
-  const timelineTotalEl = document.getElementById("timeline-total");
-  if (timelineTotalEl) timelineTotalEl.textContent = totalSteps;
-
-  if (timelineSlider) {
-    timelineSlider.max = totalSteps;
-    timelineSlider.value = 0;
-  }
-
-  const clearBtn = document.getElementById("clear-model-btn");
-  if (clearBtn) clearBtn.style.display = "none";
-
-  const status = document.getElementById("upload-status");
-  if (status) {
-    status.classList.add("hidden");
-    status.textContent = "";
-  }
-
-  const fileNameEl = document.getElementById("uploaded-file-name");
-  if (fileNameEl) fileNameEl.textContent = "";
-
-  // 重置爆炸状态
-  isExploded = false;
-  if (explodeBtn) {
-    explodeBtn.classList.remove("exploded");
-    explodeBtn.textContent = "💥 爆炸视图";
-  }
-
-  // 重新分配 Quest 3 部件的步骤索引
-  parts.forEach(part => {
-    const meshName = part.mesh.userData.name;
-    let stepIndex = totalSteps;
-    stepGroups.forEach((group, idx) => {
-      if (group.parts.includes(meshName)) {
-        stepIndex = idx;
-      }
-    });
-    part.stepIndex = stepIndex;
-  });
-
-  // 更新 UI
-  explodeCtl.updateStepUI();
-  fitCameraToModel(questGroup, false);
-
-  showStatus("已清除自定义模型，恢复默认", "info");
-  console.log("✅ 已恢复默认 Quest 3 模型和步骤系统");
-}
+// ===== 自定义模型面板（UI 同步 / 清除复位）=====
+// 实现迁至 src/custom-model-panel.js：
+//   - updateCustomModelUI / clearCustomModel 整段搬迁，行为不变（缺失 DOM
+//     元素静默跳过、默认清单复原、Quest 3 部件步骤索引重排均原样）；
+//   - hasCustomModel / currentModelName / stepGroups / totalSteps / currentStep /
+//     displayedStep / animatingStep / isExploded 八个共享状态经下方实例的
+//     getState/setState 桥接读写，与本文件的 let 是同一份；
+//   - customModelParts 经 getCustomModelParts() 惰性读取（与 upload-panel /
+//     model-fit 同一约定）；clearCustomModel 经 upload-panel 的注入面不变。
+customModelPanel = createCustomModelPanel({
+  getState: () => ({
+    hasCustomModel,
+    currentModelName,
+    stepGroups,
+    totalSteps,
+    currentStep,
+    displayedStep,
+    animatingStep,
+    isExploded,
+  }),
+  setState: patch => {
+    if ("hasCustomModel" in patch) hasCustomModel = patch.hasCustomModel;
+    if ("currentModelName" in patch) currentModelName = patch.currentModelName;
+    if ("stepGroups" in patch) stepGroups = patch.stepGroups;
+    if ("totalSteps" in patch) totalSteps = patch.totalSteps;
+    if ("currentStep" in patch) currentStep = patch.currentStep;
+    if ("displayedStep" in patch) displayedStep = patch.displayedStep;
+    if ("animatingStep" in patch) animatingStep = patch.animatingStep;
+    if ("isExploded" in patch) isExploded = patch.isExploded;
+  },
+  getCustomModelParts: () => customModelParts,
+  questGroup,
+  parts,
+  timelineSlider,
+  explodeBtn,
+  defaultStepGroups,
+  clearCustomModelGroup: modelDisposal.clearCustomModelGroup,
+  updateStepUI: () => {
+    if (typeof explodeCtl?.updateStepUI === "function") explodeCtl.updateStepUI();
+  },
+  fitCameraToModel,
+  showStatus,
+});
 
 // ===== 中心轴线（拆解时显示）=====
 const axisGeo = new CylinderGeometry(0.01, 0.01, 4, 8);
@@ -1201,7 +1121,7 @@ const uploadDeps = {
   loadCustomModel: customModelLoader.loadCustomModel,
   clearCustomModelGroup: modelDisposal.clearCustomModelGroup,
   finalizeCustomModelLoad,
-  clearCustomModel,
+  clearCustomModel: customModelPanel.clearCustomModel,
 };
 
 // 等待 DOM 完全加载后再初始化上传功能
