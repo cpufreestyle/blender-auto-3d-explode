@@ -1,3 +1,33 @@
+// 前端块与测试块共用的规则。
+// 两块只差两处，因此这两条必须留在各自的 files 块里覆盖，不能进这里：
+//   - no-console：前端是 warn（浏览器里的 console 是留给用户看的状态输出，
+//     带 emoji 的加载提示），测试是 off（断言本身就要往 stdout 打东西）；
+//   - no-use-before-define：只有前端块要，防 lowPowerMode 那类「先用后声明」
+//     的 TDZ 崩溃。
+// 提出来是为了让「两块共用同一条规则」这件事只有一处定义：以前改一处漏一处
+// 不会有任何提示，而两块的口径本该一致。
+const baseRules = {
+  'indent': ['error', 2, { 'SwitchCase': 1 }],
+  'linebreak-style': ['error', 'unix'],
+  'quotes': ['error', 'double'],
+  'semi': ['error', 'always'],
+  'no-unused-vars': 'warn',
+  'no-undef': 'error',
+  'eol-last': ['error', 'always'],
+  'comma-dangle': ['error', 'always-multiline'],
+  'no-trailing-spaces': 'error',
+  'space-before-function-paren': ['error', 'never'],
+  'object-curly-spacing': ['error', 'always'],
+  'array-bracket-spacing': ['error', 'never'],
+  'computed-property-spacing': ['error', 'never'],
+  'space-in-parens': ['error', 'never'],
+  'keyword-spacing': ['error', { 'before': true, 'after': true }],
+  'space-infix-ops': 'error',
+  'operator-linebreak': ['error', 'after'],
+  'newline-per-chained-call': ['error', { 'ignoreChainWithDepth': 3 }],
+  'max-len': ['warn', { 'code': 120, 'ignoreComments': true }]
+};
+
 export default [
   {
     ignores: [
@@ -95,28 +125,11 @@ export default [
       }
     },
     rules: {
-      'indent': ['error', 2, { 'SwitchCase': 1 }],
-      'linebreak-style': ['error', 'unix'],
-      'quotes': ['error', 'double'],
-      'semi': ['error', 'always'],
+      ...baseRules,
+      // 前端的 console 是给用户看的状态输出，与仓库既有 38 条同类 warning 同性质
       'no-console': 'warn',
-      'no-unused-vars': 'warn',
-      'no-undef': 'error',
       // 防止 lowPowerMode 那类「先用后声明」的 TDZ 崩溃再次出现（函数声明仍允许提升）
-      'no-use-before-define': ['error', { functions: false, classes: true, variables: true }],
-      'eol-last': ['error', 'always'],
-      'comma-dangle': ['error', 'always-multiline'],
-      'no-trailing-spaces': 'error',
-      'space-before-function-paren': ['error', 'never'],
-      'object-curly-spacing': ['error', 'always'],
-      'array-bracket-spacing': ['error', 'never'],
-      'computed-property-spacing': ['error', 'never'],
-      'space-in-parens': ['error', 'never'],
-      'keyword-spacing': ['error', { 'before': true, 'after': true }],
-      'space-infix-ops': 'error',
-      'operator-linebreak': ['error', 'after'],
-      'newline-per-chained-call': ['error', { 'ignoreChainWithDepth': 3 }],
-      'max-len': ['warn', { 'code': 120, 'ignoreComments': true }]
+      'no-use-before-define': ['error', { functions: false, classes: true, variables: true }]
     }
   },
   // ── 测试文件：Node.js 环境 ────────────────────────
@@ -154,26 +167,9 @@ export default [
       }
     },
     rules: {
-      'indent': ['error', 2, { 'SwitchCase': 1 }],
-      'linebreak-style': ['error', 'unix'],
-      'quotes': ['error', 'double'],
-      'semi': ['error', 'always'],
-      'no-console': 'off',
-      'no-unused-vars': 'warn',
-      'no-undef': 'error',
-      'eol-last': ['error', 'always'],
-      'comma-dangle': ['error', 'always-multiline'],
-      'no-trailing-spaces': 'error',
-      'space-before-function-paren': ['error', 'never'],
-      'object-curly-spacing': ['error', 'always'],
-      'array-bracket-spacing': ['error', 'never'],
-      'computed-property-spacing': ['error', 'never'],
-      'space-in-parens': ['error', 'never'],
-      'keyword-spacing': ['error', { 'before': true, 'after': true }],
-      'space-infix-ops': 'error',
-      'operator-linebreak': ['error', 'after'],
-      'newline-per-chained-call': ['error', { 'ignoreChainWithDepth': 3 }],
-      'max-len': ['warn', { 'code': 120, 'ignoreComments': true }]
+      ...baseRules,
+      // 测试的 stdout 就是它的输出，no-console 必须关掉
+      'no-console': 'off'
     }
   },
   // ── 服务端文件：Node.js 环境 ──────────────────────
