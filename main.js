@@ -33,6 +33,7 @@ import { createExplodeController } from "./src/explode-controller.js";
 import { createAssemblyAnalysis } from "./src/assembly-analysis.js";
 import { createModelDisposal, disposeNodeTree } from "./src/model-disposal.js";
 import { createModelFit } from "./src/model-fit.js";
+import { createCustomModelLoader } from "./src/custom-model-loader.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { defaultStepGroups } from "./src/quest3-steps.js";
 import { isQuest3Model, yieldToMain } from "./src/utils.js";
@@ -208,6 +209,7 @@ let explodeCtl = null;
 let assembly = null; // 装配顺序对接 / 自定义步骤生成（src/assembly-analysis.js）
 let modelDisposal = null; // 自定义模型拆卸与 GPU 资源释放（src/model-disposal.js）
 let modelFit = null; // 模型加载后归一化（src/model-fit.js）
+let customModelLoader = null; // 自定义模型加载主链路（src/custom-model-loader.js）
 // 主模块另有两处直接使用（步骤描述淡入 / 自动旋转快捷键）
 const { stepDescEl, autoRotateCheck } = stepUi;
 
@@ -704,280 +706,58 @@ function autoSplitModel(model) {
 //   - updateStepUI 钩子接 explodeCtl.updateStepUI（保留 typeof 守卫）；
 //   - showStatus 轻提示注入。
 
-async function loadCustomModel(arrayBuffer, fileName, blenderManifest = null) {
-  if (isLoadingCustomModel) {
-    showStatus("⏳ 正在加载模型，请稍候...", "info");
-    return;
-  }
-
-  const loadStart = performance.now();
-  let previousHasCustomModel = hasCustomModel;
-  let previousCustomModelParts = customModelParts.map(part => ({
-    mesh: part.mesh,
-    homePos: part.homePos.clone(),
-    explodePos: part.explodePos.clone(),
-    homeRot: part.homeRot.clone(),
-    explodeRot: part.explodeRot.clone(),
-    name: part.name,
-    partCenter: part.partCenter.clone(),
-    stepIndex: part.stepIndex,
-  }));
-  let previousStepGroups = stepGroups;
-  let previousTotalSteps = totalSteps;
-  let previousCurrentStep = currentStep;
-  let previousDisplayedStep = displayedStep;
-
-  try {
-    isLoadingCustomModel = true;
-    setModelLoading(true, "📦 正在解析模型...");
-    const splitMethod = blenderManifest ? "Blender CLI" : "前端 JS";
-    showStatus(`📦 正在解析模型（${splitMethod}）...`, "info");
-
-    // 先释放旧模型，降低解析新模型时的显存/内存峰值
-    modelDisposal.clearCustomModelGroup();
-
-    const LoaderClass = await loadGLTFLoader();
-    const loader = new LoaderClass();
-
-    const gltf = await new Promise((resolve, reject) => {
-      loader.parse(arrayBuffer, "", resolve, err => reject(new Error("解析失败：" + err.message)));
-    });
-
-    // 立即隐藏默认（Quest 3）模型，确保生成的模型单独显示、不与主模型叠加
-    questGroup.visible = false;
-
-    const model = gltf.scene;
-    model.updateMatrixWorld(true);
-
-    const isQ3 = isQuest3Model(fileName);
-
-    // ========== 自动拆分 ==========
-    let splitParts;
-    if (isQ3 && !blenderManifest) {
-      // Quest 3 模型且无 Blender 清单（Blender 不可用时回退）：前端按 15 区域切割
-      showStatus("🔍 Quest 3 模型：前端按 15 部位区域切割...", "info");
-      splitParts = splitModelToQuest3Regions(model);
-    } else {
-      showStatus("🔍 正在分析模型结构并自动拆分...", "info");
-      splitParts = autoSplitModel(model);
-    }
-
-    // 原始 GLTF 场景的几何体/材质已复制/拆分为新部件，释放原始场景以回收 GPU 资源
-    disposeNodeTree(model);
-
-    if (splitParts.length === 0) {
-      throw new Error("模型中未找到可渲染的网格");
-    }
-
-    setModelLoading(true, "🔧 正在准备部件...");
-
-    // ========== 烘焙世界矩阵到几何体（非前端 Quest 3 路径需要）==========
-    if (!(isQ3 && !blenderManifest)) {
-      for (let i = 0; i < splitParts.length; i++) {
-        await yieldToMain();
-        const mesh = splitParts[i].mesh;
-        mesh.updateMatrixWorld(true);
-        mesh.geometry.applyMatrix4(mesh.matrixWorld);
-        mesh.position.set(0, 0, 0);
-        mesh.rotation.set(0, 0, 0);
-        mesh.scale.set(1, 1, 1);
-        mesh.matrixAutoUpdate = true;
-        mesh.matrix.identity();
-        mesh.castShadow = !lowPowerMode;
-        mesh.receiveShadow = !lowPowerMode;
-      }
-
-      // 计算模型中心，将几何体居中
-      const modelBox = new Box3();
-      for (let i = 0; i < splitParts.length; i++) {
-        await yieldToMain();
-        const partBox = new Box3().setFromObject(splitParts[i].mesh);
-        modelBox.union(partBox);
-      }
-      const modelCenter = modelBox.getCenter(new Vector3());
-      for (let i = 0; i < splitParts.length; i++) {
-        await yieldToMain();
-        splitParts[i].mesh.geometry.translate(-modelCenter.x, -modelCenter.y, -modelCenter.z);
-      }
-    }
-
-    // ========== 创建部件数据 ==========
-    const splitPartMap = new Map(splitParts.map(part => [part.mesh, part]));
-    customModelParts.length = 0;
-    while (customModelGroup.children.length > 0) {
-      customModelGroup.remove(customModelGroup.children[0]);
-    }
-
-    for (let i = 0; i < splitParts.length; i++) {
-      await yieldToMain();
-      const mesh = splitParts[i].mesh;
-
-      // 计算部件中心（相对于模型中心，即原点）
-      const partBox = new Box3().setFromObject(mesh);
-      const partCenter = partBox.getCenter(new Vector3());
-
-      // 爆炸方向：从模型中心指向部件中心
-      const explodePos = calculateExplodePos(partCenter, i, splitParts.length);
-
-      const part = {
-        mesh,
-        homePos: new Vector3(0, 0, 0),
-        explodePos,
-        homeRot: new Euler(0, 0, 0),
-        explodeRot: new Euler(0, 0, 0),
-        name: "", // 稍后分配
-        partCenter: partCenter.clone(),
-        stepIndex: 1,
-      };
-      customModelParts.push(part);
-
-      customModelGroup.add(mesh);
-    }
-
-    // ========== 按距离中心排序（外层先拆）==========
-    // 如果有 Blender 清单，按清单顺序排列；否则按距离排序
-    if (blenderManifest && blenderManifest.parts) {
-      await sortPartsByManifestAsync(blenderManifest);
-    } else {
-      customModelParts.sort((a, b) => b.partCenter.length() - a.partCenter.length());
-    }
-
-    // ========== 分配步骤索引和名称 ==========
-    const partCount = customModelParts.length;
-    const groupCount = Math.min(Math.max(Math.ceil(partCount / 3), 2), 6);
-    const partsPerGroup = Math.ceil(partCount / groupCount);
-
-    // 重新计算包围盒（已居中）
-    const centeredBox = new Box3();
-    for (let i = 0; i < partCount; i++) {
-      centeredBox.union(new Box3().setFromObject(customModelParts[i].mesh));
-      if (i % 40 === 0) await yieldToMain();
-    }
-
-    // ========== 命名 ==========
-    if (isQ3 && blenderManifest && blenderManifest.parts) {
-      // Quest 3 模型 + Blender 清单：使用 Blender 分配的名称
-      for (let i = 0; i < partCount; i++) {
-        await yieldToMain();
-        const part = customModelParts[i];
-        part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
-        if (blenderManifest.parts[i]) {
-          part.name =
-            blenderManifest.parts[i].display_name ||
-            blenderManifest.parts[i].name ||
-            `部件${i + 1}`;
-        }
-        part.mesh.userData = { name: part.name };
-        part.mesh.name = part.name;
-      }
-    } else if (isQ3) {
-      // Quest 3 模型 + 前端拆解：splitModelToQuest3Regions 已分配名称
-      for (let i = 0; i < partCount; i++) {
-        await yieldToMain();
-        const part = customModelParts[i];
-        part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
-        const origName = splitPartMap.get(part.mesh)?.name;
-        if (origName) part.name = origName;
-        part.mesh.userData = { name: part.name };
-        part.mesh.name = part.name;
-      }
-    } else {
-      // 非 Quest 3 模型：Blender 清单名称 → GLB 原始名称 → 位置生成名称
-      for (let i = 0; i < partCount; i++) {
-        await yieldToMain();
-        const part = customModelParts[i];
-        part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
-        if (blenderManifest && blenderManifest.parts && blenderManifest.parts[i]) {
-          part.name =
-            blenderManifest.parts[i].display_name ||
-            blenderManifest.parts[i].name ||
-            `部件${i + 1}`;
-        } else {
-          const origName = splitPartMap.get(part.mesh)?.name;
-          if (origName && !origName.startsWith("部件")) {
-            part.name = origName;
-          } else {
-            part.name = generatePartName(i, part.partCenter, centeredBox);
-          }
-        }
-        part.mesh.userData = { name: part.name };
-        part.mesh.name = part.name;
-      }
-    }
-
-    // 统一收尾：隐藏默认模型、生成步骤、适配相机、回到合体
-    finalizeCustomModelLoad(fileName, { adjustExplode: true });
-
-    const elapsed = ((performance.now() - loadStart) / 1000).toFixed(1);
-    showStatus(`✅ 成功加载：${fileName}\n自动拆分为 ${partCount} 个部件（${elapsed}s）`, "success");
-
-    console.log(`✅ 自定义模型加载完成：${partCount} 个部件（自动拆分，${groupCount} 个步骤组）`);
-  } catch (err) {
-    console.error("加载模型失败：", err);
-    showStatus(`❌ 加载失败：${err.message}`, "error");
-    // 加载失败：尽量回滚到上一个可用状态，避免空白/混合显示
-    modelDisposal.clearCustomModelGroup();
-    if (previousHasCustomModel && previousCustomModelParts.length) {
-      customModelParts = previousCustomModelParts;
-      customModelGroup.visible = true;
-      questGroup.visible = false;
-      hasCustomModel = true;
-      stepGroups = previousStepGroups;
-      totalSteps = previousTotalSteps;
-      currentStep = previousCurrentStep;
-      displayedStep = previousDisplayedStep;
-      explodeCtl.updateStepUI();
-      fitCameraToModel(customModelGroup, false);
-    } else {
-      questGroup.visible = true;
-      hasCustomModel = false;
-      stepGroups = defaultStepGroups;
-      totalSteps = stepGroups.length;
-      currentStep = 0;
-      displayedStep = 0;
-      explodeCtl.updateStepUI();
-      fitCameraToModel(questGroup, false);
-    }
-  } finally {
-    isLoadingCustomModel = false;
-    setModelLoading(false);
-  }
-}
-
-async function sortPartsByManifestAsync(blenderManifest) {
-  const manifestOrder = blenderManifest.parts.map((p, idx) => ({
-    name: p.display_name || p.name,
-    idx,
-  }));
-  const used = new Set();
-  const reordered = [];
-  for (const mp of manifestOrder) {
-    await yieldToMain();
-    const targetCenter = blenderManifest.parts[mp.idx].center;
-    let bestIdx = -1;
-    let bestDist = Infinity;
-    for (let i = 0; i < customModelParts.length; i++) {
-      if (used.has(i)) continue;
-      const d = customModelParts[i].partCenter.distanceTo(
-        new Vector3(targetCenter[0], targetCenter[1], targetCenter[2]),
-      );
-      if (d < bestDist) {
-        bestDist = d;
-        bestIdx = i;
-      }
-    }
-    if (bestIdx >= 0) {
-      used.add(bestIdx);
-      reordered.push(customModelParts[bestIdx]);
-    }
-  }
-  for (let i = 0; i < customModelParts.length; i++) {
-    if (!used.has(i)) reordered.push(customModelParts[i]);
-    if (i % 40 === 0) await yieldToMain();
-  }
-  customModelParts.length = 0;
-  customModelParts.push(...reordered);
-}
+// ===== 自定义模型加载主链路 =====
+// 实现迁至 src/custom-model-loader.js：
+//   - loadCustomModel / sortPartsByManifestAsync 整段搬迁，行为不变（重入
+//     守卫、拆分分支、烘焙居中、排序命名、收尾与失败回滚均原样）；
+//   - isLoadingCustomModel / hasCustomModel / customModelParts / stepGroups /
+//     totalSteps / currentStep / displayedStep 七个共享状态经下方实例的
+//     getState/setState 桥接读写，与本文件的 let 是同一份；
+//   - 失败回滚恢复旧模型时仍走 updateStepUI 钩子（保留 typeof 守卫）与
+//     fitCameraToModel；
+//   - 步骤组数学抽为纯函数 computeGroupCount / computeStepIndex，烘焙与居中
+//     循环抽为 bakeAndCenterParts，清单重排抽为 reorderPartsByManifest，
+//     均有对应单测（tests/custom-model-loader-test.mjs）。
+customModelLoader = createCustomModelLoader({
+  getState: () => ({
+    isLoadingCustomModel,
+    hasCustomModel,
+    customModelParts,
+    stepGroups,
+    totalSteps,
+    currentStep,
+    displayedStep,
+  }),
+  setState: patch => {
+    if ("isLoadingCustomModel" in patch) isLoadingCustomModel = patch.isLoadingCustomModel;
+    if ("hasCustomModel" in patch) hasCustomModel = patch.hasCustomModel;
+    if ("customModelParts" in patch) customModelParts = patch.customModelParts;
+    if ("stepGroups" in patch) stepGroups = patch.stepGroups;
+    if ("totalSteps" in patch) totalSteps = patch.totalSteps;
+    if ("currentStep" in patch) currentStep = patch.currentStep;
+    if ("displayedStep" in patch) displayedStep = patch.displayedStep;
+  },
+  customModelGroup,
+  questGroup,
+  loadGLTFLoader,
+  isQuest3Model,
+  splitModelToQuest3Regions,
+  autoSplitModel,
+  disposeNodeTree,
+  yieldToMain,
+  calculateExplodePos,
+  generatePartName,
+  finalizeCustomModelLoad,
+  fitCameraToModel,
+  showStatus,
+  setModelLoading,
+  updateStepUI: () => {
+    if (typeof explodeCtl?.updateStepUI === "function") explodeCtl.updateStepUI();
+  },
+  clearCustomModelGroup: modelDisposal.clearCustomModelGroup,
+  defaultStepGroups,
+  isLowPowerMode: () => lowPowerMode,
+});
 
 function updateCustomModelUI(partCount, fileName) {
   const countEl = document.getElementById("part-count");
@@ -1262,7 +1042,7 @@ if (generatedSelect && generatedLoadBtn) {
       if (!resp.ok) throw new Error("加载失败 " + resp.status);
       const buf = await resp.arrayBuffer();
       const name = decodeURIComponent(url.split("/").pop());
-      loadCustomModel(buf, name, null);
+      customModelLoader.loadCustomModel(buf, name, null);
     } catch (err) {
       showStatus("❌ 从生成库加载失败: " + err.message, "error");
     }
@@ -1418,7 +1198,7 @@ const uploadDeps = {
   showStatus,
   customModelGroup,
   getCustomModelParts: () => customModelParts,
-  loadCustomModel,
+  loadCustomModel: customModelLoader.loadCustomModel,
   clearCustomModelGroup: modelDisposal.clearCustomModelGroup,
   finalizeCustomModelLoad,
   clearCustomModel,
@@ -1442,10 +1222,10 @@ if (document.readyState === "loading") {
 // 等待 DOM 完全加载后初始化 AI 绘画（面板已迁移到 src/panels/ai-paint-panel.js）
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () =>
-    setupAIPaint({ loadCustomModel, showStatus }),
+    setupAIPaint({ loadCustomModel: customModelLoader.loadCustomModel, showStatus }),
   );
 } else {
-  setupAIPaint({ loadCustomModel, showStatus });
+  setupAIPaint({ loadCustomModel: customModelLoader.loadCustomModel, showStatus });
 }
 
 // ===== 主题切换 =====

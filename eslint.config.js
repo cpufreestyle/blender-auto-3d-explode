@@ -13,6 +13,7 @@ export default [
       'main.js',
       'src/ar-preview.js',
       'src/assembly-analysis.js',
+      'src/custom-model-loader.js',
       'src/model-disposal.js',
       'src/model-fit.js',
       'src/explode-controller.js',
