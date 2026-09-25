@@ -25,15 +25,31 @@
  * (i, worldPos, bbox) 入参计算，锁定的是接线（索引来源、坐标来源、包围盒
  * 汇总范围）而非其内部公式。
  *
+ * splitSpatially（按最大轴把面切成 targetParts 段的纯函数）此前零覆盖：
+ * autoSplitModel 走的是「材质组 → 连通分量」两条自然拆分路径，注释里明确写
+ * 了「不强制空间切分」，所以这个导出从 L2 试点抽进来的那天起就没有调用方，
+ * 任何测试都没碰过它。本文件末尾补上它的直接用例： slabs 的边界语义（内
+ * 部边界归上段、末段闭区间）、首顶点决定归属、索引与非索引两条取顶点路
+ * 径、<3 面的段被丢弃、退化几何体直接返回空数组。
+ *
  * 用法：node tests/geometry-split-test.mjs
  */
 
 import {
   autoSplitModel,
+  splitSpatially,
   generatePartName,
   splitByMaterialGroups,
 } from "../src/geometry-split.js";
-import { Box3, BufferGeometry, Float32BufferAttribute, Group, Mesh, Vector3 } from "three";
+import {
+  Box3,
+  BufferGeometry,
+  Float32BufferAttribute,
+  Group,
+  Mesh,
+  MeshStandardMaterial,
+  Vector3,
+} from "three";
 
 // ===== 测试框架（与 unit-test.mjs / ar-preview-test.mjs 一致）=====
 let passed = 0;
@@ -309,6 +325,158 @@ describe("autoSplitModel 边界", async() => {
   });
 });
 
+
+// ===== splitSpatially：按最大轴切段 =====
+// 沿 X 一字排开的 9 个三角形：首顶点 x = 0..8，每个三角形自身不跨段边界
+function triangleRowGeometry() {
+  const position = [];
+  for (let i = 0; i < 9; i++) {
+    position.push(i, 0, 0, i + 0.9, 0, 0, i, 1, 0);
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute("position", new Float32BufferAttribute(position, 3));
+  return geo;
+}
+
+// 沿 Y 排开的同款（用于把 maxAxis 从 x 支路逼到 y 支路）
+function triangleColumnGeometry() {
+  const position = [];
+  for (let i = 0; i < 9; i++) {
+    position.push(0, i, 0, 1, i, 0, 0, i + 0.9, 0);
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute("position", new Float32BufferAttribute(position, 3));
+  return geo;
+}
+
+// 首顶点落在内部分段边界上 / 落在包围盒最大值上的两排三角形。
+// interior: v0.x=0（v1 向右伸 0.5）与 v0.x=1.25（v1 伸到 2.5）→ 包围盒 x∈[0,2.5]，
+//   targetParts=2 的内部边界正是 1.25 —— v0.x=1.25 的面必须归上一段。
+// onMax: v0.x=0 与 v0.x=2.5（v1 向左伸）→ 包围盒 x∈[0,2.5]，2.5 是末段闭端点。
+function boundaryRowGeometry(firstXs, extendRight) {
+  const position = [];
+  for (const x of firstXs) {
+    const x1 = extendRight ? x + 0.5 : x - 0.5;
+    position.push(x, 0, 0, x1, 0, 0, x, 1, 0);
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute("position", new Float32BufferAttribute(position, 3));
+  return geo;
+}
+
+// 全部顶点重合：三个轴向尺寸都是 0，走退化分支
+function pointGeometry() {
+  const position = [];
+  for (let i = 0; i < 9; i++) position.push(0, 0, 0);
+  const geo = new BufferGeometry();
+  geo.setAttribute("position", new Float32BufferAttribute(position, 3));
+  return geo;
+}
+
+const boxOf = geo => {
+  const b = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+  const a = geo.attributes.position.array;
+  for (let i = 0; i < a.length; i += 3) {
+    for (let k = 0; k < 3; k++) {
+      b.min[k] = Math.min(b.min[k], a[i + k]);
+      b.max[k] = Math.max(b.max[k], a[i + k]);
+    }
+  }
+  return b;
+};
+
+describe("splitSpatially — 沿最大轴等分", async() => {
+  await it("X 向长条按 targetParts 切出等段数", () => {
+    const rs = splitSpatially(triangleRowGeometry(), null, 3);
+    assert(rs.length === 3, `9 面切 3 段，每段 3 面 → 3 个结果（实得 ${rs.length}）`);
+    assert(rs.every(g => g instanceof BufferGeometry), "结果都是 BufferGeometry");
+    assert(rs.every(g => !g.index), "结果都是非索引几何体");
+    const boxes = rs.map(boxOf);
+    assert(Math.abs(boxes[0].max[0] - 2.9) < 1e-6, `第 1 段 x 到 2.9（实得 ${boxes[0].max[0]}）`);
+    assert(Math.abs(boxes[1].min[0] - 3) < 1e-6 && Math.abs(boxes[1].max[0] - 5.9) < 1e-6,
+      `第 2 段 x∈[3,5.9]（实得 ${boxes[1].min[0]},${boxes[1].max[0]}）`);
+    assert(Math.abs(boxes[2].min[0] - 6) < 1e-6, `第 3 段 x 从 6 起（实得 ${boxes[2].min[0]}）`);
+    const total = rs.reduce((s, g) => s + g.attributes.position.count, 0);
+    assert(total === 27, `9 个面全部有归属（顶点合计 27，实得 ${total}）`);
+  });
+  await it("targetParts=1 只有一段且吃下全部面", () => {
+    const rs = splitSpatially(triangleRowGeometry(), null, 1);
+    assert(rs.length === 1 && rs[0].attributes.position.count === 27,
+      `1 段 27 顶点（实得 ${rs.length} 段 / ${rs[0] && rs[0].attributes.position.count} 顶点）`);
+  });
+  await it("段数细到每段不足 3 面时全部丢弃", () => {
+    const rs = splitSpatially(triangleRowGeometry(), null, 9);
+    assert(rs.length === 0, `9 面切 9 段，每段 1 面 < 3 → 空结果（实得 ${rs.length}）`);
+  });
+  await it("Y 向长条走 y 支路", () => {
+    const rs = splitSpatially(triangleColumnGeometry(), null, 2);
+    assert(rs.length === 2, `9 面沿 Y 切 2 段 → 2 个结果（实得 ${rs.length}）`);
+    const boxes = rs.map(boxOf);
+    // 首顶点 y=4 的三角形的第三个顶点伸到 4.9，仍整段归第 1 段
+    assert(Math.abs(boxes[0].max[1] - 4.9) < 1e-4, `第 1 段 y 到 4.9（实得 ${boxes[0].max[1]}）`);
+    assert(Math.abs(boxes[1].min[1] - 5) < 1e-4 && Math.abs(boxes[1].max[1] - 8.9) < 1e-4,
+      `第 2 段 y∈[5,8.9]（实得 ${boxes[1].min[1]},${boxes[1].max[1]}）`);
+  });
+});
+
+describe("splitSpatially — 边界语义", async() => {
+  await it("内部边界归上段（闭端点在下段会掉段）", () => {
+    // v0.x=1.25 恰好是 targetParts=2 的内部边界：属下段则下段空、只剩 1 个结果
+    const rs = splitSpatially(boundaryRowGeometry([0, 0, 0, 1.25, 1.25, 1.25], true), null, 2);
+    assert(rs.length === 2, `两排各 3 面都成段 → 2 个结果（实得 ${rs.length}）`);
+    const boxes = rs.map(boxOf);
+    assert(Math.abs(boxes[0].max[0] - 0.5) < 1e-6, `第 1 段只含 v0.x=0 的面（实得 max ${boxes[0].max[0]}）`);
+    assert(Math.abs(boxes[1].min[0] - 1.25) < 1e-6,
+      `第 2 段含 v0.x=1.25 的面（实得 min ${boxes[1].min[0]}）`);
+  });
+  await it("末段是闭区间：首顶点正好在包围盒最大值也算末段", () => {
+    const rs = splitSpatially(boundaryRowGeometry([0, 0, 0, 2.5, 2.5, 2.5], false), null, 2);
+    assert(rs.length === 2, `v0.x=2.5=包围盒最大值仍能成段 → 2 个结果（实得 ${rs.length}）`);
+    const boxes = rs.map(boxOf);
+    assert(Math.abs(boxes[1].min[0] - 2.0) < 1e-6,
+      `第 2 段含 v0.x=2.5 的面（其实 min 2.0，实得 ${boxes[1].min[0]}）`);
+  });
+  await it("段下界是闭的：首顶点在段首的面算该段", () => {
+    const rs = splitSpatially(boundaryRowGeometry([0, 0, 0, 2, 2, 2], true), null, 2);
+    assert(rs.length === 2, `v0.x=0 恰为第 1 段 minBound → 2 个结果（实得 ${rs.length}）`);
+    assert(Math.abs(boxOf(rs[0]).min[0]) < 1e-6, "第 1 段含 v0.x=0 的面");
+  });
+});
+
+describe("splitSpatially — 索引、退化与 material 形参", async() => {
+  await it("索引几何体按索引首顶点归属（焊接方块 8 面/4 面对半）", () => {
+    // 焊接方块 x∈[-0.5,0.5]，目标 2 段边界为 0。按其 12 个 quad 的索引顺序逐面
+    // 数首顶点 x 符号：落在负半边的 8 面为一段、正半边的 4 面为另一段。
+    const rs = splitSpatially(weldedBoxGeometry(0), null, 2);
+    assert(rs.length === 2, `两段都够 3 面 → 2 个结果（实得 ${rs.length}）`);
+    const counts = rs.map(g => g.attributes.position.count / 3);
+    assert(counts[0] === 8 && counts[1] === 4,
+      `负半 8 面 / 正半 4 面（实得 ${counts.join("/")}）`);
+  });
+  await it("退化几何体（三轴尺寸皆 0）返回空数组", () => {
+    const rs = splitSpatially(pointGeometry(), null, 3);
+    assert(Array.isArray(rs) && rs.length === 0, "返回 [] 而不是 null / 抛错");
+  });
+  await it("material 形参不影响结果（当前实现对它只收不用）", () => {
+    const geo = triangleRowGeometry();
+    const a = splitSpatially(geo, null, 3);
+    const b = splitSpatially(geo, new MeshStandardMaterial(), 3);
+    const c = splitSpatially(geo, undefined, 3);
+    const sig = rs => rs.map(g => g.attributes.position.count).join(",");
+    assert(sig(a) === sig(b) && sig(b) === sig(c),
+      `三种 material 入参结果逐段一致（实得 ${sig(a)} / ${sig(b)} / ${sig(c)}）`);
+  });
+});
+
+// ===== 变异测试记录（/tmp/mutate_splitspatial.py，共 11 个变异：11 杀 0 存活）=====
+// maxAxis 并列时改严格大于 / maxAxis 恒为 x / maxAxis 的 y/z 支路恒为 z /
+// 退化守卫改成恒真 / 退化阈值改负数 / 末段闭区间改成开区间 / 段下界闭改开 /
+// 成段面数门槛 3 改 1 / 分段起点整体后移一段 / 索引路径的首顶点改成几何体首
+// 顶点 / 每段只取前 3 个面。逐条锚点都与同文件里形状相同的兄弟行（另两处
+// extractFacesToGeometry 调用与另一处 v0 取值）用上下文区分过，11 条全部真实
+// 命中、无锚点缺失误报。
+// 11 杀 0 存活的代价是回归风险低：这 11 条变异把 slabs 划分、边界开闭、成段
+// 门槛、索引/非索引取顶点四条主线各撬了个遍，没有一个能活着走出测试。
 // ===== 运行 =====
 (async() => {
   for (const { name, fn } of describeQueue) {
