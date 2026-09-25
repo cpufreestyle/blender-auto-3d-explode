@@ -178,6 +178,7 @@ export default [
       'src/response-utils.js',
       'src/blender-runner.js',
       'src/routes-generate.js',
+      'src/routes-blender.js',
     ],
     languageOptions: {
       ecmaVersion: 'latest',
