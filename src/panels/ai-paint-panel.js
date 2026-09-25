@@ -1,6 +1,7 @@
 // AI 绘画 / 图片转 3D 面板（从 main.js 抽取，L2 前端模块化）
 // 仅依赖 DOM + fetch + 注入的共享函数（loadCustomModel / showStatus），无 3D 场景强耦合。
 import { postGlbRequest } from "./glb-request.js";
+import { validateImageFile } from "./image-validate.js";
 import { fetchConfigAndHighlight } from "./config-panel.js";
 import { getPromptIcon } from "./prompt-icon.js";
 import { buildFeatureStatusHtml, extractImageFeatures } from "./image-features.js";
@@ -62,13 +63,9 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
   // 是纯字符串运算，两者闭包里都不引用 setupAIPaint 的状态，故无 DI 接缝。
   // 处理图片文件
   async function handleImageFile(file) {
-    if (!file || !file.type.startsWith("image/")) {
-      showAIStatus("❌ 请上传图片文件", "error");
-      return;
-    }
-
-    if (file.size > 10 * 1024 * 1024) {
-      showAIStatus("❌ 图片不能超过 10MB", "error");
+    const invalid = validateImageFile(file);
+    if (invalid) {
+      showAIStatus(invalid, "error");
       return;
     }
 
