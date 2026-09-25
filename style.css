@@ -493,16 +493,35 @@ input[type="range"]::-moz-range-thumb {
 .tool-item:hover { background: rgb(255 255 255 / 8%); transform: translateX(3px); }
 
 /* ===== 部件清单 ===== */
-.parts-header { font-size: var(--font-sm); font-weight: 600; color: var(--text-dim); margin-bottom: var(--sp-2); text-transform: uppercase; letter-spacing: 0.5px; }
+.parts-header { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--font-sm); font-weight: 600; color: var(--text-dim); margin-bottom: var(--sp-2); text-transform: uppercase; letter-spacing: 0.5px; }
+.parts-show-all { margin-left: auto; text-transform: none; letter-spacing: 0; }
 #part-count { color: var(--accent); font-weight: 600; }
 .parts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; }
 
 .part-item {
   display: flex; align-items: center; gap: 6px; font-size: var(--font-sm); color: #9fa1ac;
-  padding: 3px 6px; border-radius: 4px; cursor: default; transition: all 0.15s;
+  padding: 3px 6px; border-radius: 4px; cursor: pointer; transition: background 0.15s, color 0.15s;
 }
 .part-item:hover { background: rgb(255 255 255 / 5%); color: var(--text); }
 .part-item.active { background: rgb(74 158 255 / 15%); color: var(--accent); font-weight: 500; }
+
+/* 单独显示（isolate）中的那一行：只改右边框，避免与 active 的背景叠加后糊成一片 */
+.part-item.isolated { box-shadow: inset 2px 0 0 var(--accent); }
+.part-item.isolated .part-dot { box-shadow: 0 0 0 2px rgb(74 158 255 / 35%); }
+
+/* 单独显示按钮：默认半隐，hover / 所在行 active 时才清晰，避免清单变成噪音 */
+.part-eye {
+  margin-left: auto; flex-shrink: 0; width: 20px; height: 20px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; line-height: 1; color: var(--text-dim);
+  background: transparent; border: 1px solid transparent; border-radius: 4px;
+  cursor: pointer; opacity: 0.35; transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+.part-item:hover .part-eye { opacity: 0.8; }
+.part-eye:hover { background: rgb(74 158 255 / 18%); color: var(--accent); opacity: 1; }
+.part-eye:focus-visible { outline: none; opacity: 1; border-color: var(--accent); color: var(--accent); }
+.part-item.active .part-eye { opacity: 0.9; }
+.part-item.isolated .part-eye { opacity: 1; background: rgb(74 158 255 / 22%); color: var(--accent); }
 .part-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 
 /* ===== 操作提示 ===== */

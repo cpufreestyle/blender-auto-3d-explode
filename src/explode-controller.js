@@ -426,18 +426,13 @@ export function createExplodeController({
     });
   }
 
-  // 聚焦当前步骤的部件
-  function focusCurrentPart() {
-    const step = s.stepGroups[Math.min(s.displayedStep, s.totalSteps - 1)];
-    if (!step || step.parts.length === 0) return;
-
-    // 找到第一个部件的位置
-    const partName = step.parts[0];
+  // 聚焦指定名称的部件：找不到返回 false，其余与下方相机动画一致
+  function focusPart(partName) {
     let part = parts.find(p => p.name === partName);
     if (!part && s.hasCustomModel) {
       part = s.customModelParts.find(p => p.name === partName);
     }
-    if (!part) return;
+    if (!part) return false;
 
     // 平滑移动相机到部件位置
     const targetPos = part.mesh.position.clone();
@@ -464,6 +459,14 @@ export function createExplodeController({
     }
 
     requestAnimationFrame(animateCamera);
+    return true;
+  }
+
+  // 聚焦当前步骤的第一个部件（部件清单点击走 focusPart，二者共用同一段动画）
+  function focusCurrentPart() {
+    const step = s.stepGroups[Math.min(s.displayedStep, s.totalSteps - 1)];
+    if (!step || step.parts.length === 0) return;
+    focusPart(step.parts[0]);
   }
 
   // 鼠标移动控制炸开范围
@@ -585,6 +588,8 @@ export function createExplodeController({
     goToStep,
     toggleExplode,
     focusCurrentPart,
+    focusPart,
+    highlightPart,
     updateExplodedView,
     setStepUIHook: hook => {
       stepUIHook = hook;
