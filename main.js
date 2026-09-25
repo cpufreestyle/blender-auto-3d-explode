@@ -45,6 +45,8 @@ import { autoSplitModel, generatePartName } from "./src/geometry-split.js";
 import { createQuest3Model } from "./src/quest3-model.js";
 import { splitModelToQuest3Regions } from "./src/quest3-parts.js";
 import { setupUpload } from "./src/upload-panel.js";
+import { setupThemeToggle } from "./src/theme-toggle.js";
+import { setupStyleToggle } from "./src/style-toggle.js";
 import { setupAIPaint } from "./src/panels/ai-paint-panel.js";
 // 副作用导入：确保 config-panel.js 加载并初始化 Blender 健康检测/配置高亮（不依赖 ai-paint 面板是否启用）
 import "./src/panels/config-panel.js";
@@ -783,55 +785,15 @@ if (document.readyState === "loading") {
 }
 
 // ===== 主题切换 =====
-const themeToggle = document.getElementById("theme-toggle");
+// 实现迁至 src/theme-toggle.js：setupThemeToggle 整段搬迁，行为不变。
+// uiOverlay 由本模块持有并传入：下方 createARPreview 共用同一引用。
 const uiOverlay = document.querySelector(".ui-overlay");
-
-if (themeToggle && uiOverlay) {
-  // 检查本地存储的主题设置
-  const savedTheme = localStorage.getItem("quest3-theme");
-  if (savedTheme === "light") {
-    uiOverlay.classList.add("light-theme");
-    themeToggle.textContent = "☀️";
-  }
-
-  themeToggle.addEventListener("click", () => {
-    uiOverlay.classList.toggle("light-theme");
-    const isLight = uiOverlay.classList.contains("light-theme");
-
-    // 保存主题设置
-    localStorage.setItem("quest3-theme", isLight ? "light" : "dark");
-
-    // 更新按钮图标
-    themeToggle.textContent = isLight ? "☀️" : "🌙";
-
-    // 添加切换动画
-    themeToggle.style.transform = "rotate(360deg) scale(1.2)";
-    setTimeout(() => {
-      themeToggle.style.transform = "";
-    }, 300);
-  });
-}
+setupThemeToggle({ uiOverlay });
 
 // ===== 乐高 / 原生 外观切换 =====
-const styleToggle = document.getElementById("style-toggle");
-if (styleToggle) {
-  let modelStyle = localStorage.getItem("quest3-model-style") || "native";
-  applyModelStyle(modelStyle);
-  styleToggle.textContent = modelStyle === "lego" ? "🧱 乐高风格" : "🛠️ 原生风格";
-  styleToggle.classList.toggle("lego", modelStyle === "lego");
-
-  styleToggle.addEventListener("click", () => {
-    modelStyle = modelStyle === "lego" ? "native" : "lego";
-    applyModelStyle(modelStyle);
-    localStorage.setItem("quest3-model-style", modelStyle);
-    styleToggle.textContent = modelStyle === "lego" ? "🧱 乐高风格" : "🛠️ 原生风格";
-    styleToggle.classList.toggle("lego", modelStyle === "lego");
-    styleToggle.style.transform = "rotate(360deg) scale(1.05)";
-    setTimeout(() => {
-      styleToggle.style.transform = "";
-    }, 300);
-  });
-}
+// 实现迁至 src/style-toggle.js：setupStyleToggle 整段搬迁，行为不变。
+// applyModelStyle 注入本文件的 model-style 工厂实例（运行期才调用）。
+setupStyleToggle({ applyModelStyle });
 
 // ===== Blender 状态检测 + 一键启动（已迁移到 src/panels/config-panel.js） =====
 

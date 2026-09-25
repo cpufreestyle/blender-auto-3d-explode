@@ -23,6 +23,8 @@ export default [
       'src/model-fit.js',
       'src/model-style.js',
       'src/status-ui.js',
+      'src/style-toggle.js',
+      'src/theme-toggle.js',
       'src/explode-controller.js',
       'src/export-panel.js',
       'src/upload-panel.js',
