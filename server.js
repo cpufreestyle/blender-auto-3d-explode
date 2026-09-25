@@ -47,6 +47,7 @@ import { log } from "./src/logger.js";
 import path from "path";
 import os from "os";
 import { createStaticServer } from "./src/static-server.js";
+import { createBlenderMcpClient } from "./src/blender-mcp-client.js";
 import { fileURLToPath } from "url";
 import { ProxyAgent, setGlobalDispatcher } from "undici";
 
@@ -117,10 +118,6 @@ const IMAGE_TO_3D_DEPS = {
   uploadDir: UPLOAD_DIR,
   rootDir: __dirname,
 };
-
-// Blender MCP addon（scripts/blender_mcp_addon.py）监听的 TCP 端口
-const BLENDER_MCP_HOST = process.env.BLENDERMCP_HOST || "localhost";
-const BLENDER_MCP_PORT = Number(process.env.BLENDERMCP_PORT || 9876);
 
 // 确保上传目录存在
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -1046,72 +1043,9 @@ async function handleSplit(req, res) {
 }
 
 // ── Blender MCP addon 客户端（TCP，行分隔 JSON）────────
-
-/**
- * 向 Blender MCP addon 发送单条命令并返回解析后的 JSON 结果。
- * addon 对每条命令回复一个完整 JSON。
- * @param {string} type   命令类型（如 get_assembly_sequence）
- * @param {object} params 命令参数
- * @param {number} timeoutMs 超时（默认 15s）
- * @returns {Promise<object>} addon 的 result 字段
- */
-function callBlenderMcp(type, params = {}, timeoutMs = 15_000) {
-  return new Promise((resolve, reject) => {
-    const socket = net.createConnection(
-      { host: BLENDER_MCP_HOST, port: BLENDER_MCP_PORT },
-      () => {
-        socket.write(JSON.stringify({ type, params }) + "\n");
-      },
-    );
-    let buf = "";
-    let done = false;
-    const finish = (fn, arg) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      try {
-        socket.destroy();
-      } catch {
-        /* noop */
-      }
-      fn(arg);
-    };
-    const timer = setTimeout(
-      () => finish(reject, new Error("Blender MCP addon 响应超时")),
-      timeoutMs,
-    );
-    socket.setEncoding("utf8");
-    socket.on("data", chunk => {
-      buf += chunk;
-      try {
-        const parsed = JSON.parse(buf);
-        if (parsed && parsed.status === "error") {
-          finish(reject, new Error(parsed.message || "addon error"));
-        } else {
-          finish(resolve, parsed && "result" in parsed ? parsed.result : parsed);
-        }
-      } catch {
-        /* JSON 尚不完整，继续接收 */
-      }
-    });
-    socket.on("error", err =>
-      finish(
-        reject,
-        new Error(`无法连接 Blender MCP addon (${BLENDER_MCP_HOST}:${BLENDER_MCP_PORT})：${err.message}`),
-      ),
-    );
-    socket.on("end", () => {
-      if (!done && buf) {
-        try {
-          const parsed = JSON.parse(buf);
-          finish(resolve, parsed && "result" in parsed ? parsed.result : parsed);
-        } catch (e) {
-          finish(reject, new Error("addon 响应解析失败: " + e.message));
-        }
-      }
-    });
-  });
-}
+// 整段（含两个 MCP 地址常量）已抽至 src/blender-mcp-client.js；
+// 无参创建即用默认 localhost:9876，与原实现一致。
+const callBlenderMcp = createBlenderMcpClient();
 
 /**
  * GET /api/assembly/sequence?method=distance|size|hierarchy
