@@ -39,6 +39,8 @@ export default [
       'src/panels/image-features.js',
       'src/panels/glb-request.js',
       'src/panels/prompt-icon.js',
+      'src/panels/ai-paint-panel.js',
+      'src/panels/config-panel.js',
       'src/render-loop.js',
       'src/utils.js'
     ],

@@ -56,10 +56,6 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
     statusEl.classList.remove("hidden");
   }
 
-  function hideAIStatus() {
-    if (statusEl) statusEl.classList.add("hidden");
-  }
-
   // ========== 图片特征提取与特征文案 ==========
   // 实现迁至 src/panels/image-features.js：extractImageFeatures 是纯 canvas 运算
   // （只用 document.createElement 与传入的 imgElement），buildFeatureStatusHtml
@@ -193,10 +189,10 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
       hyper3d: "Hyper3D(Rodin) 云端",
     }[deploy] || "云端";
     showAIStatus(
-      `<span class="ai-paint-spinner"></span>` +
-        (isLocal
-          ? "正在用本地 Blender 重建 3D（零依赖、可拆解，按图切块，约 10-30 秒）..."
-          : `正在用 ${providerLabel} 重建 3D 模型...（约 1-3 分钟，请耐心等待）`),
+      "<span class=\"ai-paint-spinner\"></span>" +
+        (isLocal ?
+          "正在用本地 Blender 重建 3D（零依赖、可拆解，按图切块，约 10-30 秒）..." :
+          `正在用 ${providerLabel} 重建 3D 模型...（约 1-3 分钟，请耐心等待）`),
       "info",
     );
 
@@ -222,13 +218,13 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
         timeoutLabel: "20分钟",
       });
 
-      showAIStatus(`✅ 重建成功！正在加载到场景...`, "success");
+      showAIStatus("✅ 重建成功！正在加载到场景...", "success");
       await loadCustomModel(result.arrayBuffer, "图片转3D", result.manifest);
       showAIStatus(
-        `✅ 图片转3D 已加载\n可旋转/缩放，可切换乐高/原生风格`,
+        "✅ 图片转3D 已加载\n可旋转/缩放，可切换乐高/原生风格",
         "success",
       );
-      showStatus(`✅ 图片转3D：模型已加载`, "success");
+      showStatus("✅ 图片转3D：模型已加载", "success");
     } catch (err) {
       console.error("图片转3D 失败:", err);
       showAIStatus(`❌ 重建失败：${err.message}`, "error");
@@ -310,7 +306,7 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
       blenderReadbackBtn.disabled = true;
       blenderReadbackBtn.textContent = "⏳ 读取中...";
     }
-    showAIStatus(`<span class="ai-paint-spinner"></span>正在从 Blender 读回对象...`, "info");
+    showAIStatus("<span class=\"ai-paint-spinner\"></span>正在从 Blender 读回对象...", "info");
     try {
       const resp = await fetch(`${BLENDER_SERVER_AI}/api/blender/export`);
       if (!resp.ok) {
@@ -357,8 +353,10 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
     textTo3DBtn.disabled = true;
     paintBtn.textContent = "⏳ 生成中...";
     const imgHint = uploadedImageFeatures ? "（含图片特征）" : "";
+    const actionLabel = isTextTo3D ? "🌐 文生3D" : "正在生成";
     showAIStatus(
-      `<span class="ai-paint-spinner"></span>${isTextTo3D ? "🌐 文生3D" : "正在生成"} "${prompt}" ${imgHint}...（云端 Hyper3D 生成中，约1-3分钟）`,
+      `<span class="ai-paint-spinner"></span>${actionLabel} "${prompt}" ${imgHint}` +
+        "...（云端 Hyper3D 生成中，约1-3分钟）",
       "info",
     );
 
@@ -431,8 +429,7 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
 
     // 只显示最近 8 个
     const recent = aiPaintGallery.slice(-8);
-    recent.forEach((item, idx) => {
-      const actualIdx = aiPaintGallery.length - recent.length + idx;
+    recent.forEach(item => {
       const el = document.createElement("div");
       el.className = "ai-gallery-item";
       el.innerHTML = `
