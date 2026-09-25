@@ -46,7 +46,7 @@ import {
 import { log } from "./src/logger.js";
 import path from "path";
 import os from "os";
-import zlib from "zlib";
+import { createStaticServer } from "./src/static-server.js";
 import { fileURLToPath } from "url";
 import { ProxyAgent, setGlobalDispatcher } from "undici";
 
@@ -1373,126 +1373,10 @@ const server = http.createServer(
 );
 
 // ── 静态文件服务 ──────────────────────────────────────
-
-const MIME_TYPES = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".svg": "image/svg+xml",
-  ".ico": "image/x-icon",
-  ".glb": "model/gltf-binary",
-  ".gltf": "model/gltf+json",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-  ".ttf": "font/ttf",
-  ".wasm": "application/wasm",
-  ".mjs": "text/javascript; charset=utf-8",
-  ".map": "application/json; charset=utf-8",
-  ".txt": "text/plain; charset=utf-8",
-  ".webmanifest": "application/manifest+json",
-};
-
-/**
- * 静态资源缓存策略：
- *   · index.html  → no-cache（每次协商，保证入口最新）
- *   · 带 ?v= 版本号 → 强缓存 1 年 + immutable（内容变了就换版本号）
- *   · 其它        → 1 小时缓存，过期后协商（ETag/Last-Modified 兜底）
- */
-function staticCacheControl(url, pathname) {
-  if (pathname === "/index.html" || pathname === "/") return "no-cache";
-  if (url && /[?&]v=/.test(url.search || "")) return "public, max-age=31536000, immutable";
-  return "public, max-age=3600, must-revalidate";
-}
-
-function serveStatic(req, res, url) {
-  let pathname = decodeURIComponent(url.pathname);
-
-  // 安全：防止路径遍历
-  if (pathname.includes("..")) {
-    sendJSON(res, 403, { error: "Forbidden" });
-    return;
-  }
-
-  // 默认 index.html
-  if (pathname === "/" || pathname === "") {
-    pathname = "/index.html";
-  }
-
-  const filePath = path.join(__dirname, pathname);
-
-  // 确保文件在 __dirname 下
-  if (!filePath.startsWith(__dirname)) {
-    sendJSON(res, 403, { error: "Forbidden" });
-    return;
-  }
-
-  fs.stat(filePath, (statErr, stat) => {
-    if (statErr || !stat.isFile()) {
-      sendJSON(res, 404, { error: "Not Found", path: pathname });
-      return;
-    }
-
-    const ext = path.extname(filePath).toLowerCase();
-    const contentType = MIME_TYPES[ext] || "application/octet-stream";
-    // 用 size+mtime 生成弱 ETag：内容一变 ETag 就变，可安全用于协商缓存
-    const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
-    const lastModified = stat.mtime.toUTCString();
-    const cacheControl = staticCacheControl(url, pathname);
-
-    // ── 协商缓存：命中则直接 304（省掉整个响应体）──
-    const inm = req.headers["if-none-match"];
-    const ims = req.headers["if-modified-since"];
-    const etagHit =
-      !!inm && inm.split(",").some((t) => t.trim() === etag || t.trim() === "*");
-    const imsHit =
-      !inm && ims && new Date(ims).getTime() >= Math.floor(stat.mtimeMs / 1000) * 1000;
-    if (etagHit || imsHit) {
-      res.writeHead(304, {
-        ETag: etag,
-        "Last-Modified": lastModified,
-        "Cache-Control": cacheControl,
-      });
-      res.end();
-      return;
-    }
-
-    const headers = {
-      "Content-Type": contentType,
-      "Cache-Control": cacheControl,
-      ETag: etag,
-      "Last-Modified": lastModified,
-    };
-
-    // ── 文本类资源 gzip（体积通常省 60~75%）──
-    const isCompressible = /^(text\/|application\/(json|javascript|wasm)|image\/svg)/.test(
-      contentType,
-    );
-    const acceptsGzip = /\bgzip\b/.test(req.headers["accept-encoding"] || "");
-    if (isCompressible && acceptsGzip && stat.size > 1024) {
-      headers["Content-Encoding"] = "gzip";
-      headers["Vary"] = "Accept-Encoding";
-      res.writeHead(200, headers);
-      const src = fs.createReadStream(filePath);
-      const gz = zlib.createGzip();
-      src.on("error", () => { try { res.destroy(); } catch { /* ignore */ } });
-      gz.on("error", () => { try { res.destroy(); } catch { /* ignore */ } });
-      src.pipe(gz).pipe(res);
-      return;
-    }
-
-    // ── 直出：流式读取，避免整文件读入内存（大 GLB 也适用）──
-    headers["Content-Length"] = stat.size;
-    res.writeHead(200, headers);
-    const stream = fs.createReadStream(filePath);
-    stream.on("error", () => { try { res.destroy(); } catch { /* ignore */ } });
-    stream.pipe(res);
-  });
-}
+// MIME 映射 / 三段式缓存策略 / 协商缓存 / gzip / 流式直出已抽至
+// src/static-server.js；serveStatic 在此绑定 server.js 的 sendJSON，
+// 供下面 createServer 的 GET 兜底路由调用。
+const serveStatic = createStaticServer({ sendJSON });
 
 // ── 启动 ──────────────────────────────────────────────
 
