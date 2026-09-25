@@ -29,14 +29,14 @@
   </div>
 
   <script type="module">
-    import * as THREE from './vendor/three.module.js?v=1783166735';
-    import { OrbitControls } from './vendor/OrbitControls.js?v=1783166735';
+    import * as THREE from '../vendor/three/build/three.module.js?v=1783166735';
+    import { OrbitControls } from '../vendor/three/examples/jsm/controls/OrbitControls.js?v=1783166735';
 
     // 动态导入 GLTFLoader
     let GLTFLoader = null;
     async function loadGLTFLoader() {
       if (!GLTFLoader) {
-        const module = await import('./vendor/GLTFLoader.js?v=1783166735');
+        const module = await import('../vendor/three/examples/jsm/loaders/GLTFLoader.js?v=1783166735');
         GLTFLoader = module.GLTFLoader;
       }
       return GLTFLoader;
