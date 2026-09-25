@@ -18,7 +18,7 @@ import { createModelFit } from "./src/model-fit.js";
 import { createCustomModelFinalizer } from "./src/custom-model-finalize.js";
 import { createCustomModelLoader } from "./src/custom-model-loader.js";
 import { createCustomModelPanel } from "./src/custom-model-panel.js";
-import { defaultStepGroups } from "./src/quest3-steps.js";
+import { assignPartStepIndices, defaultStepGroups } from "./src/quest3-steps.js";
 import { isQuest3Model, yieldToMain } from "./src/utils.js";
 import { createARPreview } from "./src/ar-preview.js";
 import { createExportPanel } from "./src/export-panel.js";
@@ -352,24 +352,10 @@ fitCameraToModel(questGroup, false);
 // stepGroups / totalSteps 声明见文件上方「模块共享状态与引用」
 
 // 给每个部件分配步骤序号（默认最后一步）
-parts.forEach(part => {
-  // 确保 mesh.userData.name 存在
-  if (!part.mesh.userData.name) {
-    part.mesh.userData.name = part.mesh.name || `part_${parts.indexOf(part)}`;
-  }
-  // 确保 mesh.name 可用
-  if (!part.mesh.name) {
-    part.mesh.name = part.mesh.userData.name;
-  }
-  const meshName = part.mesh.userData.name;
-  let stepIndex = totalSteps;
-  stepGroups.forEach((group, idx) => {
-    if (group.parts.includes(meshName)) {
-      stepIndex = idx;
-    }
-  });
-  part.stepIndex = stepIndex;
-});
+// 实现迁至 src/quest3-steps.js：命名补齐 + 按 stepGroups 落 stepIndex 整段
+// 搬迁，行为不变。parts / stepGroups / totalSteps 以实参传入：stepGroups
+// 是会重赋值的 let，实参取调用瞬间的当前值，与原闭包读取同一时刻。
+assignPartStepIndices({ parts, stepGroups, totalSteps });
 
 console.log(
   "部件步骤分配：",

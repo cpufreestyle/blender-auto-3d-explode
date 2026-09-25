@@ -152,3 +152,43 @@ Meta 提供 4 种厚度可选：
 ❓ 有疑问？可以问我任何关于 Quest 3 的问题！`,
   },
 ];
+
+/**
+ * 给每个部件分配步骤序号（默认最后一步）。
+ *
+ * 从 main.js 搬迁：原块在 Quest 3 默认模型构建后、爆炸控制器创建前执行一次。
+ * 与 defaultStepGroups 同属「步骤方案」职责，故收入本模块；console 打点留在
+ * main.js 调用处，本模块保持纯函数（与 quest3-model.js / geometry-split.js
+ * 一致）。
+ *
+ * 顺带补齐部件命名：mesh.userData.name 缺失时取 mesh.name，二者皆缺则回落
+ * part_N（parts.indexOf 取位序）；mesh.name 缺失时取 mesh.userData.name。
+ * 随后按 stepGroups 里含该部件名的组下标落 stepIndex，未命中则落 totalSteps，
+ * 即「默认最后一步」；stepGroups.forEach 不 break，故同名出现在多个组时以
+ * 最后一个命中的组为准（defaultStepGroups 里每个部件名只出现一次，两种读法
+ * 结果相同）。
+ *
+ * 纯函数语义：只写 part.mesh.* 与 part.stepIndex，不读不写其它共享状态，
+ * parts / stepGroups / totalSteps 均由调用方以实参传入（stepGroups 是会重
+ * 赋值的 let，实参取调用瞬间的当前值）。
+ */
+export function assignPartStepIndices({ parts, stepGroups, totalSteps }) {
+  parts.forEach(part => {
+    // 确保 mesh.userData.name 存在
+    if (!part.mesh.userData.name) {
+      part.mesh.userData.name = part.mesh.name || `part_${parts.indexOf(part)}`;
+    }
+    // 确保 mesh.name 可用
+    if (!part.mesh.name) {
+      part.mesh.name = part.mesh.userData.name;
+    }
+    const meshName = part.mesh.userData.name;
+    let stepIndex = totalSteps;
+    stepGroups.forEach((group, idx) => {
+      if (group.parts.includes(meshName)) {
+        stepIndex = idx;
+      }
+    });
+    part.stepIndex = stepIndex;
+  });
+}
