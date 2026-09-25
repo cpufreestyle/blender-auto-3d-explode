@@ -127,7 +127,7 @@ describe("index.html 的 id 都有消费者", () => {
   ].join("\n");
 
   it("数量与现状一致（回归后先看这里，别静默放行）", () => {
-    assert(ids.length === 78, `index.html 声明了 ${ids.length} 个 id，预期 78`);
+    assert(ids.length === 81, `index.html 声明了 ${ids.length} 个 id，预期 81`);
   });
 
   it("没有任何 id 是孤儿（词边界命中才算）", () => {
@@ -159,7 +159,7 @@ describe("style.css 的 class 选择器都真实生效", () => {
   ]);
 
   it("数量与现状一致", () => {
-    assert(classes.length === 121, `style.css 有 ${classes.length} 个 class 选择器，预期 121`);
+    assert(classes.length === 124, `style.css 有 ${classes.length} 个 class 选择器，预期 124`);
   });
 
   it("每个 class 都有 token 落在元素上", () => {
@@ -225,7 +225,7 @@ describe("JS 取的每个 id 都有着落", () => {
   };
 
   it("数量与现状一致", () => {
-    assert(requested.length === 114, `字面量 getElementById ${requested.length} 个，预期 114`);
+    assert(requested.length === 117, `字面量 getElementById ${requested.length} 个，预期 117`);
     assert(templates.length === 5, `模板 getElementById ${templates.length} 个，预期 5`);
   });
 

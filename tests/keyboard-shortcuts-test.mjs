@@ -7,7 +7,7 @@
  *     getter 惰性读取，钉住「读的是当前值」）；
  *   - 空格：toggleExplode；r/R：goToStep(0)；
  *   - a/A：翻转 autoRotateCheck.checked 并同步 controls.autoRotate；
- *   - f/F：focusCurrentPart；s/S：exportScreenshot；
+ *   - f/F：focusCurrentPart；h/H：toggleSidebar（未注入时静默忽略）；s/S：exportScreenshot；
  *   - 每个分支均 preventDefault；
  *   - target 为 INPUT/TEXTAREA 时整体忽略（不 preventDefault、不触发动作）；
  *   - 未列出的键无动作；
@@ -70,6 +70,7 @@ function setup(displayed = 2) {
   };
   const controls = { autoRotate: true };
   const exportPanel = { exportScreenshot: rec("exportScreenshot") };
+  const toggleSidebar = rec("toggleSidebar");
   let step = displayed;
 
   setupKeyboardShortcuts({
@@ -78,6 +79,7 @@ function setup(displayed = 2) {
     autoRotateCheck,
     exportPanel,
     getDisplayedStep: () => step,
+    toggleSidebar,
   });
   const key = (k, target = { tagName: "DIV" }) => {
     let prevented = false;
@@ -114,7 +116,7 @@ describe("keydown 分发", async() => {
     assert(w.calls[0].args[0] === 6, "读到更新后的 displayedStep=5");
   });
 
-  await it("空格 / r / R / f / F / s / S 各路动作", async() => {
+  await it("空格 / r / R / f / F / h / H / s / S 各路动作", async() => {
     const w = setup();
     const prevented = [
       w.key(" "),
@@ -122,6 +124,8 @@ describe("keydown 分发", async() => {
       w.key("R"),
       w.key("f"),
       w.key("F"),
+      w.key("h"),
+      w.key("H"),
       w.key("s"),
       w.key("S"),
     ];
@@ -132,10 +136,12 @@ describe("keydown 分发", async() => {
       "goToStep",
       "focusCurrentPart",
       "focusCurrentPart",
+      "toggleSidebar",
+      "toggleSidebar",
       "exportScreenshot",
       "exportScreenshot",
     ].join(",");
-    assert(names.join(",") === expectNames, "动作序列：toggle → goToStep(0) ×2 → focus ×2 → 截图 ×2");
+    assert(names.join(",") === expectNames, "动作序列：toggle → goToStep(0) ×2 → focus ×2 → 侧栏 ×2 → 截图 ×2");
     assert(w.calls[1].args[0] === 0 && w.calls[2].args[0] === 0, "r/R 均回步骤 0");
     assert(prevented.every(Boolean), "全部 preventDefault");
   });
@@ -163,6 +169,37 @@ describe("keydown 分发", async() => {
     const w = setup();
     w.key("q");
     assert(w.calls.length === 0, "q 无动作");
+  });
+
+  await it("没注入 toggleSidebar 时按 H 不抛（面板缺失时 main.js 传的就是空操作）", async() => {
+    const calls = [];
+    const rec2 = name => () => calls.push(name);
+    // 换一个自己的 document 桩，免得和 setup() 里的 keyListeners 抢同一个句柄
+    const prevDoc = globalThis.document;
+    const local = {};
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: { addEventListener: (t, fn) => { local[t] = fn; } },
+    });
+    setupKeyboardShortcuts({
+      explodeCtl: {
+        goToStep: rec2("goToStep"),
+        toggleExplode: rec2("toggleExplode"),
+        focusCurrentPart: rec2("focusCurrentPart"),
+      },
+      controls: { autoRotate: false },
+      autoRotateCheck: { addEventListener: () => {} },
+      exportPanel: { exportScreenshot: rec2("exportScreenshot") },
+      getDisplayedStep: () => 0,
+    });
+    let threw = null;
+    try {
+      local.keydown({ key: "h", target: { tagName: "DIV" }, preventDefault: () => {} });
+    } catch (e) {
+      threw = e;
+    }
+    Object.defineProperty(globalThis, "document", { configurable: true, value: prevDoc });
+    assert(threw === null && calls.length === 0, `H 被静默忽略（抛错：${threw && threw.message}）`);
   });
 });
 

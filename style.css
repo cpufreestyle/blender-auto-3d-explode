@@ -53,6 +53,7 @@ html, body {
   box-shadow: 0 16px 48px rgb(0 0 0 / 45%);
   scrollbar-width: thin;
   scrollbar-color: rgb(129 140 248 / 30%) transparent;
+  transition: transform 0.28s ease;
 }
 
 .ui-overlay::-webkit-scrollbar { width: 5px; }
@@ -163,6 +164,24 @@ html, body {
   display: flex; align-items: center; justify-content: center;
 }
 .theme-toggle:hover { background: rgb(255 255 255 / 15%); transform: rotate(30deg) scale(1.1); }
+.header-actions { display: flex; align-items: center; gap: var(--sp-1); }
+
+/* 侧栏折叠：整块滑出视口，把 340px 还给 3D 视图 */
+.ui-overlay.collapsed { transform: translateX(calc(-100% - 24px)); }
+
+/* 收起后唯一的回来入口：浮动圆钮（默认隐藏，侧栏收起时才出现） */
+.sidebar-expand {
+  position: fixed; top: 16px; left: 16px; z-index: 11;
+  width: 32px; height: 32px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; line-height: 1; color: var(--text);
+  background: var(--glass); border: 1px solid var(--glass-border);
+  border-radius: 50%; box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  cursor: pointer; transition: transform 0.2s, background 0.2s;
+}
+.sidebar-expand:hover { background: rgb(255 255 255 / 14%); transform: scale(1.08); }
+.sidebar-expand:focus-visible { outline: none; border-color: var(--accent); color: var(--accent); }
 
 /* ===== 可折叠面板 ===== */
 .panel { margin-bottom: var(--sp-2); border-radius: var(--rad-md); overflow: hidden; }
@@ -655,4 +674,14 @@ input[type="range"]::-moz-range-thumb {
 .fcm-footer {
   display: flex; justify-content: flex-end; gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-4); border-top: 1px solid rgb(255 255 255 / 8%);
+}
+
+/* ===== 尊重系统的「减少动态效果」偏好 ===== */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
