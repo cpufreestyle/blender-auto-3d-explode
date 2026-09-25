@@ -328,6 +328,31 @@ describe("index.html 静态资源版本键与 package.json version 一致", () =
   });
 });
 
+// ===== 图标按钮可读性守卫 =====
+describe("index.html 的纯图标按钮都有 title", () => {
+  // 可见文字剥完 emoji / 符号 / 空白后什么都不剩的按钮，对读屏与不熟悉图标的人
+  // 都是一片空白——时间轴的 ▶️ ⏮️ 与 AI 面板的 ✕ 曾经正是如此。这类按钮必须带 title。
+  const iconOnly = [...mainHtml.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)]
+    .map((m) => ({
+      id: (m[0].match(/\bid="([^"]+)"/) || [null, null])[1],
+      title: (m[0].match(/\btitle="([^"]*)"/) || [null, null])[1],
+      text: m[1]
+        .replace(/<[^>]*>/g, "")
+        .replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{2BFF}\u{FE00}-\u{FE0F}\s]/gu, ""),
+    }))
+    .filter((b) => b.text.length === 0);
+
+  it("没有「只剩图标」的按钮缺 title", () => {
+    const bad = iconOnly.filter((b) => !b.title || !b.title.trim());
+    assert(
+      bad.length === 0,
+      bad.length === 0 ?
+        `${iconOnly.length} 个纯图标按钮全部有 title（${iconOnly.map((b) => b.id).join(", ")}）` :
+        `缺 title: ${bad.map((b) => b.id || "(无 id)").join(", ")}`,
+    );
+  });
+});
+
 // ===== 汇总 =====
 for (const { name, fn } of describeQueue) {
   console.log(`\n${name}`);
