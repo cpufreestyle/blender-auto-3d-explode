@@ -13,6 +13,7 @@ export default [
       'main.js',
       'src/ar-preview.js',
       'src/assembly-analysis.js',
+      'src/custom-model-finalize.js',
       'src/custom-model-loader.js',
       'src/custom-model-panel.js',
       'src/geometry-split.js',
