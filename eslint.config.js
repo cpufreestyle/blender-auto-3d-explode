@@ -166,7 +166,7 @@ export default [
   },
   // ── 服务端文件：Node.js 环境 ──────────────────────
   {
-    files: ['server.js', 'src/server-utils.js'],
+    files: ['server.js', 'src/server-utils.js', 'src/ai-config.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
