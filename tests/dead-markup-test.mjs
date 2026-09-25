@@ -30,6 +30,7 @@
  */
 
 import fs from "node:fs";
+import { MODEL_LOADING_BTN_IDS } from "../src/status-ui.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -287,6 +288,21 @@ describe("根目录 .css 都被页面加载", () => {
       orphans.length === 0 ?
         `${rootCss.length} 个根目录样式表均被 link 标签加载` :
         `无人加载: ${orphans.join(", ")}`,
+    );
+  });
+});
+
+// ===== 跨文件契约守卫：按钮禁用清单 vs index.html =====
+describe("MODEL_LOADING_BTN_IDS 与 index.html 不漂移", () => {
+  it("清单里每个 id 都在页面里", () => {
+    // 只防 html 侧改名/删按钮：清单侧删条目无法从代码推断意图，杀不掉也不该杀
+    const indexHtml = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+    const missing = MODEL_LOADING_BTN_IDS.filter((id) => !indexHtml.includes(`id="${id}"`));
+    assert(
+      missing.length === 0,
+      missing.length === 0 ?
+        `${MODEL_LOADING_BTN_IDS.length} 个禁用按钮 id 均在 index.html 在位` :
+        `页面里找不到: ${missing.join(", ")}`,
     );
   });
 });
