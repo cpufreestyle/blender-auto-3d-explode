@@ -36,9 +36,9 @@
 <div class="err" id="err"></div>
 
 <script type="module">
-import * as THREE from './vendor/three.module.js';
-import { OrbitControls } from './vendor/OrbitControls.js';
-import { GLTFLoader } from './vendor/GLTFLoader.js';
+import * as THREE from './vendor/three/build/three.module.js';
+import { OrbitControls } from './vendor/three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from './vendor/three/examples/jsm/loaders/GLTFLoader.js';
 
 const MODEL = new URLSearchParams(location.search).get('model') || 'models/generated/lego-car.glb';
 document.getElementById('name').textContent = MODEL.split('/').pop();

@@ -2,7 +2,7 @@
 //
 // 本模块为「纯函数」：仅依赖 THREE、src/utils.js 的 UnionFind / generatePartName，
 // 不引用 main.js 的共享状态（scene/camera/parts/questGroup 等），因此可独立复用与测试。
-// 与 main.js 共用同一个 ../vendor/three.module.js 实例（ESM 按解析路径缓存，材质/几何类型一致）。
+// 与 main.js 共用同一个 "three" 裸导入实例（ESM 按解析路径缓存，材质/几何类型一致）。
 
 import { Box3, BufferGeometry, Float32BufferAttribute, Mesh, Vector3 } from "three";
 import { UnionFind, generatePartName as _generatePartName } from "./utils.js";

@@ -6,16 +6,19 @@
   <meta name="api-base" content="http://localhost:3001" />
   <title>Blender 3D 拆解教学</title>
   <link rel="stylesheet" href="style.css?v=3.2.13" />
-  <!-- dev 模式（npx serve .）裸导入解析：源码 import "three"，映射到本地 vendor 副本。
-       webpack 构建产物自包含，不依赖此映射；修改时需与 package.json 的 three 版本保持一致。 -->
+  <!-- dev 模式（npx serve . / node server.js）裸导入解析：源码 import "three"，
+       映射到 node_modules/three 的同构镜像 vendor/three/（webpack 构建产物自包含，
+       不经过这里）。镜像由 scripts/vendor_three_sync.py 生成（npm run vendor:sync），
+       升级 three 后必须重跑；镜像内容、版本与 importmap 覆盖度由
+       tests/vendor-three-test.mjs 逐文件字节守卫。 -->
   <script type="importmap">
     {
       "imports": {
-        "three": "/vendor/three.module.js",
-        "three/examples/jsm/controls/": "/vendor/",
-        "three/examples/jsm/geometries/": "/vendor/",
-        "three/examples/jsm/loaders/": "/vendor/",
-        "three/examples/jsm/exporters/": "/vendor/"
+        "three": "/vendor/three/build/three.module.js",
+        "three/examples/jsm/controls/": "/vendor/three/examples/jsm/controls/",
+        "three/examples/jsm/exporters/": "/vendor/three/examples/jsm/exporters/",
+        "three/examples/jsm/geometries/": "/vendor/three/examples/jsm/geometries/",
+        "three/examples/jsm/loaders/": "/vendor/three/examples/jsm/loaders/"
       }
     }
   </script>
