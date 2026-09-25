@@ -45,12 +45,13 @@ import { autoSplitModel, generatePartName } from "./src/geometry-split.js";
 import { createQuest3Model } from "./src/quest3-model.js";
 import { splitModelToQuest3Regions } from "./src/quest3-parts.js";
 import { setupUpload } from "./src/upload-panel.js";
+import { setupGeneratedLibrary } from "./src/generated-library.js";
+import { setupKeyboardShortcuts } from "./src/keyboard-shortcuts.js";
 import { setupThemeToggle } from "./src/theme-toggle.js";
 import { setupStyleToggle } from "./src/style-toggle.js";
 import { setupAIPaint } from "./src/panels/ai-paint-panel.js";
 // 副作用导入：确保 config-panel.js 加载并初始化 Blender 健康检测/配置高亮（不依赖 ai-paint 面板是否启用）
 import "./src/panels/config-panel.js";
-import { API_BASE } from "./src/config.js";
 
 // 实现迁至 src/gltf-loader.js：loadGLTFLoader 与惰性缓存整段搬迁，行为不变
 const { loadGLTFLoader } = createGLTFLoaderProvider();
@@ -609,40 +610,12 @@ if (assemblyAnalyzeBtn) {
 }
 
 // 从生成库加载已拆解模型（models/generated/）
-const generatedSelect = document.getElementById("generated-select");
-const generatedLoadBtn = document.getElementById("generated-load");
-if (generatedSelect && generatedLoadBtn) {
-  fetch(`${API_BASE}/api/generated`)
-    .then(r => r.json())
-    .then(data => {
-      if (!data.success || !data.files || !data.files.length) return;
-      data.files.forEach(f => {
-        const opt = document.createElement("option");
-        opt.value = f.url;
-        const kb = (f.size / 1024).toFixed(0);
-        opt.textContent = `${f.name} (${kb} KB)`;
-        generatedSelect.appendChild(opt);
-      });
-    })
-    .catch(() => {
-      /* 忽略：无生成库时不展示 */
-    });
-
-  generatedLoadBtn.addEventListener("click", async() => {
-    const url = generatedSelect.value;
-    if (!url) return;
-    try {
-      showStatus("📦 正在从生成库加载模型...", "info");
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error("加载失败 " + resp.status);
-      const buf = await resp.arrayBuffer();
-      const name = decodeURIComponent(url.split("/").pop());
-      customModelLoader.loadCustomModel(buf, name, null);
-    } catch (err) {
-      showStatus("❌ 从生成库加载失败: " + err.message, "error");
-    }
-  });
-}
+// 实现迁至 src/generated-library.js：选项填充 + 点击加载整段搬迁，行为不变。
+// showStatus 来自 src/status-ui.js；loadCustomModel 注入 custom-model-loader 实例。
+setupGeneratedLibrary({
+  showStatus,
+  loadCustomModel: customModelLoader.loadCustomModel,
+});
 
 
 // ===== 导出与轻提示（截图 / 教案 / GLB）=====
@@ -667,49 +640,14 @@ const exportPanel = createExportPanel({
 });
 
 // 键盘快捷键
-document.addEventListener("keydown", e => {
-  // 忽略在输入框中的按键
-  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-
-  switch (e.key) {
-    case "ArrowRight":
-      e.preventDefault();
-      explodeCtl.goToStep(displayedStep + 1);
-      break;
-    case "ArrowLeft":
-      e.preventDefault();
-      explodeCtl.goToStep(displayedStep - 1);
-      break;
-    case " ":
-      e.preventDefault();
-      explodeCtl.toggleExplode();
-      break;
-    case "r":
-    case "R":
-      e.preventDefault();
-      explodeCtl.goToStep(0);
-      break;
-    case "a":
-    case "A":
-      e.preventDefault();
-      autoRotateCheck.checked = !autoRotateCheck.checked;
-      controls.autoRotate = autoRotateCheck.checked;
-      break;
-    case "f":
-    case "F":
-      e.preventDefault();
-      explodeCtl.focusCurrentPart();
-      break;
-    case "s":
-    case "S":
-      e.preventDefault();
-      exportPanel.exportScreenshot();
-      break;
-  }
-});
-
-autoRotateCheck.addEventListener("change", e => {
-  controls.autoRotate = e.target.checked;
+// 实现迁至 src/keyboard-shortcuts.js：keydown 分发 + autoRotate change 整段
+// 搬迁，行为不变。displayedStep 经 getDisplayedStep() 惰性读取（let 会重赋值）。
+setupKeyboardShortcuts({
+  explodeCtl,
+  controls,
+  autoRotateCheck,
+  exportPanel,
+  getDisplayedStep: () => displayedStep,
 });
 
 explodeCtl.updateStepUI();

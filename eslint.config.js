@@ -25,6 +25,8 @@ export default [
       'src/status-ui.js',
       'src/style-toggle.js',
       'src/theme-toggle.js',
+      'src/generated-library.js',
+      'src/keyboard-shortcuts.js',
       'src/explode-controller.js',
       'src/export-panel.js',
       'src/upload-panel.js',
