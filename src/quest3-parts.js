@@ -123,6 +123,38 @@ export function assignQuest3PartNames(parts, modelBox) {
 }
 
 /**
+ * 归一化坐标下最近的 Quest 3 模板下标。
+ *
+ * 距离口径与 assignQuest3PartNames 的贪心配对保持一致：X/Z 权重 1.0
+ * （左右/前后更可靠），Y 权重 0.7（高度可能因头带比例变化）。
+ * 只有严格小于才替换，故距离并列时取表序靠前的模板。
+ *
+ * 此前 mergePartsToQuest3（按部件中心）与 splitModelToQuest3Regions（按三角面
+ * 中心）各自内联了一份逐字相同的循环，收在这里共用。
+ *
+ * @param {number} nx 归一化 X（左右）
+ * @param {number} ny 归一化 Y（上下）
+ * @param {number} nz 归一化 Z（前后）
+ * @returns {number} QUEST3_PART_TEMPLATES 的下标
+ */
+export function nearestTemplateIndex(nx, ny, nz) {
+  let bestT = 0;
+  let bestDist = Infinity;
+  for (let t = 0; t < QUEST3_PART_TEMPLATES.length; t++) {
+    const tpl = QUEST3_PART_TEMPLATES[t];
+    const dx = nx - tpl.pos[0];
+    const dy = ny - tpl.pos[1];
+    const dz = nz - tpl.pos[2];
+    const dist = Math.sqrt(dx * dx + dy * dy * 0.7 + dz * dz);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestT = t;
+    }
+  }
+  return bestT;
+}
+
+/**
  * 将拆解后的多个部件按 Quest 3 原始 15 部位模板聚类合并
  * 把属于同一 Quest 3 区域的部件几何体合并为一个 mesh
  *
@@ -153,19 +185,7 @@ export function mergePartsToQuest3(splitParts, modelBox) {
     const ny = center.y / halfExtents.y;
     const nz = center.z / halfExtents.z;
 
-    let bestT = 0,
-      bestDist = Infinity;
-    for (let t = 0; t < QUEST3_PART_TEMPLATES.length; t++) {
-      const tpl = QUEST3_PART_TEMPLATES[t];
-      const dx = nx - tpl.pos[0];
-      const dy = ny - tpl.pos[1];
-      const dz = nz - tpl.pos[2];
-      const dist = Math.sqrt(dx * dx + dy * dy * 0.7 + dz * dz);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestT = t;
-      }
-    }
+    const bestT = nearestTemplateIndex(nx, ny, nz);
 
     if (!groups[bestT]) groups[bestT] = [];
     groups[bestT].push(p);
@@ -292,19 +312,7 @@ export function splitModelToQuest3Regions(model) {
       const nz = tmpCenter.z / halfExtents.z;
 
       // 找最近的 Quest 3 模板
-      let bestT = 0,
-        bestDist = Infinity;
-      for (let t = 0; t < QUEST3_PART_TEMPLATES.length; t++) {
-        const tpl = QUEST3_PART_TEMPLATES[t];
-        const dx = nx - tpl.pos[0];
-        const dy = ny - tpl.pos[1];
-        const dz = nz - tpl.pos[2];
-        const dist = Math.sqrt(dx * dx + dy * dy * 0.7 + dz * dz);
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestT = t;
-        }
-      }
+      const bestT = nearestTemplateIndex(nx, ny, nz);
 
       templateFaces[bestT].faces.push({ geoIndex: gi, faceIndex: f, nx, ny, nz });
       if (!templateFaces[bestT].material) {
