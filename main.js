@@ -44,11 +44,7 @@ import {
   calculateExplodePos,
   calculateSmartExplodeDist,
 } from "./src/explode-geometry.js";
-import {
-  splitByConnectedComponents,
-  splitByMaterialGroups,
-  generatePartName,
-} from "./src/geometry-split.js";
+import { autoSplitModel, generatePartName } from "./src/geometry-split.js";
 import { materials, getLegoMaterialForMesh } from "./src/lego-materials.js";
 import { splitModelToQuest3Regions } from "./src/quest3-parts.js";
 import { setupUpload } from "./src/upload-panel.js";
@@ -624,80 +620,10 @@ function finalizeCustomModelLoad(fileName, opts = {}) {
 }
 
 // ===== 模型自动拆分系统 =====
-// 几何体拆分工具已抽到 ./src/geometry-split.js（extractFacesToGeometry / splitBy* / generatePartName）
-
-// 自动拆分编排器：收集 mesh，按材质和连通分量准确拆分
-function autoSplitModel(model) {
-  // 第一步：收集所有 mesh 及其世界变换
-  const rawMeshes = [];
-  model.traverse(child => {
-    if (child.isMesh && child.geometry && child.geometry.attributes.position) {
-      rawMeshes.push(child);
-    }
-  });
-
-  // 如果 mesh 数量 >= 2，直接使用原始 mesh（保持准确）
-  if (rawMeshes.length >= 2) {
-    return rawMeshes.map((mesh, i) => {
-      const name = mesh.name || mesh.userData.name || `部件${i + 1}`;
-      return { mesh, name, isOriginal: true };
-    });
-  }
-
-  // 只有一个 mesh 时，尝试按材质组或连通分量拆分（自然拆分，不强制）
-  const splitParts = [];
-  for (const mesh of rawMeshes) {
-    const geometry = mesh.geometry;
-    const material = mesh.material;
-
-    // 尝试材质组拆分（如果模型本身有多个材质组，说明设计上就是多部件）
-    const groupResults = splitByMaterialGroups(geometry);
-    if (groupResults.length >= 2) {
-      for (const gr of groupResults) {
-        const newMesh = new Mesh(
-          gr.geometry,
-          Array.isArray(material) ? material[gr.materialIndex] || material[0] : material,
-        );
-        newMesh.matrix.copy(mesh.matrixWorld);
-        newMesh.matrixAutoUpdate = false;
-        splitParts.push({ mesh: newMesh, name: "", isOriginal: false });
-      }
-      continue;
-    }
-
-    // 尝试连通分量拆分（检测物理上分离的部件）
-    const ccResults = splitByConnectedComponents(geometry);
-    if (ccResults.length >= 2) {
-      for (const ccGeo of ccResults) {
-        const newMesh = new Mesh(ccGeo, material);
-        newMesh.matrix.copy(mesh.matrixWorld);
-        newMesh.matrixAutoUpdate = false;
-        splitParts.push({ mesh: newMesh, name: "", isOriginal: false });
-      }
-      continue;
-    }
-
-    // 无法自然拆分，保留原始 mesh（不强制空间切分，保持准确）
-    splitParts.push({ mesh, name: mesh.name || "", isOriginal: true });
-  }
-
-  // 计算整体包围盒用于命名
-  const bbox = new Box3();
-  for (const part of splitParts) {
-    const partBox = new Box3().setFromObject(part.mesh);
-    bbox.union(partBox);
-  }
-
-  // 为拆分后的部件命名
-  return splitParts.map((part, i) => {
-    if (!part.name) {
-      const pos = new Vector3();
-      part.mesh.getWorldPosition(pos);
-      part.name = generatePartName(i, pos, bbox);
-    }
-    return part;
-  });
-}
+// 实现迁至 src/geometry-split.js：autoSplitModel 整段搬迁，行为不变
+//（收集 mesh → 材质组 / 连通分量自然拆分 → 整体包围盒命名）。与
+// extractFacesToGeometry / splitBy* / generatePartName 同属纯函数模块，
+// 无共享状态依赖，拆分化简后就近编排；单测见 tests/geometry-split-test.mjs。
 
 // ===== Blender MCP 装配顺序对接 =====
 // 实现迁至 src/assembly-analysis.js：
