@@ -9,6 +9,7 @@
  *     请求形状、上传与下载进度文案、旧版 JSON base64 兼容、新版 header 解析、
  *     失败与超时一律 resolve(null) 以触发前端回退；
  *   - customModelParts 经 getCustomModelParts() 惰性读取：建厂阶段一次都不取，
+ *     每次派发各取一次，不会把旧数组引用钉死；
  *     每次派发各取一次，不会把旧数组引用钉死。
  *
  * 范围说明：loadSTLModel / loadURDFModel 内部走 three 的 STLLoader 与 DOMParser，
@@ -209,6 +210,10 @@ function installWorld({
     },
     fireReader: () => {
       fireReader = true;
+    },
+    failReader: () => {
+      const r = readers[readers.length - 1];
+      if (r && r.onerror) r.onerror();
     },
     chooseFile: file =>
       els["file-input"].listeners.change({ target: { files: [file], value: "prev" } }),
@@ -593,6 +598,9 @@ describe("上传模块（src/upload-panel.js）", async() => {
       w.chooseFile(makeFile("a.urdf"));
       assert(w.calls.partCalls.length === 1, "URDF 分发时读了一次");
       assert(w.calls.partCalls[0] === first, "读到的是当前数组引用");
+      // Node 里没有 DOMParser，loadURDFModel 必然走到自己的 catch；
+      // 但 catch 的文案带路线名，足以证明 URDF 进的是 URDF loader 而不是 STL。
+      assert(w.lastStatus().msg.includes("URDF 解析失败"), "URDF 路线进的是 loadURDFModel");
       const second = [{ name: "new" }];
       w.setParts(second);
       w.chooseFile(makeFile("b.urdf"));
@@ -609,6 +617,76 @@ describe("上传模块（src/upload-panel.js）", async() => {
       assert(w.deps.customModelGroup.__customModelGroup === true, "Group 引用未被复制改写");
       assert(typeof w.deps.showStatus === "function", "showStatus 以回调形式注入");
       assert(typeof w.deps.getCustomModelParts === "function", "部件数组经 getter 注入");
+    } finally {
+      restoreGlobals();
+    }
+  });
+});
+
+// ===== 读取失败：readFileAs 的 onerror 接缝 =====
+// 该 onerror 是三条路线（URDF 文本 / STL 二进制 / GLB 二进制）共用的一份实现，
+// 失败文案也统一写死在这里。逐条路线各验一遍，防止接缝只被其中一条看守——
+// 只测一条的话，「改坏某条路线的读取模式」或「某条路线漏接 onerror」都能蒙混过关。
+describe("读取文件失败：三条路线共用同一句提示", async() => {
+  const routes = [
+    { label: "URDF", file: "robot.urdf", mode: "text", viaBlender: false },
+    { label: "STL", file: "part.stl", mode: "buffer", viaBlender: true },
+    { label: "GLB", file: "part.glb", mode: "buffer", viaBlender: true },
+  ];
+  for (const route of routes) {
+    await it(`${route.label} 读取失败：既定文案 + error 级 + 不进加载`, async() => {
+      const w = installWorld();
+      try {
+        w.chooseFile(makeFile(route.file));
+        if (route.viaBlender) {
+          // STL / GLB 先试 Blender 后端，须先让它失败才回退到 FileReader
+          w.lastXhr().emit("error", {});
+          await flush();
+        }
+        assert(w.calls.reads.length === 1, `${route.label} 恰好发起一次读取`);
+        assert(w.calls.reads[0].mode === route.mode, `${route.label} 读取模式为 ${route.mode}`);
+        const before = w.calls.loadCustomModel.length;
+        w.failReader();
+        const st = w.lastStatus();
+        assert(st.msg === "❌ 读取文件失败", `${route.label} 提示既定文案`);
+        assert(st.type === "error", `${route.label} 为 error 级`);
+        assert(
+          w.calls.loadCustomModel.length === before,
+          `${route.label} 读取失败后不调用 loadCustomModel`,
+        );
+      } finally {
+        restoreGlobals();
+      }
+    });
+  }
+
+  await it("GLB 回退成功：onload 把 result / 文件名 / manifest 原样交给 loadCustomModel", async() => {
+    const w = installWorld();
+    w.fireReader();
+    try {
+      w.chooseFile(makeFile("part.glb"));
+      w.lastXhr().emit("error", {});
+      await flush();
+      assert(w.calls.loadCustomModel.length === 1, "loadCustomModel 只被调用一次");
+      const c = w.calls.loadCustomModel[0];
+      assert(
+        c.arrayBuffer instanceof ArrayBuffer && c.arrayBuffer.byteLength === 4,
+        "交出的是 FileReader 的 result，不是事件对象也不是 null",
+      );
+      assert(c.fileName === "part.glb", "文件名是用户选中的那个");
+      assert(c.manifest === null, "前端 JS 拆解没有 manifest，与调用点约定一致");
+      assert(w.calls.finalizeCustomModelLoad.length === 0, "loadCustomModel 自行收尾，本模块不代劳");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("读取失败不会触到 getCustomModelParts：loaderDeps 只在 onload 里求值", () => {
+    const w = installWorld();
+    try {
+      w.chooseFile(makeFile("robot.urdf"));
+      w.failReader();
+      assert(w.calls.partCalls.length === 0, "onerror 路径没有构造 loaderDeps");
     } finally {
       restoreGlobals();
     }
