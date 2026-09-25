@@ -30,6 +30,7 @@ const CONFIG_SRC = fs.readFileSync(path.join(ROOT, "src/config.js"), "utf8");
 
 // 与 src/config.js 里的选择器写法保持一致（CSS 属性值单引号，JS 串双引号）
 const META_SELECTOR = "meta[name='api-base']";
+import { DEFAULT_MODELS } from "../src/provider-models.js";
 
 // ===== 测试框架（与仓库既有 .mjs 测试一致）=====
 let passed = 0;
@@ -207,6 +208,35 @@ describe("webpack — CopyPlugin 给出 dist 侧的模块真身", async() => {
       wp.includes("{ from: \"src/panels/config-check.js\", to: \"src/panels/config-check.js\" }"),
       "拷贝 src/panels/config-check.js",
     );
+  });
+});
+
+
+describe("模型默认值单一来源（provider-models.js ↔ ai-config.html）", async() => {
+  const html = fs.readFileSync(path.join(ROOT, "ai-config.html"), "utf8");
+  await it("七个文本 LLM 的页面兜底与 DEFAULT_MODELS 逐项一致", () => {
+    // provider-models.js 的注释写着「避免与前端各自维护、改一处漏一处」，
+    // 但此前没有任何东西守着这次同步——这里逐项比对页面 loadConfig 里的
+    // `|| '默认'` 兜底。补了 provider 却忘了页面兜底同样会被杀。
+    const providers = Object.keys(DEFAULT_MODELS);
+    assert(providers.length === 7, `DEFAULT_MODELS 共 ${providers.length} 家（数量变了要同步检查守卫）`);
+    for (const p of providers) {
+      const re = new RegExp(
+        `getElementById\\('${p}-model'\\)\\.value = config\\.${p}\\.model \\|\\| '([^']*)'`,
+      );
+      const m = html.match(re);
+      assert(!!m, `页面里有 ${p}-model 的兜底赋值`);
+      assert(m && m[1] === DEFAULT_MODELS[p], `${p} 兜底 ${m && m[1]} === DEFAULT_MODELS ${DEFAULT_MODELS[p]}`);
+    }
+  });
+  await it("tripo 默认版本号页面三处与服务器默认一致", () => {
+    const srv = fs.readFileSync(path.join(ROOT, "src/ai-config.js"), "utf8");
+    const m = srv.match(/tripo: \{ apiKey: '', model: '([^']+)' \}/);
+    assert(!!m, "服务端 providers.tripo.model 默认值可按此模式取到（模式失效要同步更新守卫）");
+    const v = m && m[1];
+    assert(html.includes(`value="${v}"`), `tripo-model input 默认值 = ${v}`);
+    assert(html.includes(`config.providers?.tripo?.model || '${v}'`), `loadConfig 兜底 = ${v}`);
+    assert(html.includes(`document.getElementById('tripo-model').value || '${v}'`), `saveConfig 兜底 = ${v}`);
   });
 });
 
