@@ -243,8 +243,10 @@ const MIXED_GEOM = "<?xml version=\"1.0\"?><robot name=\"m\">" +
   "<link name=\"none\"><visual></visual></link>" +
   "</robot>";
 
-// 16 个 link 铺开到不同位置，用于触发 Quest 3 合并分支（>15 才合）
-function quest3URDF() {
+// 16 个 link 铺开到不同位置，用于触发 Quest 3 合并分支（>15 才合）。
+// meshLink 非空时给那个 link 换成 <mesh filename>：mesh 没有可用几何体会
+// 回落成 0.08 盒子，与原来的盒子逐尺寸相同，因此两条既有用例的结果不受影响。
+function quest3URDF(meshLink = null, meshFile = "meshes/frame.stl") {
   const spots = [
     [0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
     [0.7, 0.7, 0], [-0.7, 0.7, 0], [0.7, -0.7, 0], [-0.7, -0.7, 0],
@@ -252,8 +254,11 @@ function quest3URDF() {
   ];
   let s = "<?xml version=\"1.0\"?><robot name=\"q3\">";
   spots.forEach((p, k) => {
-    s += `<link name="l${k}"><visual><origin xyz="${p[0]} ${p[1]} ${p[2]}"/>` +
-      "<geometry><box size=\"0.08 0.08 0.08\"/></geometry></visual></link>";
+    const geom = `l${k}` === meshLink ?
+      `<geometry><mesh filename="${meshFile}"/></geometry>` :
+      "<geometry><box size=\"0.08 0.08 0.08\"/></geometry>";
+    s += `<link name="l${k}"><visual><origin xyz="${p[0]} ${p[1]} ${p[2]}"/>` + geom +
+      "</visual></link>";
   });
   return s + "</robot>";
 }
@@ -402,10 +407,8 @@ describe("loadURDFModel — 双 link 完整链路", async() => {
     const p = parts[0];
     assertEqual(p.mesh.userData.isURDF, true, "userData 标记 isURDF");
     assertEqual(p.mesh.userData.name, "arm", "userData.name 与部件名同步");
-    // 已知问题（另行修复，不在本刀范围）：命名步骤把 userData 整个替换成
-    // { name, isURDF }，装配阶段写进去的 meshFile 被丢掉，因此下面那句
-    // 「URDF 引用的 mesh 文件需单独上传」的提示永远是空串。
-    assertEqual(p.mesh.userData.meshFile, undefined, "meshFile 已被命名步骤丢弃（已知问题）");
+    // 命名步骤只改 name，meshFile 跟着搬过来：这个 URDF 没有外部引用，故为空串
+    assertEqual(p.mesh.userData.meshFile, "", "meshFile 字段在命名后仍在");
     assertEqual(p.mesh.position.length(), 0, "mesh 变换已烘进几何体，position 归零");
     assertEqual(p.mesh.rotation.x + p.mesh.rotation.y + p.mesh.rotation.z, 0, "rotation 归零");
     assertEqual(p.mesh.scale.x + p.mesh.scale.y + p.mesh.scale.z, 3, "scale 为 1");
@@ -536,14 +539,16 @@ describe("loadURDFModel — mesh 引用的提示", async() => {
     const p = partsByName(deps, "l0");
     assert(p !== null, "mesh 引用的 link 也出部件");
     if (!p) return;
-    // 装配阶段确实把文件名写进了 mesh.userData.meshFile，但命名步骤随后整块
-    // 替换了 userData，于是 meshNote 的条件永远为假：
-    //   splitParts[0].mesh.userData.meshFile === undefined
-    // 「引用了外部 mesh 却没有任何提示」是这条链路当前的实情，用例把它钉住，
-    // 修复时应连同下面两条一起翻面。
-    assertEqual(p.mesh.userData.meshFile, undefined, "外部 mesh 文件名未能存活到收尾（已知问题）");
-    assert(!lastStatus(seen).msg.includes("需单独上传"), "因此「需单独上传」提示不会出现");
-    assert(lastStatus(seen).msg.includes("✅ URDF 解析完成"), "但正常成功文案仍在");
+    // 装配阶段把外部文件名写进 mesh.userData.meshFile，命名步骤只改 name，
+    // 文件名一路活到收尾，于是这条提示真的会出现
+    assertEqual(p.mesh.userData.meshFile, "meshes/arm.dae", "外部 mesh 文件名存活到收尾");
+    assert(
+      lastStatus(seen).msg.includes(
+        "⚠️ 注意: URDF 引用的 mesh 文件 (meshes/arm.dae) 需单独上传\n当前使用占位几何体",
+      ),
+      "引用外部 mesh 时给出「需单独上传」提示",
+    );
+    assert(lastStatus(seen).msg.includes("✅ URDF 解析完成"), "正常成功文案仍在");
 
     // <mesh/> 一个属性都不给：meshFile 取空串。即便 userData 能存活到收尾，
     // 空串也不该触发「需单独上传」提示——这条在既有问题修复前后都应成立。
@@ -587,6 +592,28 @@ describe("loadURDFModel — Quest 3 按 15 部位聚类合并", async() => {
     );
     assert(lastStatus(d2.seen).msg.includes(`✅ URDF 解析完成：${after.length} 个 link（部件）`),
       "成功文案报告的是合并后的部件数");
+  });
+});
+
+describe("loadURDFModel — Quest 3 合并后外部 mesh 引用不丢", async() => {
+  await withDOMParser(async() => {
+    const { deps, seen } = makeDeps([]);
+    await loadURDFModel(quest3URDF("l3"), "quest3-head.urdf", deps);
+    const parts = deps.customModelParts;
+    assert(parts.length > 0 && parts.length <= 15, `合并后不超过 15 个部件（实得 ${parts.length}）`);
+
+    // 带着 <mesh filename> 的 link 会被并进某个聚类；合并会重建 mesh 与
+    // userData，文件名必须一起搬过去，否则收尾的提示在合并场景下又哑了
+    assert(
+      parts.some(p => p.mesh.userData.meshFile === "meshes/frame.stl"),
+      "合并后的部件里仍有人带着外部 mesh 文件名",
+    );
+    assert(
+      lastStatus(seen).msg.includes(
+        "⚠️ 注意: URDF 引用的 mesh 文件 (meshes/frame.stl) 需单独上传",
+      ),
+      "合并之后仍给出「需单独上传」提示",
+    );
   });
 });
 
@@ -838,23 +865,22 @@ describe("loadSTLModel — 坏输入走 catch 且不产出部件", async() => {
 });
 
 // ===== 变异测试记录（src/model-loaders.js）=====
-// 53 个变异：43 杀 10 存活。存活的逐个查过，判定如下——
-//   等价（改了也没有任何观测差异）：
+// 58 个变异：49 杀 9 存活。存活的逐个查过，判定全部等价：
 //   - jointMap 写入去掉 child 守卫：没有 <child> 时写进去的键是 "undefined"，
 //     没有任何 link 会叫这个名字，读不到的键改了也观测不到；
 //   - joint 类型缺省 fixed 改 revolute：jointMap 里的 type 全模块无人读取；
-//   - userData 丢掉 isURDF / 丢掉 name：命名步骤两个分支都会把 userData 整块
-//     替换成 { name, isURDF }，装配阶段写进去的值观测不到；
+//   - userData（装配阶段）丢掉 isURDF / 丢掉 name：命名步骤两个分支都会重建
+//     userData，装配阶段写进去的同名字段观测不到；
 //   - mesh.name 改用固定串：命名步骤两个分支都会再把 mesh.name 设回部件名
 //     （mergePartsToQuest3 也只读 splitParts[].mesh，不读 mesh.name）；
 //   - isOriginal 改 false：splitParts[].isOriginal 没有任何下游读者；
-//   - partCenter 不再 clone：Box3.getCenter(new Vector3()) 本来就返回新对象，
+//   - partCenter 不再 clone：Box3.getCenter(new Vector3()) 本来返回新对象，
 //     不存在别名，克隆与否观测不到；
 //   - stepIndex 初值 1 改 0：命名步骤会为每个部件重新算 stepIndex；
 //   - STL 部件名改用固定串：命名步骤随后又把 mesh.name 设成文件名/部位名。
-//   已知盲区：
-//   - 外部 mesh 文件名缺省 "" 改 "unknown"：被「命名步骤整块替换 userData」
-//     这一既有问题挡住，meshFile 活不到收尾，暂不可杀；修复后即可杀。
+// 曾经有一个盲区——外部 mesh 文件名缺省 "" 改 "unknown" 杀不掉——根因是命名
+// 步骤整块替换 userData、meshFile 活不到收尾。该问题已随 src 修复关闭，现在
+// 这条变异会被「mesh 引用的提示」那个 describe 杀掉。
 
 // ===== 运行 =====
 for (const { name, fn } of describeQueue) {

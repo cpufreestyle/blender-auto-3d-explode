@@ -208,6 +208,11 @@ export function mergePartsToQuest3(splitParts, modelBox) {
     } else {
       // 合并多个几何体
       const meshes = indices.map(i => splitParts[i].mesh);
+      // 外部 mesh 引用跟着合并结果走：URDF 链路靠 userData.meshFile 走到收尾
+      // 的「需单独上传」提示，整块替换 userData 会把它丢掉
+      const meshFile = meshes
+        .map(m => m.userData?.meshFile)
+        .find(f => f) || "";
       const geometries = meshes.map(m => {
         m.updateMatrixWorld(true);
         const geo = m.geometry.clone();
@@ -229,7 +234,7 @@ export function mergePartsToQuest3(splitParts, modelBox) {
       newMesh.castShadow = true;
       newMesh.receiveShadow = true;
       newMesh.name = name;
-      newMesh.userData = { name };
+      newMesh.userData = { name, meshFile };
       mergedParts.push({ mesh: newMesh, name, isOriginal: false });
     }
   }
