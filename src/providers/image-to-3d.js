@@ -177,6 +177,38 @@ async function finishHyper3DTask(apiKey, uuid, subKey) {
   return downloadBuffer(glbItem.url);
 }
 
+const HYPER3D_RODIN_URL = "https://hyperhuman.deemos.com/api/v2/rodin";
+
+// Hyper3D 两条路线（图片 / 文本）共用的表单默认值
+function appendHyper3DTaskDefaults(form) {
+  form.append("tier", "Sketch");
+  form.append("mesh_mode", "Raw");
+  form.append("texture_mode", "high");
+}
+
+/**
+ * 建任务的收尾：POST 表单 → 错误文案透传（截断 400 字符）→ 从响应里取任务标识。
+ * uuid 与 subscription_key 都支持「顶层」与「data 下」两级回退，缺任何一个
+ * 都视为失败。图片路线与文生路线这一段原本逐字相同，收在一起后由两条路线的
+ * 既有用例共同看守。
+ */
+async function createHyper3DTask(apiKey, form) {
+  const res = await fetch(HYPER3D_RODIN_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`Hyper3D 创建任务失败 ${res.status}: ${t.slice(0, 400)}`);
+  }
+  const cd = await res.json();
+  const uuid = cd.uuid || (cd.data && cd.data.uuid);
+  const subKey = cd.subscription_key || (cd.data && cd.data.subscription_key);
+  if (!uuid || !subKey) throw new Error("Hyper3D 未返回任务标识 (uuid/subscription_key)");
+  return { uuid, subKey };
+}
+
 /**
  * Hyper3D(Rodin) image-to-3d：POST /api/v2/rodin（multipart images）→ 轮询 → 下载 GLB
  */
@@ -188,23 +220,9 @@ export async function runHyper3DImageTo3D(cfg, body, imageBase64) {
   const imageBytes = Buffer.from(imageBase64, "base64");
   const form = new FormData();
   form.append("images", new Blob([imageBytes], { type: mime }), `0000${ext}`);
-  form.append("tier", "Sketch");
-  form.append("mesh_mode", "Raw");
-  form.append("texture_mode", "high");
+  appendHyper3DTaskDefaults(form);
   console.log(`  🌐 图片转3D: 创建 Hyper3D Rodin 任务 (${(imageBytes.length / 1024).toFixed(1)} KB)`);
-  const createRes = await fetch("https://hyperhuman.deemos.com/api/v2/rodin", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form,
-  });
-  if (!createRes.ok) {
-    const t = await createRes.text();
-    throw new Error(`Hyper3D 创建任务失败 ${createRes.status}: ${t.slice(0, 400)}`);
-  }
-  const cd = await createRes.json();
-  const uuid = cd.uuid || (cd.data && cd.data.uuid);
-  const subKey = cd.subscription_key || (cd.data && cd.data.subscription_key);
-  if (!uuid || !subKey) throw new Error("Hyper3D 未返回任务标识 (uuid/subscription_key)");
+  const { uuid, subKey } = await createHyper3DTask(apiKey, form);
   const glbBuffer = await finishHyper3DTask(apiKey, uuid, subKey);
   return { glbBuffer, manifest: { total_parts: 0, parts: [], engine: "hyper3d" } };
 }
@@ -224,23 +242,9 @@ export async function runHyper3DTextTo3D(cfg, prompt) {
   }
   const form = new FormData();
   form.append("prompt", text);
-  form.append("tier", "Sketch");
-  form.append("mesh_mode", "Raw");
-  form.append("texture_mode", "high");
+  appendHyper3DTaskDefaults(form);
   console.log(`  🌐 文生3D: 创建 Hyper3D Rodin 文本任务 (${text.length} 字)`);
-  const createRes = await fetch("https://hyperhuman.deemos.com/api/v2/rodin", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form,
-  });
-  if (!createRes.ok) {
-    const t = await createRes.text();
-    throw new Error(`Hyper3D 创建任务失败 ${createRes.status}: ${t.slice(0, 400)}`);
-  }
-  const cd = await createRes.json();
-  const uuid = cd.uuid || (cd.data && cd.data.uuid);
-  const subKey = cd.subscription_key || (cd.data && cd.data.subscription_key);
-  if (!uuid || !subKey) throw new Error("Hyper3D 未返回任务标识 (uuid/subscription_key)");
+  const { uuid, subKey } = await createHyper3DTask(apiKey, form);
   const glbBuffer = await finishHyper3DTask(apiKey, uuid, subKey);
   return { glbBuffer, manifest: { total_parts: 0, parts: [], engine: "hyper3d-text", prompt: text } };
 }
