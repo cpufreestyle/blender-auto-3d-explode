@@ -58,7 +58,7 @@ export let AI_CONFIG = {
   // 图片转 3D 第三方云端提供商（Meshy / Tripo / Hyper3D-Rodin）的 API Key 配置。
   // mode 可直接设为 "meshy" / "tripo" / "hyper3d" 来走对应云端（与 MCP tools 一致）。
   providers: {
-    meshy: { apiKey: '', model: 'meshy-6' },
+    meshy: { apiKey: '' },
     tripo: { apiKey: '', model: 'v3.1-20260211' },
     hyper3d: { apiKey: '', mode: 'MAIN_SITE' },
   },

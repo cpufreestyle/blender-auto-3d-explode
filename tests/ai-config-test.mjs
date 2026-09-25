@@ -138,7 +138,7 @@ describe("loadAIConfig 深合并", async() => {
     assert(AI_CONFIG.openai.key === "sk-x", "openai.key 取文件值");
     assert(AI_CONFIG.openai.model === DEFAULT_MODELS.openai, "openai.model 留默认");
     assert(AI_CONFIG.anthropic.key === "", "未配置的 anthropic.key 留默认空串");
-    assert(AI_CONFIG.providers.meshy.model === "meshy-6", "providers.meshy 默认未丢");
+    assert(AI_CONFIG.providers.meshy.apiKey === "", "providers.meshy 默认未丢");
     assert(AI_CONFIG.extraTop === "keep", "顶层新键随 spread 带入");
     assert(AI_CONFIG.replicate.mcResolution === 256, "replicate 嵌套默认未丢");
   });
