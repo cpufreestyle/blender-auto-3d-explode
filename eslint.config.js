@@ -175,6 +175,7 @@ export default [
       'src/static-server.js',
       'src/proxy-detect.js',
       'src/closed-loop.js',
+      'src/response-utils.js',
     ],
     languageOptions: {
       ecmaVersion: 'latest',
