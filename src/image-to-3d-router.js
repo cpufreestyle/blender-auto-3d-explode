@@ -50,7 +50,7 @@ export async function generateImageTo3D({ mode, body, imageBase64, mime, config,
       // 已配置 Replicate Token 时，本地服务不可用则自动回退云端，提升易用性
       if (!(config.replicate || {}).token) throw localErr;
       console.warn(`  ⚠️ 本地图像转3D服务不可用，自动回退到 Replicate 云端: ${localErr.message}`);
-      return await runReplicateImageTo3D(body, imageBase64, mime, "local", config, deps);
+      return await runReplicateImageTo3D(body, imageBase64, mime, "local", config);
     }
   }
   // 第三方云端提供商（与 MCP tools 一致）：Meshy / Tripo / Hyper3D(Rodin)
@@ -60,7 +60,7 @@ export async function generateImageTo3D({ mode, body, imageBase64, mime, config,
   // VLM 视觉模型程序化重建（看图→生成 3D 代码→自动修复→导出 GLB）
   if (mode === "vlm") return runVlmImageTo3D(config.vlm, body, imageBase64, deps);
   // Replicate 云端（及未知 deploy 值的历史兜底）
-  return runReplicateImageTo3D(body, imageBase64, mime, mode, config, deps);
+  return runReplicateImageTo3D(body, imageBase64, mime, mode, config);
 }
 
 // ── 本地路线 ────────────────────────────────────────
@@ -289,7 +289,7 @@ async function runVlmImageTo3D(vlmCfg, body, imageBase64, deps) {
  * 云端模型；本地模式回退到云端时，body.model 是本地生成方式（relief/voxel/depth 等），
  * 不能当作 Replicate 模型名。
  */
-async function runReplicateImageTo3D(body, imageBase64, mime, requestedMode, config, deps) {
+async function runReplicateImageTo3D(body, imageBase64, mime, requestedMode, config) {
   const rep = config.replicate || {};
   const token = rep.token;
   if (!token) {

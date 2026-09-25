@@ -124,7 +124,7 @@ export async function loadSTLModel(arrayBuffer, fileName, deps) {
     finalizeCustomModelLoad(fileName, { modelType: "STL", adjustExplode: false });
     showStatus(
       "✅ STL 模型加载完成（单部件）\n💡 提示: 启动 Blender 后端可获得自动拆解",
-      "success"
+      "success",
     );
 
     console.log(`✅ STL 模型加载完成：${fileName}`);
@@ -173,10 +173,12 @@ export async function loadURDFModel(urdfText, fileName, deps) {
       const parent = joint.querySelector("parent")?.getAttribute("link");
       const child = joint.querySelector("child")?.getAttribute("link");
       const origin = joint.querySelector("origin");
-      const originXYZ = origin?.getAttribute("xyz")?.trim().split(/\s+/).map(parseFloat) || [
+      const originXYZ = origin?.getAttribute("xyz")?.trim().split(/\s+/)
+        .map(parseFloat) || [
         0, 0, 0,
       ];
-      const originRPY = origin?.getAttribute("rpy")?.trim().split(/\s+/).map(parseFloat) || [
+      const originRPY = origin?.getAttribute("rpy")?.trim().split(/\s+/)
+        .map(parseFloat) || [
         0, 0, 0,
       ];
       const jointName = joint.getAttribute("name") || "joint";
@@ -242,10 +244,12 @@ export async function loadURDFModel(urdfText, fileName, deps) {
 
       // 获取 visual origin
       const visOrigin = visual?.querySelector("origin");
-      const visXYZ = visOrigin?.getAttribute("xyz")?.trim().split(/\s+/).map(parseFloat) || [
+      const visXYZ = visOrigin?.getAttribute("xyz")?.trim().split(/\s+/)
+        .map(parseFloat) || [
         0, 0, 0,
       ];
-      const visRPY = visOrigin?.getAttribute("rpy")?.trim().split(/\s+/).map(parseFloat) || [
+      const visRPY = visOrigin?.getAttribute("rpy")?.trim().split(/\s+/)
+        .map(parseFloat) || [
         0, 0, 0,
       ];
 
@@ -257,7 +261,8 @@ export async function loadURDFModel(urdfText, fileName, deps) {
       // 创建几何体
       let geometry;
       if (boxEl) {
-        const size = boxEl.getAttribute("size")?.trim().split(/\s+/).map(parseFloat) || [
+        const size = boxEl.getAttribute("size")?.trim().split(/\s+/)
+          .map(parseFloat) || [
           0.1, 0.1, 0.1,
         ];
         geometry = new BoxGeometry(size[0] || 0.1, size[1] || 0.1, size[2] || 0.1);
@@ -388,9 +393,9 @@ export async function loadURDFModel(urdfText, fileName, deps) {
     finalizeCustomModelLoad(fileName, { modelType: "URDF", adjustExplode: true });
 
     const meshNote =
-      partCount > 0 && splitParts[0]?.mesh?.userData?.meshFile
-        ? `\n⚠️ 注意: URDF 引用的 mesh 文件 (${splitParts[0].mesh.userData.meshFile}) 需单独上传\n当前使用占位几何体`
-        : "";
+      partCount > 0 && splitParts[0]?.mesh?.userData?.meshFile ?
+        `\n⚠️ 注意: URDF 引用的 mesh 文件 (${splitParts[0].mesh.userData.meshFile}) 需单独上传\n当前使用占位几何体` :
+        "";
     showStatus(`✅ URDF 解析完成：${partCount} 个 link（部件）${meshNote}`, "success");
 
     console.log(`✅ URDF 模型加载完成：${partCount} 个部件`);
