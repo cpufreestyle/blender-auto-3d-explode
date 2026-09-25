@@ -1,7 +1,6 @@
 import {
   ACESFilmicToneMapping,
   AmbientLight,
-  Box3,
   BufferAttribute,
   BufferGeometry,
   Color,
@@ -20,10 +19,10 @@ import {
   Scene,
   SpotLight,
   TOUCH,
-  Vector3,
   WebGLRenderer,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { createCameraFitter } from "./src/camera-fit.js";
 import { createExplodeController } from "./src/explode-controller.js";
 import { createAssemblyAnalysis } from "./src/assembly-analysis.js";
 import { createModelDisposal, disposeNodeTree } from "./src/model-disposal.js";
@@ -208,65 +207,10 @@ let customModelPanel = null; // 自定义模型面板 UI 同步与清除复位�
 const { stepDescEl, autoRotateCheck } = stepUi;
 
 // ===== 自动适配相机到模型 =====
-function fitCameraToModel(modelGroup, smooth = true) {
-  // 计算包围盒
-  const box = new Box3().setFromObject(modelGroup);
-  const center = box.getCenter(new Vector3());
-  const size = new Vector3();
-  box.getSize(size);
-
-  // 计算最大尺寸
-  const maxDim = Math.max(size.x, size.y, size.z);
-
-  // 计算合适的相机距离（根据模型大小）
-  const fov = camera.fov * (Math.PI / 180);
-  let cameraDistance = Math.abs(maxDim / Math.sin(fov / 2)) * 1.5;
-
-  // 设置最小/最大距离限制
-  cameraDistance = Math.max(0.8, Math.min(cameraDistance, 20));
-
-  // 设置相机目标位置
-  const targetPos = new Vector3(center.x, center.y + size.y * 0.3, center.z);
-  controls.target.copy(targetPos);
-
-  // 计算新的相机位置（保持当前角度）
-  const direction = new Vector3().subVectors(camera.position, controls.target).normalize();
-  const newCameraPos = targetPos.clone().add(direction.multiplyScalar(cameraDistance));
-
-  if (smooth) {
-    // 平滑过渡
-    const startPos = camera.position.clone();
-    const startTarget = controls.target.clone();
-    let progress = 0;
-
-    function animateCamera() {
-      progress += 0.03;
-      if (progress >= 1) {
-        camera.position.copy(newCameraPos);
-        controls.target.copy(targetPos);
-        return;
-      }
-
-      // 使用缓动函数
-      const easeProgress = 1 - Math.pow(1 - progress, 3);
-      camera.position.lerpVectors(startPos, newCameraPos, easeProgress);
-      controls.target.lerpVectors(startTarget, targetPos, easeProgress);
-
-      requestAnimationFrame(animateCamera);
-    }
-    animateCamera();
-  } else {
-    camera.position.copy(newCameraPos);
-    controls.target.copy(targetPos);
-  }
-
-  console.log("📐 相机适配:", {
-    center: `(${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)})`,
-    size: `(${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`,
-    maxDim: maxDim.toFixed(2),
-    cameraDistance: cameraDistance.toFixed(2),
-  });
-}
+// 实现迁至 src/camera-fit.js：fitCameraToModel 整段搬迁，行为不变（包围盒 →
+// 距离夹取 → 缓动/直落两路 → 日志）。camera / controls 为稳定 const 引用，
+// 工厂创建时传入；requestAnimationFrame 仍走全局。
+const { fitCameraToModel } = createCameraFitter({ camera, controls });
 
 // ===== 增强灯光系统 =====
 const ambientLight = new AmbientLight(0xffffff, 0.45);
