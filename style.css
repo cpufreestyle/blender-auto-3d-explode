@@ -198,7 +198,7 @@ html, body {
 .panel-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: var(--sp-2) var(--sp-3); cursor: pointer; user-select: none;
-  font-size: var(--font-md); font-weight: 600; color: var(--text-dim);
+  font-size: var(--font-md); font-weight: 600; color: var(--text-dim); letter-spacing: 0.3px;
   transition: color 0.2s;
 }
 .panel-header:hover { color: var(--text); }
@@ -267,7 +267,7 @@ html, body {
 
 /* ===== 状态框 ===== */
 .status-box {
-  padding: 8px 10px; border-radius: 6px; font-size: var(--font-sm); line-height: 1.5;
+  padding: var(--sp-2) var(--sp-3); border-radius: 6px; font-size: var(--font-sm); line-height: 1.5;
   margin-bottom: var(--sp-2); white-space: pre-line;
 }
 .status-box.hidden { display: none; }
@@ -357,7 +357,7 @@ html, body {
 @keyframes gradient-shift { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
 
 .step-desc {
-  padding: 10px 12px; border-left: 3px solid var(--accent);
+  padding: var(--sp-2) var(--sp-3); border-left: 3px solid var(--accent);
   border-radius: 8px; font-size: var(--font-md); line-height: 1.6; color: #c5c7d3;
   background: linear-gradient(135deg, rgb(74 158 255 / 7%), rgb(143 122 255 / 5%));
   white-space: pre-line; transition: all 0.3s;
@@ -636,14 +636,30 @@ input[type="range"]::-moz-range-thumb {
 /* ===== 隐藏 ===== */
 .hidden { display: none !important; }
 
-/* ===== 移动端 ===== */
+/* ===== 移动端 / 窄屏 =====
+   两条覆盖路径缺一不可：
+   1) .mobile-device —— UA 检测（src/scene-setup.js），覆盖到平板竖屏（iPad 宽 768px）；
+   2) @media (width <= 560px) —— 桌面浏览器把窗口拉窄、UA 检测不到的窄屏设备。
+      行式控件换行规则两边共用：390px 宽度下时间轴与 AI 输入行整行换行，
+      滑块 / 输入框不与按钮挤在同一条线上，触控目标同步放大。 */
 .mobile-device .ui-overlay { top: 6px; left: 6px; right: 6px; width: auto; max-height: calc(100vh - 12px); padding: var(--sp-3); }
 .mobile-device .btn { padding: 12px 14px; font-size: var(--font-lg); min-height: 44px; }
 .mobile-device input[type="range"] { height: 7px; }
 .mobile-device input[type="range"]::-webkit-slider-thumb { width: 20px; height: 20px; }
 
-@media (width <= 480px) {
-  .ui-overlay { top: 8px; left: 8px; width: calc(100% - 16px); padding: var(--sp-3); max-height: calc(100vh - 16px); }
+@media (width <= 560px) {
+  .ui-overlay { top: 8px; left: 8px; width: calc(100% - 16px); max-width: 520px; padding: var(--sp-3); max-height: calc(100vh - 16px); }
+  .btn { min-height: 40px; }
+  .btn-mini { min-height: 36px; padding: 7px 10px; }
+  input[type="range"] { height: 7px; }
+  input[type="range"]::-webkit-slider-thumb { width: 20px; height: 20px; }
+  .tl-controls { flex-wrap: wrap; }
+  .tl-slider-wrap { flex: 1 1 100%; }
+  .ai-input-row { flex-wrap: wrap; }
+  .ai-input-row .ai-input { flex: 1 1 100%; }
+  .blender-banner { flex-wrap: wrap; }
+  .bb-text { flex-basis: 100%; }
+  .header-row { flex-wrap: wrap; row-gap: var(--sp-1); }
 }
 
 /* ===== 首次使用：模型配置引导弹窗 ===== */
