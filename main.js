@@ -33,6 +33,7 @@ import { setupUpload } from "./src/upload-panel.js";
 import { setupGeneratedLibrary } from "./src/generated-library.js";
 import { setupKeyboardShortcuts } from "./src/keyboard-shortcuts.js";
 import { createStepDescAnimation } from "./src/step-desc.js";
+import { createRenderLoop } from "./src/render-loop.js";
 import { createSceneSetup } from "./src/scene-setup.js";
 import { setupThemeToggle } from "./src/theme-toggle.js";
 import { setupStyleToggle } from "./src/style-toggle.js";
@@ -532,30 +533,12 @@ setupKeyboardShortcuts({
 explodeCtl.updateStepUI();
 
 
-// ===== 响应窗口大小 =====
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
-// ===== 渲染循环 =====
-function animate(now) {
-  requestAnimationFrame(animate);
-  // 后台标签页不做任何计算与渲染（浏览器已节流 rAF，这里再兜一层）
-  if (document.hidden) return;
-  explodeCtl.updateExplodedView(now);
-
-  // 粒子动画（缓慢旋转）— 仅在可见时更新
-  if (particlesMesh && particlesMesh.visible) {
-    particlesMesh.rotation.y = now * 0.00005;
-    particlesMesh.rotation.x = now * 0.00003;
-  }
-
-  controls.update();
-  renderer.render(scene, camera);
-}
-requestAnimationFrame(animate);
+// ===== 响应窗口大小 + 渲染循环 =====
+// 实现迁至 src/render-loop.js：resize 监听与 animate 自递归整段搬迁，行为
+// 不变（窗口变化只重设 size 与 aspect、不重设 pixelRatio，初值只在
+// createSceneSetup 里设一次；后台标签页在进 updateExplodedView 之前就
+// return）。六个依赖均为稳定 const 引用，直接传入。
+createRenderLoop({ camera, renderer, scene, controls, explodeCtl, particlesMesh });
 
 // 隐藏加载提示
 const loadingEl = document.getElementById("loading");

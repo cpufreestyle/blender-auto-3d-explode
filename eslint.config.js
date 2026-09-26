@@ -36,6 +36,7 @@ export default [
       'src/quest3-data.js',
       'src/quest3-model.js',
       'src/quest3-steps.js',
+      'src/render-loop.js',
       'src/utils.js'
     ],
     languageOptions: {
