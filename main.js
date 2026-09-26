@@ -2,15 +2,11 @@ import {
   ACESFilmicToneMapping,
   AmbientLight,
   Box3,
-  BoxGeometry,
   BufferAttribute,
   BufferGeometry,
-  CatmullRomCurve3,
-  CircleGeometry,
   Color,
   CylinderGeometry,
   DirectionalLight,
-  Euler,
   Fog,
   GridHelper,
   Group,
@@ -24,7 +20,6 @@ import {
   Scene,
   SpotLight,
   TOUCH,
-  TubeGeometry,
   Vector3,
   WebGLRenderer,
 } from "three";
@@ -36,7 +31,6 @@ import { createModelFit } from "./src/model-fit.js";
 import { createCustomModelFinalizer } from "./src/custom-model-finalize.js";
 import { createCustomModelLoader } from "./src/custom-model-loader.js";
 import { createCustomModelPanel } from "./src/custom-model-panel.js";
-import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { defaultStepGroups } from "./src/quest3-steps.js";
 import { isQuest3Model, yieldToMain } from "./src/utils.js";
 import { createARPreview } from "./src/ar-preview.js";
@@ -46,7 +40,8 @@ import {
   calculateSmartExplodeDist,
 } from "./src/explode-geometry.js";
 import { autoSplitModel, generatePartName } from "./src/geometry-split.js";
-import { materials, getLegoMaterialForMesh } from "./src/lego-materials.js";
+import { getLegoMaterialForMesh } from "./src/lego-materials.js";
+import { createQuest3Model } from "./src/quest3-model.js";
 import { splitModelToQuest3Regions } from "./src/quest3-parts.js";
 import { setupUpload } from "./src/upload-panel.js";
 import { setupAIPaint } from "./src/panels/ai-paint-panel.js";
@@ -334,192 +329,10 @@ scene.add(questGroup);
 
 const parts = []; // 存储所有可拆解部件
 
-function createPart({
-  mesh,
-  homePos,
-  explodePos,
-  homeRot = [0, 0, 0],
-  explodeRot = [0, 0, 0],
-  name,
-}) {
-  mesh.position.set(...homePos);
-  mesh.rotation.set(...homeRot);
-  mesh.castShadow = !lowPowerMode;
-  mesh.receiveShadow = !lowPowerMode;
-  mesh.userData = { name };
-  questGroup.add(mesh);
-  parts.push({
-    mesh,
-    homePos: new Vector3(...homePos),
-    explodePos: new Vector3(...explodePos),
-    homeRot: new Euler(...homeRot),
-    explodeRot: new Euler(...explodeRot),
-    name: name,
-  });
-  return mesh;
-}
-
-// 1. 主机身（中部黑色主体）
-const bodyGeo = new RoundedBoxGeometry(2.2, 1.15, 1.0, 4, 0.12);
-const bodyMesh = new Mesh(bodyGeo, materials.body);
-createPart({
-  mesh: bodyMesh,
-  homePos: [0, 0, 0],
-  explodePos: [0, 0, 0],
-  name: "主机身",
-});
-
-// 2. 前面板（白色外壳）
-const frontGeo = new RoundedBoxGeometry(2.3, 1.25, 0.25, 4, 0.1);
-const frontMesh = new Mesh(frontGeo, materials.frontPlate);
-createPart({
-  mesh: frontMesh,
-  homePos: [0, 0, 0.55],
-  explodePos: [0, 0, 1.45],
-  name: "前面板",
-});
-
-// 3. 后面罩/泡沫垫
-const foamGeo = new RoundedBoxGeometry(2.0, 0.95, 0.18, 4, 0.08);
-const foamMesh = new Mesh(foamGeo, materials.foam);
-createPart({
-  mesh: foamMesh,
-  homePos: [0, 0, -0.55],
-  explodePos: [0, 0, -1.35],
-  name: "面罩海绵",
-});
-
-// 4. 左右透镜模组
-const barrelGeo = new CylinderGeometry(0.32, 0.32, 0.45, 32);
-barrelGeo.rotateX(Math.PI / 2);
-const leftBarrel = new Mesh(barrelGeo, materials.lensBarrel);
-createPart({
-  mesh: leftBarrel,
-  homePos: [-0.52, 0.05, -0.12],
-  explodePos: [-0.52, 0.05, -0.7],
-  name: "左透镜模组",
-});
-
-const rightBarrel = new Mesh(barrelGeo.clone(), materials.lensBarrel);
-createPart({
-  mesh: rightBarrel,
-  homePos: [0.52, 0.05, -0.12],
-  explodePos: [0.52, 0.05, -0.7],
-  name: "右透镜模组",
-});
-
-// 5. 透镜玻璃片
-const glassGeo = new CylinderGeometry(0.26, 0.26, 0.04, 32);
-glassGeo.rotateX(Math.PI / 2);
-const leftGlass = new Mesh(glassGeo, materials.lensGlass);
-createPart({
-  mesh: leftGlass,
-  homePos: [-0.52, 0.05, -0.34],
-  explodePos: [-0.52, 0.05, -1.1],
-  name: "左透镜",
-});
-
-const rightGlass = new Mesh(glassGeo.clone(), materials.lensGlass);
-createPart({
-  mesh: rightGlass,
-  homePos: [0.52, 0.05, -0.34],
-  explodePos: [0.52, 0.05, -1.1],
-  name: "右透镜",
-});
-
-// 6. 显示屏/主板
-const pcbGeo = new BoxGeometry(1.6, 0.7, 0.06);
-const pcbMesh = new Mesh(pcbGeo, materials.pcb);
-createPart({
-  mesh: pcbMesh,
-  homePos: [0, 0.05, -0.05],
-  explodePos: [0, 0.05, -0.95],
-  name: "主板/显示屏",
-});
-
-// 7. 前置摄像头（左右两颗 + 中间一颗）
-const camGeo = new CylinderGeometry(0.09, 0.09, 0.08, 24);
-camGeo.rotateX(Math.PI / 2);
-
-const leftCam = new Mesh(camGeo, materials.camera);
-createPart({
-  mesh: leftCam,
-  homePos: [-0.75, 0.18, 0.68],
-  explodePos: [-0.95, 0.35, 1.8],
-  name: "左摄像头",
-});
-
-const rightCam = new Mesh(camGeo.clone(), materials.camera);
-createPart({
-  mesh: rightCam,
-  homePos: [0.75, 0.18, 0.68],
-  explodePos: [0.95, 0.35, 1.8],
-  name: "右摄像头",
-});
-
-const centerCam = new Mesh(camGeo.clone(), materials.camera);
-createPart({
-  mesh: centerCam,
-  homePos: [0, 0.28, 0.68],
-  explodePos: [0, 0.55, 1.9],
-  name: "中置摄像头",
-});
-
-// 摄像头镜头小圆点
-const lensDotGeo = new CircleGeometry(0.055, 24);
-function addCamLens(parent, zOffset) {
-  const dot = new Mesh(lensDotGeo, materials.sensor);
-  dot.position.z = zOffset;
-  parent.add(dot);
-}
-addCamLens(leftCam, 0.045);
-addCamLens(rightCam, 0.045);
-addCamLens(centerCam, 0.045);
-
-// 8. 下侧摄像头/传感器
-const bottomCam = new Mesh(camGeo.clone(), materials.camera);
-createPart({
-  mesh: bottomCam,
-  homePos: [0, -0.35, 0.6],
-  explodePos: [0, -0.75, 1.7],
-  name: "下置追踪摄像头",
-});
-addCamLens(bottomCam, 0.045);
-
-// 9. 头带臂（左右）
-const armGeo = new RoundedBoxGeometry(0.25, 0.7, 0.18, 2, 0.04);
-const leftArm = new Mesh(armGeo, materials.strapArm);
-createPart({
-  mesh: leftArm,
-  homePos: [-1.25, 0, 0],
-  explodePos: [-2.1, 0, 0],
-  name: "左头带臂",
-});
-
-const rightArm = new Mesh(armGeo.clone(), materials.strapArm);
-createPart({
-  mesh: rightArm,
-  homePos: [1.25, 0, 0],
-  explodePos: [2.1, 0, 0],
-  name: "右头带臂",
-});
-
-// 10. 头带（简化弧线）
-const strapCurve = new CatmullRomCurve3([
-  new Vector3(-1.25, 0.25, -0.1),
-  new Vector3(-0.8, 1.4, -0.5),
-  new Vector3(0, 1.6, -0.6),
-  new Vector3(0.8, 1.4, -0.5),
-  new Vector3(1.25, 0.25, -0.1),
-]);
-const strapGeo = new TubeGeometry(strapCurve, 32, 0.14, 12, false);
-const strapMesh = new Mesh(strapGeo, materials.strapArm);
-createPart({
-  mesh: strapMesh,
-  homePos: [0, 0, 0],
-  explodePos: [0, 0.9, -0.8],
-  name: "头带",
-});
+// 实现迁至 src/quest3-model.js：createPart / addCamLens 与十个默认部件的几何
+// 构造整段搬迁，行为不变。questGroup / parts / lowPowerMode 均为稳定 const
+// 引用直接传入（parts 只 push 不重赋值，无需桥接）。
+createQuest3Model({ questGroup, parts, lowPowerMode });
 
 // ===== 自定义模型处理 =====
 // customModelGroup 声明见文件上方「模块共享状态与引用」

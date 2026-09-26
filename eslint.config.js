@@ -23,6 +23,7 @@ export default [
       'src/export-panel.js',
       'src/upload-panel.js',
       'src/quest3-data.js',
+      'src/quest3-model.js',
       'src/quest3-steps.js',
       'src/utils.js'
     ],
