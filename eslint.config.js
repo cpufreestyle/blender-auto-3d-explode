@@ -176,6 +176,7 @@ export default [
       'src/proxy-detect.js',
       'src/closed-loop.js',
       'src/response-utils.js',
+      'src/blender-runner.js',
     ],
     languageOptions: {
       ecmaVersion: 'latest',

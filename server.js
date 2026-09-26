@@ -26,7 +26,6 @@ import {
   getCORSHeaders,
   cleanupOldTempFiles,
   findBlenderCandidates,
-  createBlenderJobQueue,
   isAllowedExtension,
   elapsedSeconds,
   ALLOWED_EXTENSIONS,
@@ -48,6 +47,7 @@ import { createStaticServer } from "./src/static-server.js";
 import { createBlenderMcpClient } from "./src/blender-mcp-client.js";
 import { createClosedLoop } from "./src/closed-loop.js";
 import { createResponseUtils } from "./src/response-utils.js";
+import { createBlenderRunner } from "./src/blender-runner.js";
 import { callAI } from "./src/ai-call.js";
 import { detectProxy } from "./src/proxy-detect.js";
 import { fileURLToPath } from "url";
@@ -134,105 +134,18 @@ function findBlender() {
 }
 
 // ── Blender 单飞守卫 ──────────────────────────────────
-// 确保本服务器进程同一时刻最多只持有「一个」Blender：
-//   · 后台任务（拆解 / AI 绘画，均为 --background 无窗口）串行执行，互不重叠；
-//   · GUI 打开前先结束上一个由本服务器拉起的 Blender，避免窗口堆叠。
-// 注：常驻的 Blender MCP 宿主（用户自行启动、监听 9876）不在此管理范围内，保留不动。
-
-// GUI 窗口句柄（activeBlenderChild）随 openInBlender 搬到 src/response-utils.js 的
-// 工厂闭包里（读者/写者本来就只有它一个）；这里只保留后台任务的串行队列。
-const blenderJobQueue = createBlenderJobQueue();
-
-/** 后台 Blender 任务串行器：保证任意时刻只有一个 --background Blender 在跑 */
-function enqueueBlenderJob(task) {
-  return blenderJobQueue.enqueue(task);
-}
-
-/**
- * 调用 Blender CLI 进行 AI 绘画（生成模型）
- */
-async function runBlenderAIPaint(prompt, outputPath, manifestPath, imageFeaturesPath) {
-  const scriptPath = path.join(__dirname, "blender_ai_paint.py");
-  const args = [
-    "--factory-startup",
-    "--background",
-    "--python",
-    scriptPath,
-    "--",
-    "--prompt",
-    prompt,
-    "--output",
-    outputPath,
-    "--manifest",
-    manifestPath,
-  ];
-
-  // 如果有图片特征文件，传递给 Blender
-  if (imageFeaturesPath) {
-    args.push("--image-features", imageFeaturesPath);
-  }
-
-  console.log(`  🎨 AI 绘画: ${BLENDER_PATH} ${args.join(" ")}`);
-
-  // 单飞守卫：与其他后台 Blender 任务串行，确保同一时刻只跑一个
-  return enqueueBlenderJob(() =>
-    execFileAsync(BLENDER_PATH, args, {
-      timeout: 120_000, // 2 分钟超时
-      maxBuffer: 50 * 1024 * 1024,
-    })
-  );
-}
-
-/**
- * 调用 Blender CLI 拆解 GLB
- */
-async function runBlenderSplit(inputPath, outputPath, manifestPath, originalFileName, vlm = null) {
-  const scriptPath = path.join(__dirname, "blender_split_glb.py");
-  const args = [
-    "--factory-startup",
-    "--background",
-    "--python",
-    scriptPath,
-    "--",
-    "--input",
-    inputPath,
-    "--output",
-    outputPath,
-    "--manifest",
-    manifestPath,
-    "--original-filename",
-    originalFileName,
-  ];
-
-  // 可选的 VLM 部件语义标注：把 provider/model 作为命令行参数传入；
-  // API Key 只通过环境变量 VLM_API_KEY 安全传递（绝不出现在命令行，避免 ps 泄露）。
-  let env = process.env;
-  if (vlm && vlm.provider) {
-    args.push("--vlm-provider", vlm.provider);
-    if (vlm.model) args.push("--vlm-model", vlm.model);
-    if (vlm.key) env = { ...process.env, VLM_API_KEY: vlm.key };
-  }
-
-  console.log(`  🔧 调用 Blender: ${BLENDER_PATH} ${args.join(" ")}`);
-
-  // 单飞守卫：与其他后台 Blender 任务串行，确保同一时刻只跑一个
-  return enqueueBlenderJob(() =>
-    execFileAsync(BLENDER_PATH, args, {
-      timeout: 600_000, // 10 分钟超时（大模型需要更久）
-      maxBuffer: 50 * 1024 * 1024,
-      env,
-    })
-  );
-}
+// 实现抽至 src/blender-runner.js：串行队列内置在工厂内，runBlenderAIPaint 与
+// runBlenderSplit 排到同一条链上，保证任意时刻只有一个 --background Blender
+// 在跑；GUI 窗口那一半（activeBlenderChild）在 src/response-utils.js。
+const { runBlenderAIPaint, runBlenderSplit } = createBlenderRunner({
+  blenderPath: BLENDER_PATH,
+  rootDir: __dirname,
+  execFile: execFileAsync,
+});
 
 // ── 安全的 multipart 解析器 ────────────────────────────
-
-/**
- * 解析 multipart/form-data 请求体
- * 提取上传的文件内容（增加输入校验）
- * @param {http.IncomingMessage} req
- * @returns {Promise<{filename: string, data: Buffer, contentType: string}>}
- */
+// 解析与输入校验在 src/server-utils.js 的 parseMultipartBuffer，
+// 按 Content-Type 分发在 src/body.js 的 readBody。
 
 // ── 响应工具 ──────────────────────────────────────────
 // 整段（sendJSON / respondError / wrap / sendBinaryResult /
