@@ -1,7 +1,7 @@
 // 材质与乐高外观系统 — 从 main.js 抽出（L2 模块化试点）。
 //
 // 纯展示层：定义「原生 / 乐高」两套 THREE 材质，以及原生→乐高映射与取色 helper。
-// 仅依赖 THREE（与 main.js 共用同一 ../vendor/three.module.js 实例），不含场景/相机等共享状态。
+// 仅依赖 THREE（与 main.js 共用同一 "three" 裸导入实例），不含场景/相机等共享状态。
 // 注意：样式状态 currentModelStyle 与切换逻辑 applyModelStyle 保留在 main.js（需改写该状态），
 //       本模块仅导出可变材质对象与取色函数，由 main.js 的 applyModelStyle 在切换时引用。
 

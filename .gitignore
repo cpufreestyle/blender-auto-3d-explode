@@ -7,6 +7,11 @@ node_modules
 # Production builds
 dist/
 build/
+# 例外：vendor/three 的构建产物是运行期资源（index.html 的 importmap 直指
+# vendor/three/build/three.module.js）。上面的 build/ 是给项目自身产物用的，
+# 不能顺带把必须入库的 vendored 构建产物挡在库外——CI 镜像守卫会因此失败。
+!vendor/three/build/
+!vendor/three/build/*
 
 # Cache
 .cache/
