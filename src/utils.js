@@ -271,3 +271,11 @@ export function validateGLBHeader(buffer) {
 
   return { valid: true, version, length };
 }
+
+/**
+ * 让出主线程一帧，避免长循环（拆解 / 排序 / manifest 处理）卡死渲染。
+ * @returns {Promise<void>}
+ */
+export function yieldToMain() {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
