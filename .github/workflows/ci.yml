@@ -7,7 +7,9 @@ on:
   push:
     branches: [main, master]
   pull_request:
-    branches: [main, master]
+    # branches 过滤的是 PR 的 base 分支。只写 main/master 时，base 指向 stack/*
+    # 的堆叠链上级 PR 不触发任何门禁（本仓库整段栈曾因此只剩栈底 PR 有 CI）。
+    branches: [main, master, 'stack/**']
 
 permissions:
   contents: read
