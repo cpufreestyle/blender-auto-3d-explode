@@ -169,9 +169,13 @@ export async function startUiSmoke({
     await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
     await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
   };
+  // 特殊键必须给对 VirtualKeyCode：Tab 按字母推导会算成 84（"TAB".charCodeAt(0)），
+  // 浏览器不认，焦点就不动
+  const KEY_VK = { Tab: 9, Enter: 13, Escape: 27, " ": 32, ArrowLeft: 37, ArrowRight: 39 };
   const key = async k => {
-    await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code: k, windowsVirtualKeyCode: k === "Escape" ? 27 : k.toUpperCase().charCodeAt(0) });
-    await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: k, windowsVirtualKeyCode: k === "Escape" ? 27 : k.toUpperCase().charCodeAt(0) });
+    const vk = KEY_VK[k] !== undefined ? KEY_VK[k] : k.toUpperCase().charCodeAt(0);
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code: k, windowsVirtualKeyCode: vk });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: k, windowsVirtualKeyCode: vk });
   };
   const shotPixels = async () => decodePng(Buffer.from((await send("Page.captureScreenshot", { format: "png" })).data, "base64"));
   // 亮像素占比：isolate 后其余部件不再反光
@@ -204,6 +208,13 @@ export async function startUiSmoke({
     return png;
   };
 
+  // 视口模拟：窄屏冒烟在同一个 Chrome 实例里收窄视口再还原，
+  // 比 --window-size 灵活（跑完记得 clearViewport）
+  const setViewport = async (width, height, deviceScaleFactor = 2, mobile = false) => {
+    await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor, mobile });
+  };
+  const clearViewport = async () => { await send("Emulation.clearDeviceMetricsOverride", {}); };
+
   await send("Page.navigate", { url: `http://127.0.0.1:${port}${url}` });
 
   return {
@@ -212,6 +223,8 @@ export async function startUiSmoke({
     evaluate,
     click,
     key,
+    setViewport,
+    clearViewport,
     shotPixels,
     brightRatio,
     diffFraction,
