@@ -26,16 +26,11 @@ import {
   getCORSHeaders,
   cleanupOldTempFiles,
   findBlenderCandidates,
-  isAllowedExtension,
-  elapsedSeconds,
-  ALLOWED_EXTENSIONS,
-  MAX_FILE_SIZE,
 } from "./src/server-utils.js";
 import { readBody } from "./src/body.js";
 import { runHyper3DTextTo3D } from "./src/providers/image-to-3d.js";
 import { generateImageTo3D } from "./src/image-to-3d-router.js";
 import {
-  AI_CONFIG,
   loadAIConfig,
   autoDetectProvider,
   createAIConfigHandlers,
@@ -49,6 +44,7 @@ import { createClosedLoop } from "./src/closed-loop.js";
 import { createResponseUtils } from "./src/response-utils.js";
 import { createBlenderRunner } from "./src/blender-runner.js";
 import { createGenerateRoutes } from "./src/routes-generate.js";
+import { createBlenderRoutes } from "./src/routes-blender.js";
 import { callAI } from "./src/ai-call.js";
 import { detectProxy } from "./src/proxy-detect.js";
 import { fileURLToPath } from "url";
@@ -162,102 +158,30 @@ const {
   sendBinaryResult,
   saveGeneratedModel,
 } = createResponseUtils({ GENERATED_DIR, UPLOAD_DIR, BLENDER_PATH });
-
-// ── 路由处理 ──────────────────────────────────────────
-
-/**
- * AI 绘画 — 根据提示词生成3D模型
- * POST /api/ai-paint
- * Body: { "prompt": "红色球体", "imageFeatures": { ... } }
- * 返回：二进制 GLB + manifest 头（同 /api/split 格式）
- */
-async function handleAIPaint(req, res) {
-  const startTime = Date.now();
-  let blenderStdout = "";
-  let blenderStderr = "";
-
-  try {
-    // 1. 读取 JSON body
-    const body = await readBody(req, { maxSize: 10 * 1024 });
-    const prompt = body.prompt || "球体";
-
-    if (typeof prompt !== "string" || prompt.length > 500) {
-      sendJSON(res, 400, { error: "提示词无效或过长（最多500字符）" });
-      return;
-    }
-
-    const imageFeatures = body.imageFeatures || null;
-    console.log(
-      `\n🎨 AI 绘画请求: "${prompt}"${imageFeatures ? ` + 图片特征(${imageFeatures.mood}色调, ${imageFeatures.dominantColors?.length || 0}主色)` : ""}`
-    );
-
-    // 2. 临时文件路径
-    const jobId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const outputPath = path.join(UPLOAD_DIR, `ai-output-${jobId}.glb`);
-    const manifestPath = path.join(UPLOAD_DIR, `ai-manifest-${jobId}.json`);
-
-    // 如果有图片特征，写入临时 JSON 文件供 Blender 读取
-    let imageFeaturesPath = null;
-    if (imageFeatures) {
-      imageFeaturesPath = path.join(UPLOAD_DIR, `ai-imgfeat-${jobId}.json`);
-      fs.writeFileSync(imageFeaturesPath, JSON.stringify(imageFeatures, null, 2), "utf-8");
-      console.log(`  🖼️ 图片特征已写入: ${imageFeaturesPath}`);
-    }
-
-    try {
-      // 3. 调用 Blender 生成模型
-      try {
-        const result = await runBlenderAIPaint(prompt, outputPath, manifestPath, imageFeaturesPath);
-        blenderStdout = result.stdout || "";
-        blenderStderr = result.stderr || "";
-      } catch (berr) {
-        blenderStdout = berr.stdout || "";
-        blenderStderr = berr.stderr || berr.message || "";
-      }
-
-      if (blenderStdout) console.log(`  📤 Blender stdout:\n${blenderStdout.slice(0, 3000)}`);
-      if (blenderStderr) console.log(`  📤 Blender stderr:\n${blenderStderr.slice(0, 3000)}`);
-
-      // 4. 检查输出
-      if (!fs.existsSync(outputPath)) {
-        const detail = (blenderStderr || blenderStdout || "").slice(0, 3000);
-        throw new Error(`Blender 未生成 GLB 文件。日志:\n${detail}`);
-      }
-      if (!fs.existsSync(manifestPath)) {
-        const detail = (blenderStderr || blenderStdout || "").slice(0, 3000);
-        throw new Error(`Blender 未生成 manifest。日志:\n${detail}`);
-      }
-
-      // 5. 读取结果
-      const outputBuffer = fs.readFileSync(outputPath);
-      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-
-      const elapsed = elapsedSeconds(startTime);
-      console.log(
-        `  ✅ AI 绘画完成: ${manifest.total_parts} 个部件 (${elapsed}s, ${(outputBuffer.length / 1024).toFixed(1)} KB)`
-      );
-
-      // 6. 返回二进制 GLB + manifest 头
-      sendBinaryResult(res, outputBuffer, manifest, elapsed, "ai-paint");
-    } finally {
-      // 清理临时文件
-      [outputPath, manifestPath].forEach(f => {
-        try {
-          fs.unlinkSync(f);
-        } catch {
-          /* ignore */
-        }
-      });
-    }
-  } catch (err) {
-    console.error(`  ❌ AI 绘画失败: ${err.message}`);
-    sendJSON(res, 500, {
-      success: false,
-      error: err.message,
-      blender_output: blenderStdout || blenderStderr || "",
-    });
-  }
-}
+// ── Blender 类路由（AI 绘画 / 健康检查 / 生成库 / 一键启动 / 拆解）──
+// 六个 handler（handleAIPaint / handleHealth / handleGeneratedList /
+// launchBlenderApp / handleLaunchBlender / handleSplit）整段抽至
+// src/routes-blender.js；它们在 server.js 里原本被「AI 生成类路由」的挂线注释
+// 隔成两段不连续，现在合并进同一工厂。BLENDER_PATH 传启动期探测到的路径，
+// execFile 传 promisify 后的实现（两个 handler 要跑 `blender --version` 探活）；
+// spawn / platform 不传，工厂默认取真实实现——与 createResponseUtils 一致。
+const {
+  handleAIPaint,
+  handleHealth,
+  handleGeneratedList,
+  launchBlenderApp,
+  handleLaunchBlender,
+  handleSplit,
+} = createBlenderRoutes({
+  sendJSON,
+  sendBinaryResult,
+  runBlenderAIPaint,
+  runBlenderSplit,
+  UPLOAD_DIR,
+  GENERATED_DIR,
+  BLENDER_PATH,
+  execFile: execFileAsync,
+});
 
 // ── AI 生成类路由（图片转3D / 文生3D）──────────────────
 // 实现（finishImageTo3D / handleImageTo3D / handleTextTo3D / runLocalTextTo3D）
@@ -278,8 +202,9 @@ const { handleImageTo3D, handleTextTo3D } = createGenerateRoutes({
 // 实现迁至 src/ai-config.js：AI_CONFIG 默认值/落盘加载/首次自动探测与
 // probeAuth / PROVIDER_PROBES、/api/ai-config GET·POST、/api/ai-test、
 // /api/test-provider 四个 handler 整段搬迁，行为不变。
-// AI_CONFIG 以 ESM live binding 导出：本文件下方 callAI / handleSplit /
-// 图片转3D 编排直接读到的即最新值（POST 保存后整体换新对象）。
+// AI_CONFIG 以 ESM live binding 导出：src/ai-call.js 的 callAI、
+// src/routes-blender.js 的 handleSplit、src/routes-generate.js 的图片转3D
+// 编排直接读到的即最新值（POST 保存后整体换新对象）。
 // readBody / sendJSON / callAI 经工厂注入（handleAITest 运行期才调用）。
 loadAIConfig();
 await autoDetectProvider();
@@ -298,204 +223,6 @@ const {
  * DEFAULT_MODELS 仍取 src/provider-models.js 单一来源。
  */
 
-
-/**
- * 健康检查
- */
-async function handleHealth(req, res) {
-  try {
-    const { stdout } = await execFileAsync(BLENDER_PATH, ["--version"], { timeout: 10_000 });
-    const version = stdout.match(/Blender ([\d.]+)/)?.[1] || "unknown";
-    sendJSON(res, 200, {
-      status: "ok",
-      blender: BLENDER_PATH,
-      version: version,
-      message: `Blender ${version} 可用`,
-    });
-  } catch (err) {
-    sendJSON(res, 503, {
-      status: "error",
-      blender: BLENDER_PATH,
-      message: `Blender 不可用: ${err.message}`,
-    });
-  }
-}
-
-/**
- * 列出 models/generated/ 下已生成的模型（最新在前），供前端「从生成库加载」
- */
-async function handleGeneratedList(req, res) {
-  try {
-    const entries = fs.readdirSync(GENERATED_DIR, { withFileTypes: true });
-    const files = entries
-      .filter(e => e.isFile() && /\.(glb|gltf|stl)$/i.test(e.name))
-      .map(e => {
-        const full = path.join(GENERATED_DIR, e.name);
-        const stat = fs.statSync(full);
-        return {
-          name: e.name,
-          url: `/models/generated/${encodeURIComponent(e.name)}`,
-          size: stat.size,
-          mtime: stat.mtimeMs,
-        };
-      })
-      .sort((a, b) => b.mtime - a.mtime);
-    sendJSON(res, 200, { success: true, files });
-  } catch (err) {
-    sendJSON(res, 500, { success: false, error: err.message });
-  }
-}
-
-/**
- * 在本机启动 Blender 应用程序（GUI），用于「一键启动」功能。
- * 仅负责打开应用，不改变 BLENDER_PATH 检测逻辑。
- */
-function launchBlenderApp() {
-  const platform = os.platform();
-  let cmd, args;
-  if (platform === "darwin") {
-    cmd = "open";
-    args = ["-a", "Blender"];
-  } else if (platform === "win32") {
-    // 优先使用已探测到的 BLENDER_PATH（可能是非 PATH 的官方安装版，如 D 盘），
-    // 否则回退到 PATH 中的 blender。避免装了 Blender 却因不在 PATH 而启动失败。
-    const exe = BLENDER_PATH && BLENDER_PATH !== "blender" ? BLENDER_PATH : "blender";
-    cmd = "cmd";
-    args = ["/c", "start", "", exe];
-  } else {
-    // Linux：后台启动 blender GUI
-    cmd = "blender";
-    args = [];
-  }
-  const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
-  child.unref();
-  return true;
-}
-
-/**
- * 一键启动 Blender：打开应用并重新检测可用性
- */
-async function handleLaunchBlender(req, res) {
-  try {
-    launchBlenderApp();
-    // 启动后重新检测 Blender CLI 是否可用（GUI 打开不影响 CLI 检测，此处仅做状态反馈）
-    let health = null;
-    try {
-      const { stdout } = await execFileAsync(BLENDER_PATH, ["--version"], { timeout: 10_000 });
-      const version = stdout.match(/Blender ([\d.]+)/)?.[1] || "unknown";
-      health = { status: "ok", blender: BLENDER_PATH, version };
-    } catch {
-      health = { status: "error", blender: BLENDER_PATH };
-    }
-    sendJSON(res, 200, { launched: true, health });
-  } catch (err) {
-    sendJSON(res, 500, { launched: false, error: err.message });
-  }
-}
-
-/**
- * 拆解 GLB
- * 修复：blenderStdout/blenderStderr 提到 try 外层，catch 可访问
- */
-async function handleSplit(req, res) {
-  const startTime = Date.now();
-  // 提到外层 try 之前，确保 catch 块可以访问
-  let blenderStdout = "";
-  let blenderStderr = "";
-
-  try {
-    // 1. 解析上传的文件
-    const file = await readBody(req, { maxSize: MAX_FILE_SIZE });
-    if (!file) {
-      sendJSON(res, 400, { error: "未收到文件" });
-      return;
-    }
-
-    const fileName = file.filename;
-    const ext = path.extname(fileName).toLowerCase();
-    if (!isAllowedExtension(ext)) {
-      sendJSON(res, 400, { error: `不支持的格式: ${ext}，支持 ${ALLOWED_EXTENSIONS.join(" / ")}` });
-      return;
-    }
-
-    console.log(`\n📦 收到拆解请求: ${fileName} (${(file.data.length / 1024).toFixed(1)} KB)`);
-
-    // 2. 临时文件路径
-    const jobId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const inputPath = path.join(UPLOAD_DIR, `input-${jobId}${ext}`);
-    const outputPath = path.join(UPLOAD_DIR, `output-${jobId}.glb`);
-    const manifestPath = path.join(UPLOAD_DIR, `manifest-${jobId}.json`);
-
-    try {
-      // 3. 写入临时文件
-      fs.writeFileSync(inputPath, file.data);
-      console.log(`  📝 临时文件: ${inputPath}`);
-
-      // 4. 调用 Blender
-      try {
-        // 是否启用 VLM 部件语义标注：需同时开启 semanticLabel、配置 vlm provider/model，
-        // 且对应 provider（openai/stepfun/kimi/anthropic）已填 API Key；否则跳过。
-        let vlm = null;
-        if (AI_CONFIG.semanticLabel && AI_CONFIG.vlm && AI_CONFIG.vlm.provider) {
-          const prov = AI_CONFIG.vlm.provider;
-          const key = (AI_CONFIG[prov] && AI_CONFIG[prov].key) || "";
-          if (key) {
-            vlm = { provider: prov, model: AI_CONFIG.vlm.model || "", key };
-          } else {
-            console.warn(`  ⚠️ 已开启语义标注但未配置 ${prov} 的 API Key，跳过 VLM 标注`);
-          }
-        }
-        const result = await runBlenderSplit(inputPath, outputPath, manifestPath, fileName, vlm);
-        blenderStdout = result.stdout || "";
-        blenderStderr = result.stderr || "";
-      } catch (berr) {
-        // Blender 进程本身出错（崩溃/超时）
-        blenderStdout = berr.stdout || "";
-        blenderStderr = berr.stderr || berr.message || "";
-      }
-
-      // 打印 Blender 输出到服务器日志
-      if (blenderStdout) console.log(`  📤 Blender stdout:\n${blenderStdout.slice(0, 2000)}`);
-      if (blenderStderr) console.log(`  📤 Blender stderr:\n${blenderStderr.slice(0, 2000)}`);
-
-      // 5. 检查输出
-      if (!fs.existsSync(outputPath)) {
-        const detail = (blenderStderr || blenderStdout || "").slice(0, 3000);
-        throw new Error(`Blender 未生成输出文件。Blender 日志:\n${detail}`);
-      }
-      if (!fs.existsSync(manifestPath)) {
-        const detail = (blenderStderr || blenderStdout || "").slice(0, 3000);
-        throw new Error(`Blender 未生成清单文件。Blender 日志:\n${detail}`);
-      }
-
-      // 6. 读取结果
-      const outputBuffer = fs.readFileSync(outputPath);
-      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-
-      const elapsed = elapsedSeconds(startTime);
-      console.log(`  ✅ 拆解完成: ${manifest.total_parts} 个部件 (${elapsed}s)`);
-
-      // 7. 返回二进制 GLB + manifest 头（不再 base64 编码）
-      sendBinaryResult(res, outputBuffer, manifest, elapsed, "split");
-    } finally {
-      // 清理临时文件
-      [inputPath, outputPath, manifestPath].forEach(f => {
-        try {
-          fs.unlinkSync(f);
-        } catch {
-          /* ignore */
-        }
-      });
-    }
-  } catch (err) {
-    console.error(`  ❌ 拆解失败: ${err.message}`);
-    sendJSON(res, 500, {
-      success: false,
-      error: err.message,
-      blender_output: blenderStdout || blenderStderr || "",
-    });
-  }
-}
 
 // ── Blender MCP addon 客户端（TCP，行分隔 JSON）────────
 // 整段（含两个 MCP 地址常量）已抽至 src/blender-mcp-client.js；
