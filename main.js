@@ -32,6 +32,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { createExplodeController } from "./src/explode-controller.js";
 import { createAssemblyAnalysis } from "./src/assembly-analysis.js";
 import { createModelDisposal, disposeNodeTree } from "./src/model-disposal.js";
+import { createModelFit } from "./src/model-fit.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { defaultStepGroups } from "./src/quest3-steps.js";
 import { isQuest3Model, yieldToMain } from "./src/utils.js";
@@ -206,6 +207,7 @@ const stepUi = {
 let explodeCtl = null;
 let assembly = null; // 装配顺序对接 / 自定义步骤生成（src/assembly-analysis.js）
 let modelDisposal = null; // 自定义模型拆卸与 GPU 资源释放（src/model-disposal.js）
+let modelFit = null; // 模型加载后归一化（src/model-fit.js）
 // 主模块另有两处直接使用（步骤描述淡入 / 自动旋转快捷键）
 const { stepDescEl, autoRotateCheck } = stepUi;
 
@@ -548,56 +550,16 @@ modelDisposal = createModelDisposal({
 let isLoadingCustomModel = false;
 
 
-/**
- * 自动放大微小模型
- * 如果模型最大维度小于 5，自动缩放到约 10 单位
- * @param {string} modelType - 模型类型名称（用于日志）
- * @returns {number} 实际应用的缩放比例
- */
-function autoScaleModel(modelType = "模型") {
-  const autoBox = new Box3().setFromObject(customModelGroup);
-  const autoSize = new Vector3();
-  autoBox.getSize(autoSize);
-  const autoMaxDim = Math.max(autoSize.x, autoSize.y, autoSize.z);
+// ===== 模型加载后归一化（自动缩放 / 爆炸距离智能调整）=====
+// 实现迁至 src/model-fit.js：autoScaleModel -> modelFit.autoScaleModel，
+// adjustSmartExplodeDistances -> modelFit.adjustSmartExplodeDistances（算式
+// 部分另抽为纯函数 computeAutoScale）。
+modelFit = createModelFit({
+  customModelGroup,
+  camera,
+  getCustomModelParts: () => customModelParts,
+});
 
-  let autoScale = 1.0;
-  if (autoMaxDim < 5.0 && autoMaxDim > 0.001) {
-    autoScale = 10.0 / autoMaxDim;
-    autoScale = Math.min(autoScale, 20);
-  }
-
-  if (autoScale > 1.0) {
-    customModelGroup.scale.set(autoScale, autoScale, autoScale);
-    console.log(`🔍 ${modelType}自动放大 ${autoScale.toFixed(1)} 倍`);
-  }
-
-  return autoScale;
-}
-
-/**
- * 智能调整所有自定义部件的爆炸距离
- * 根据相机位置和模型大小计算合适的爆炸距离
- */
-function adjustSmartExplodeDistances() {
-  requestAnimationFrame(() => {
-    const groupScale = customModelGroup.scale.x || 1;
-    for (let i = 0; i < customModelParts.length; i++) {
-      const part = customModelParts[i];
-      let explodeDir = part.explodePos.clone();
-      if (explodeDir.length() < 0.001) {
-        explodeDir = part.partCenter.clone();
-        if (explodeDir.length() < 0.001) {
-          const angle = (i / customModelParts.length) * Math.PI * 2;
-          explodeDir.set(Math.cos(angle), 0.5, Math.sin(angle));
-        }
-      }
-      explodeDir.normalize();
-      const smartDist = calculateSmartExplodeDist(customModelGroup, explodeDir, camera);
-      part.explodePos.copy(explodeDir.multiplyScalar(smartDist / groupScale));
-    }
-    console.log("✅ 爆炸距离已智能调整");
-  });
-}
 
 /**
  * 自定义模型加载后的统一收尾流程（消除三个 loader 中的重复代码）。
@@ -629,13 +591,13 @@ function finalizeCustomModelLoad(fileName, opts = {}) {
   explodeCtl.updateStepUI();
 
   // 自动缩放
-  autoScaleModel(modelType);
+  modelFit.autoScaleModel(modelType);
 
   // 自动适配相机
   fitCameraToModel(customModelGroup, false);
 
   // 智能调整爆炸距离
-  if (adjustExplode) adjustSmartExplodeDistances();
+  if (adjustExplode) modelFit.adjustSmartExplodeDistances();
 
   // 装配分析（非阻塞）
   assembly.maybeApplyAssemblySequence(fileName);
