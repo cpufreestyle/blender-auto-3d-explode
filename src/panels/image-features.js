@@ -154,3 +154,23 @@ export function extractImageFeatures(imgElement) {
     resolve(features);
   });
 }
+
+// 把特征对象拼成上传区状态条要展示的 HTML：主色调色块，加上 mood 色调、
+// 对称度、边缘密度三项百分比。纯字符串运算，不碰 DOM —— 原先整段内联在
+// handleImageFile 的 img.onload 里，取不到 uploadedImageFeatures 就整块跳过，
+// 因此这里只负责「给定特征就产出文案」，null 判定留给调用方。
+export function buildFeatureStatusHtml(features) {
+  const colorSwatches = features.dominantColors
+    .map(c => {
+      const rgb = `rgb(${c.r},${c.g},${c.b})`;
+      const pct = (c.ratio * 100).toFixed(0);
+      return `<span class="ai-paint-color-swatch" style="background:${rgb}" title="${rgb} ${pct}%"></span>`;
+    })
+    .join("");
+  return (
+    `🖼️ 已提取图片特征: ${features.mood}色调 · ` +
+    `对称度${(features.symmetry * 100).toFixed(0)}% · ` +
+    `边缘密度${(features.edgeDensity * 100).toFixed(0)}%` +
+    `<div class="ai-paint-color-swatches">${colorSwatches}</div>`
+  );
+}

@@ -1,8 +1,9 @@
 // AI 绘画 / 图片转 3D 面板（从 main.js 抽取，L2 前端模块化）
 // 仅依赖 DOM + fetch + 注入的共享函数（loadCustomModel / showStatus），无 3D 场景强耦合。
-import { base64ToUtf8 } from "../utils.js";
+import { postGlbRequest } from "./glb-request.js";
 import { fetchConfigAndHighlight } from "./config-panel.js";
-import { extractImageFeatures } from "./image-features.js";
+import { getPromptIcon } from "./prompt-icon.js";
+import { buildFeatureStatusHtml, extractImageFeatures } from "./image-features.js";
 import { API_BASE } from "../config.js";
 
 // 后端 AI 服务地址（从统一配置读取）
@@ -59,23 +60,10 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
     if (statusEl) statusEl.classList.add("hidden");
   }
 
-  // 获取提示词对应的图标
-  function getPromptIcon(prompt) {
-    const p = prompt.toLowerCase();
-    if (p.includes("篮球") || p.includes("basketball")) return "🏀";
-    if (p.includes("quest") || p.includes("vr") || p.includes("头显")) return "🕶️";
-    if (p.includes("机器人") || p.includes("robot")) return "🤖";
-    if (p.includes("汽车") || p.includes("车") || p.includes("car")) return "🚗";
-    if (p.includes("房子") || p.includes("house")) return "🏠";
-    if (p.includes("人") || p.includes("角色") || p.includes("character")) return "🧑";
-    if (p.includes("火箭") || p.includes("rocket")) return "🚀";
-    if (p.includes("球") || p.includes("sphere") || p.includes("ball")) return "🔴";
-    return "🎨";
-  }
-
-  // ========== 图片特征提取 ==========
-  // 实现迁至 src/panels/image-features.js：整段搬迁，行为不变（纯 canvas 运算，
-  // 只用 document.createElement 与传入的 imgElement，闭包里无依赖，故无 DI 接缝）。
+  // ========== 图片特征提取与特征文案 ==========
+  // 实现迁至 src/panels/image-features.js：extractImageFeatures 是纯 canvas 运算
+  // （只用 document.createElement 与传入的 imgElement），buildFeatureStatusHtml
+  // 是纯字符串运算，两者闭包里都不引用 setupAIPaint 的状态，故无 DI 接缝。
   // 处理图片文件
   async function handleImageFile(file) {
     if (!file || !file.type.startsWith("image/")) {
@@ -101,16 +89,7 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
       img.onload = async() => {
         uploadedImageFeatures = await extractImageFeatures(img);
         if (uploadedImageFeatures) {
-          const colorSwatches = uploadedImageFeatures.dominantColors
-            .map(
-              c =>
-                `<span class="ai-paint-color-swatch" style="background:rgb(${c.r},${c.g},${c.b})" title="rgb(${c.r},${c.g},${c.b}) ${(c.ratio * 100).toFixed(0)}%"></span>`,
-            )
-            .join("");
-          showAIStatus(
-            `🖼️ 已提取图片特征: ${uploadedImageFeatures.mood}色调 · 对称度${(uploadedImageFeatures.symmetry * 100).toFixed(0)}% · 边缘密度${(uploadedImageFeatures.edgeDensity * 100).toFixed(0)}%<div class="ai-paint-color-swatches">${colorSwatches}</div>`,
-            "info",
-          );
+          showAIStatus(buildFeatureStatusHtml(uploadedImageFeatures), "info");
         }
       };
       img.src = dataUrl;
@@ -222,55 +201,25 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
     );
 
     try {
-      const xhr = new XMLHttpRequest();
-      xhr.responseType = "arraybuffer";
-      xhr.timeout = 1200000; // 20 分钟（CPU 首跑含权重下载可能较慢）
+      // 部署方式 + 模型：本地走 TripoSR 真重建，云端走 Replicate（owner/name）
+      const payload = { image: uploadedImageDataUrl, deploy };
+      if (deploy === "local") {
+        payload.mode = imgTo3DModeLocal ? imgTo3DModeLocal.value : "depth"; // depth | relief | voxel
+        payload.tiles = imgTo3DTilesLocal ? (parseInt(imgTo3DTilesLocal.value, 10) || 3) : 3; // 拆解块数，越大越易拆解
+        payload.real = !!(imgTo3DReal && imgTo3DReal.checked); // 真重建需本机就绪 TripoSR
+        payload.removeBg = imgTo3DRemoveBg ? imgTo3DRemoveBg.checked : true; // 去背景（真重建时用）
+        payload.bakeTexture = imgTo3DBake ? imgTo3DBake.checked : false; // 烘焙纹理（真重建时用）
+      } else if (deploy === "replicate") {
+        let m = imgTo3DModel ? imgTo3DModel.value : "";
+        if (m === "__custom__" && imgTo3DModelCustom) m = imgTo3DModelCustom.value.trim();
+        if (m) payload.model = m;
+      }
 
-      const result = await new Promise((resolve, reject) => {
-        xhr.addEventListener("load", () => {
-          try {
-            if (xhr.status !== 200) {
-              const errText = new TextDecoder().decode(xhr.response);
-              let errMsg = `服务器错误 ${xhr.status}`;
-              try {
-                errMsg = JSON.parse(errText).error || errMsg;
-              } catch {}
-              reject(new Error(errMsg));
-              return;
-            }
-            const manifestBase64 = xhr.getResponseHeader("X-Manifest") || "";
-            let manifest = null;
-            if (manifestBase64) manifest = JSON.parse(base64ToUtf8(manifestBase64));
-            resolve({
-              arrayBuffer: xhr.response,
-              manifest,
-              totalParts: parseInt(xhr.getResponseHeader("X-Total-Parts") || "0", 10),
-            });
-          } catch (err) {
-            reject(err);
-          }
-        });
-        xhr.addEventListener("error", () =>
-          reject(new Error("网络错误：无法连接到服务器（请确认 server.js 已启动）")),
-        );
-        xhr.addEventListener("timeout", () => reject(new Error("请求超时（20分钟）")));
-
-        xhr.open("POST", `${BLENDER_SERVER_AI}/api/image-to-3d`);
-        xhr.setRequestHeader("Content-Type", "application/json");
-        // 部署方式 + 模型：本地走 TripoSR 真重建，云端走 Replicate（owner/name）
-        const payload = { image: uploadedImageDataUrl, deploy };
-        if (deploy === "local") {
-          payload.mode = imgTo3DModeLocal ? imgTo3DModeLocal.value : "depth"; // depth | relief | voxel
-          payload.tiles = imgTo3DTilesLocal ? (parseInt(imgTo3DTilesLocal.value, 10) || 3) : 3; // 拆解块数，越大越易拆解
-          payload.real = !!(imgTo3DReal && imgTo3DReal.checked); // 真重建需本机就绪 TripoSR
-          payload.removeBg = imgTo3DRemoveBg ? imgTo3DRemoveBg.checked : true; // 去背景（真重建时用）
-          payload.bakeTexture = imgTo3DBake ? imgTo3DBake.checked : false; // 烘焙纹理（真重建时用）
-        } else if (deploy === "replicate") {
-          let m = imgTo3DModel ? imgTo3DModel.value : "";
-          if (m === "__custom__" && imgTo3DModelCustom) m = imgTo3DModelCustom.value.trim();
-          if (m) payload.model = m;
-        }
-        xhr.send(JSON.stringify(payload));
+      const result = await postGlbRequest({
+        url: `${BLENDER_SERVER_AI}/api/image-to-3d`,
+        payload,
+        timeoutMs: 1200000, // 20 分钟（CPU 首跑含权重下载可能较慢）
+        timeoutLabel: "20分钟",
       });
 
       showAIStatus(`✅ 重建成功！正在加载到场景...`, "success");
@@ -288,6 +237,18 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
         imgTo3DBtn.disabled = false;
         imgTo3DBtn.textContent = "🧊 图片转3D";
       }
+    }
+  }
+
+  // 把生成结果的 modelUrl 拉成 GLB 并载入场景。
+  // 展示失败不致命：Blender 已导入成功才是主路径，这里只保证「网页也能看到」，
+  // 因此吃掉了全部异常。genToBlender 的失败回退与成功路径共用它。
+  async function loadModelFromUrl(modelUrl, label) {
+    try {
+      const ab = await (await fetch(`${BLENDER_SERVER_AI}${modelUrl}`)).arrayBuffer();
+      await loadCustomModel(ab, label, null);
+    } catch {
+      /* 展示失败不致命 */
     }
   }
 
@@ -318,12 +279,7 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
       if (!resp.ok || !data.success) {
         // 即便导入失败，只要已生成模型也展示到网页，避免白跑一趟
         if (data.modelUrl) {
-          try {
-            const ab = await (await fetch(`${BLENDER_SERVER_AI}${data.modelUrl}`)).arrayBuffer();
-            await loadCustomModel(ab, "生成→Blender", null);
-          } catch {
-            /* 展示失败不致命 */
-          }
+          await loadModelFromUrl(data.modelUrl, "生成→Blender");
         }
         throw new Error(data.error || `服务器错误 ${resp.status}`);
       }
@@ -335,12 +291,7 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
       );
       showStatus(`✅ 已发送到 Blender：${objName}`, "success");
       if (data.modelUrl) {
-        try {
-          const ab = await (await fetch(`${BLENDER_SERVER_AI}${data.modelUrl}`)).arrayBuffer();
-          await loadCustomModel(ab, `Blender: ${objName}`, null);
-        } catch {
-          /* 展示失败不致命 */
-        }
+        await loadModelFromUrl(data.modelUrl, `Blender: ${objName}`);
       }
     } catch (err) {
       console.error("生成并发送到 Blender 失败:", err);
@@ -412,64 +363,19 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
     );
 
     try {
-      const xhr = new XMLHttpRequest();
-      xhr.responseType = "arraybuffer";
-      xhr.timeout = 120000; // 2 分钟
+      const payload = { prompt };
+      if (isTextTo3D) {
+        payload.mode = textMode; // auto / cloud / local
+      } else if (uploadedImageFeatures) {
+        payload.imageFeatures = uploadedImageFeatures;
+      }
 
-      const result = await new Promise((resolve, reject) => {
-        xhr.addEventListener("load", () => {
-          try {
-            if (xhr.status !== 200) {
-              const errText = new TextDecoder().decode(xhr.response);
-              let errMsg = `服务器错误 ${xhr.status}`;
-              try {
-                errMsg = JSON.parse(errText).error || errMsg;
-              } catch {}
-              reject(new Error(errMsg));
-              return;
-            }
-
-            const successHeader = xhr.getResponseHeader("X-Success");
-            if (successHeader !== "true") {
-              reject(new Error("服务器返回异常"));
-              return;
-            }
-
-            const totalParts = parseInt(xhr.getResponseHeader("X-Total-Parts") || "0");
-            const elapsedSeconds = parseFloat(xhr.getResponseHeader("X-Elapsed-Seconds") || "0");
-            const manifestBase64 = xhr.getResponseHeader("X-Manifest") || "";
-
-            let manifest = null;
-            if (manifestBase64) {
-              const manifestJson = base64ToUtf8(manifestBase64);
-              manifest = JSON.parse(manifestJson);
-            }
-
-            resolve({
-              arrayBuffer: xhr.response,
-              manifest,
-              totalParts,
-              elapsedSeconds,
-            });
-          } catch (err) {
-            reject(err);
-          }
-        });
-
-        xhr.addEventListener("error", () =>
-          reject(new Error("网络错误：无法连接到服务器（请确认 server.js 已启动）")),
-        );
-        xhr.addEventListener("timeout", () => reject(new Error("请求超时（2分钟）")));
-
-        xhr.open("POST", `${BLENDER_SERVER_AI}/${isTextTo3D ? "api/text-to-3d" : "api/ai-paint"}`);
-        xhr.setRequestHeader("Content-Type", "application/json");
-        const payload = { prompt };
-        if (isTextTo3D) {
-          payload.mode = textMode; // auto / cloud / local
-        } else if (uploadedImageFeatures) {
-          payload.imageFeatures = uploadedImageFeatures;
-        }
-        xhr.send(JSON.stringify(payload));
+      const result = await postGlbRequest({
+        url: `${BLENDER_SERVER_AI}/${isTextTo3D ? "api/text-to-3d" : "api/ai-paint"}`,
+        payload,
+        timeoutMs: 120000, // 2 分钟
+        timeoutLabel: "2分钟",
+        requireSuccess: true,
       });
 
       // 成功！加载模型到场景

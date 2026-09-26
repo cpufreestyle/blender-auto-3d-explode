@@ -23,7 +23,7 @@
  * 用法：node tests/image-features-test.mjs
  */
 
-import { extractImageFeatures } from "../src/panels/image-features.js";
+import { buildFeatureStatusHtml, extractImageFeatures } from "../src/panels/image-features.js";
 
 // ===== 测试框架（与仓库既有 .mjs 测试一致）=====
 let passed = 0;
@@ -524,6 +524,74 @@ describe("宽高比与原始尺寸", async() => {
     assert(f.brightRatio === 1, `180.25 算亮（实际 bright=${f.brightRatio}）`);
   });
 });
+
+describe("特征状态文案 buildFeatureStatusHtml", async() => {
+  const feat = (over = {}) =>
+    Object.assign(
+      {
+        mood: "暖",
+        symmetry: 0.42,
+        edgeDensity: 0.07,
+        dominantColors: [
+          { r: 200, g: 100, b: 50, ratio: 0.4567 },
+          { r: 0, g: 0, b: 0, ratio: 0.0049 },
+        ],
+      },
+      over,
+    );
+
+  it("三项指标按 toFixed(0) 取整后拼进文案", () => {
+    const html = buildFeatureStatusHtml(feat());
+    assert(html.startsWith("🖼️ 已提取图片特征: 暖色调 · "), "开头固定 + mood");
+    assert(html.includes("对称度42%"), "对称度 0.42 → 42%");
+    assert(html.includes("边缘密度7%"), "边缘密度 0.07 → 7%");
+  });
+
+  it("色块按 dominantColors 原序输出，ratio 取整后进 title", () => {
+    const html = buildFeatureStatusHtml(feat());
+    const swatches = html.slice(html.indexOf("<div class=\"ai-paint-color-swatches\">"));
+    assert(swatches.indexOf("rgb(200,100,50)") < swatches.indexOf("rgb(0,0,0)"), "色块顺序与输入一致");
+    assert(html.includes("rgb(200,100,50) 46%"), "ratio 0.4567 → 46% 进 title");
+    assert(html.includes("rgb(0,0,0) 0%"), "ratio 0.0049 → 0% 进 title");
+    assert(html.includes("class=\"ai-paint-color-swatch\""), "色块带固定 class");
+    assert(html.includes("style=\"background:rgb(200,100,50)\""), "background 取 rgb 而非占比");
+    assert(html.includes("</span><span class=\"ai-paint-color-swatch\""), "多个色块之间无分隔符，直接相邻");
+    assert(!html.includes("</span>,<span"), "色块之间不插逗号");
+    assert(
+      html.indexOf("<div class=\"ai-paint-color-swatches\">") < html.indexOf("class=\"ai-paint-color-swatch\""),
+      "容器开标签排在首个色块之前",
+    );
+    assert(
+      html.lastIndexOf("class=\"ai-paint-color-swatch\"") < html.lastIndexOf("</div>"),
+      "最后一个色块排在容器闭标签之前",
+    );
+  });
+
+  it("dominantColors 为空数组时输出空容器且不抛错", () => {
+    const html = buildFeatureStatusHtml(feat({ dominantColors: [] }));
+    assert(html.includes("<div class=\"ai-paint-color-swatches\"></div>"), "空容器原样闭合");
+    assert(html.includes("对称度42%"), "指标部分不受色块影响");
+  });
+
+  it("边界取整：0 与 1 都是整百分比，0.005 落到 1%", () => {
+    const html = buildFeatureStatusHtml(feat({ symmetry: 0, edgeDensity: 1, dominantColors: [] }));
+    assert(html.includes("对称度0%"), "symmetry 0 → 0%");
+    assert(html.includes("边缘密度100%"), "edgeDensity 1 → 100%");
+    const html2 = buildFeatureStatusHtml(feat({ symmetry: 0.005, edgeDensity: 0.995, dominantColors: [] }));
+    assert(html2.includes("对称度1%"), "symmetry 0.005 → 1%");
+    assert(html2.includes("边缘密度100%"), "edgeDensity 0.995 → 100%");
+  });
+
+  it("mood 原样透传，不做二次加工", () => {
+    assert(buildFeatureStatusHtml(feat({ mood: "冷", dominantColors: [] })).includes("冷色调"), "mood 冷");
+    assert(buildFeatureStatusHtml(feat({ mood: "亮", dominantColors: [] })).includes("亮色调"), "mood 亮");
+  });
+
+  it("返回值是单行字符串", () => {
+    assert(!buildFeatureStatusHtml(feat()).includes("\n"), "不含换行");
+  });
+});
+
 
 // ===== 运行 =====
 (async() => {
