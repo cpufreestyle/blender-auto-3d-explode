@@ -23,7 +23,9 @@ import {
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { createCameraFitter } from "./src/camera-fit.js";
+import { createGLTFLoaderProvider } from "./src/gltf-loader.js";
 import { createExplodeController } from "./src/explode-controller.js";
+import { createModelStyleSwitcher } from "./src/model-style.js";
 import { createAssemblyAnalysis } from "./src/assembly-analysis.js";
 import { createModelDisposal, disposeNodeTree } from "./src/model-disposal.js";
 import { createModelFit } from "./src/model-fit.js";
@@ -39,7 +41,6 @@ import {
   calculateSmartExplodeDist,
 } from "./src/explode-geometry.js";
 import { autoSplitModel, generatePartName } from "./src/geometry-split.js";
-import { getLegoMaterialForMesh } from "./src/lego-materials.js";
 import { createQuest3Model } from "./src/quest3-model.js";
 import { splitModelToQuest3Regions } from "./src/quest3-parts.js";
 import { setupUpload } from "./src/upload-panel.js";
@@ -48,15 +49,8 @@ import { setupAIPaint } from "./src/panels/ai-paint-panel.js";
 import "./src/panels/config-panel.js";
 import { API_BASE } from "./src/config.js";
 
-// 动态导入 GLTFLoader（npm 包，webpack 自动 tree-shake）
-let GLTFLoader = null;
-async function loadGLTFLoader() {
-  if (!GLTFLoader) {
-    const module = await import("three/examples/jsm/loaders/GLTFLoader.js");
-    GLTFLoader = module.GLTFLoader;
-  }
-  return GLTFLoader;
-}
+// 实现迁至 src/gltf-loader.js：loadGLTFLoader 与惰性缓存整段搬迁，行为不变
+const { loadGLTFLoader } = createGLTFLoaderProvider();
 
 // ===== WebGL 支持检测 =====
 try {
@@ -251,21 +245,16 @@ scene.add(bottomLight);
 let currentModelStyle = "native"; // 'native' | 'lego'
 
 // 应用模型外观风格：'native' | 'lego'
-function applyModelStyle(style) {
-  currentModelStyle = style;
-  const setLego = style === "lego";
-  const groups = [questGroup];
-  if (typeof customModelGroup !== "undefined") groups.push(customModelGroup);
-  groups.forEach(group => {
-    group.traverse(child => {
-      if (!child.isMesh) return;
-      if (child.userData._nativeMaterial === undefined) {
-        child.userData._nativeMaterial = child.material;
-      }
-      child.material = setLego ? getLegoMaterialForMesh(child) : child.userData._nativeMaterial;
-    });
-  });
-}
+// 实现迁至 src/model-style.js：applyModelStyle 整段搬迁，行为不变（样式状态
+// 经桥接读写，两个模型组深度遍历换材质，首次见到的 mesh 缓存原生材质）。
+const { applyModelStyle } = createModelStyleSwitcher({
+  questGroup,
+  customModelGroup,
+  getState: () => ({ currentModelStyle }),
+  setState: patch => {
+    if ("currentModelStyle" in patch) currentModelStyle = patch.currentModelStyle;
+  },
+});
 
 // ===== Quest 3 简化模型构建 =====
 // questGroup 声明见文件上方「模块共享状态与引用」
