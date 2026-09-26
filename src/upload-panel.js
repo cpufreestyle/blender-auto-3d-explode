@@ -172,6 +172,37 @@ export function setupUpload({
     });
   }
 
+  /**
+   * 两个前端 loader 的注入形参。URDF 与 STL 两条路线逐字相同。
+   *
+   * getCustomModelParts() 必须每次现取：main.js 里那个数组是 let、会被整体替换，
+   * 建厂时拷一份引用会拿到旧数组（见本文件头的依赖注入说明）。
+   */
+  function loaderDeps() {
+    return {
+      showStatus,
+      clearCustomModelGroup,
+      finalizeCustomModelLoad,
+      customModelGroup,
+      customModelParts: getCustomModelParts(),
+    };
+  }
+
+  /**
+   * 读文件并把结果交给回调。URDF / STL / GLB 三条路线的 onload + onerror +
+   * readAsX 样板逐字相同（失败文案也一样），收在这里只留一份。
+   *
+   * @param {File} file
+   * @param {"readAsText"|"readAsArrayBuffer"} method - FileReader 的读取方法
+   * @param {(result: string|ArrayBuffer) => void} onLoaded - 在 onload 里同步调用
+   */
+  function readFileAs(file, method, onLoaded) {
+    const reader = new FileReader();
+    reader.onload = e => onLoaded(e.target.result);
+    reader.onerror = () => showStatus("❌ 读取文件失败", "error");
+    reader[method](file);
+  }
+
   async function handleFile(file) {
     if (!file) return;
 
@@ -189,18 +220,9 @@ export function setupUpload({
     // URDF 文件：前端解析 XML 结构
     if (ext === "urdf") {
       showStatus("📦 正在解析 URDF 文件...", "info");
-      const reader = new FileReader();
-      reader.onload = e => {
-        loadURDFModel(e.target.result, file.name, {
-          showStatus,
-          clearCustomModelGroup,
-          finalizeCustomModelLoad,
-          customModelGroup,
-          customModelParts: getCustomModelParts(),
-        });
-      };
-      reader.onerror = () => showStatus("❌ 读取文件失败", "error");
-      reader.readAsText(file);
+      readFileAs(file, "readAsText", urdfText => {
+        loadURDFModel(urdfText, file.name, loaderDeps());
+      });
       return;
     }
 
@@ -214,18 +236,9 @@ export function setupUpload({
       }
       // 回退：前端 STLLoader 直接加载（单部件）
       showStatus("⏳ 正在用前端加载 STL 模型...", "info");
-      const reader = new FileReader();
-      reader.onload = e => {
-        loadSTLModel(e.target.result, file.name, {
-          showStatus,
-          clearCustomModelGroup,
-          finalizeCustomModelLoad,
-          customModelGroup,
-          customModelParts: getCustomModelParts(),
-        });
-      };
-      reader.onerror = () => showStatus("❌ 读取文件失败", "error");
-      reader.readAsArrayBuffer(file);
+      readFileAs(file, "readAsArrayBuffer", stlBuffer => {
+        loadSTLModel(stlBuffer, file.name, loaderDeps());
+      });
       return;
     }
 
@@ -241,12 +254,9 @@ export function setupUpload({
     // 回退：读取文件用 JS 拆解（包括 Quest 3 面级别切割）
     showStatus("⏳ 正在用前端 JS 拆解模型...", "info");
 
-    const reader = new FileReader();
-    reader.onload = e => {
-      loadCustomModel(e.target.result, file.name, null);
-    };
-    reader.onerror = () => showStatus("❌ 读取文件失败", "error");
-    reader.readAsArrayBuffer(file);
+    readFileAs(file, "readAsArrayBuffer", glbBuffer => {
+      loadCustomModel(glbBuffer, file.name, null);
+    });
   }
 
   // 点击上传按钮
