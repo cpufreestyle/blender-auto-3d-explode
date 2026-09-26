@@ -10,7 +10,7 @@
 > - CI 现状：`main` 上 **CI workflow 连续失败**，失败点是 `Python — Lint & Test` job 的 **Lint Python** 步骤；`Build and Test` workflow 为绿
 >
 > **2026-09-23 复核后**：上述待办已全部处理（见 §1 末尾「复核后落地」与 §7）。当前 `origin/main` = `8c128cd`（图片转3D 统一调度器 #17 已合入），CI 双 job 全绿。
-> **2026-09-26 发布 v3.3.0 后**：66 个优化 PR（#26–#91）按栈序自底向上全部合入 `main`（栈链用 merge commit，#91 用 squash），内容与栈顶 `stack/065-narrow-ui-smoke` 一致；版本号 3.3.0，`package.json` 与 `index.html` 两处 `?v=` 版本键同步（有单测钉住一致）；CI 四门禁（Frontend / Python / Blender 冒烟 / sync）全绿，`npm test` 3149 条断言 0 失败。合并前 main 的备份在 `backup/pre-merge-main`。
+> **2026-09-26 发布 v3.3.0 后**：本轮 66 个堆叠 PR（#26–#91，连同 09-23 的 15 个共 81 个）按栈序自底向上全部合入 `main`（栈链用 merge commit，#91 用 squash），内容与栈顶 `stack/065-narrow-ui-smoke` 一致；版本号 3.3.0，`package.json` 与 `index.html` 两处 `?v=` 版本键同步（有单测钉住一致）；CI 四门禁（Frontend / Python / Blender 冒烟 / sync）全绿，`npm test` 3149 条断言 0 失败。合并前 main 的备份在 `backup/pre-merge-main`。
 
 ---
 

@@ -4,17 +4,18 @@
 
 ## [v3.3.0] - 2026-09-26
 
-> 本版覆盖 v3.2.8 之后的全部变更（66 个 PR，#26–#91）。期间的 v3.2.9 与栈内 3.2.10–3.2.13 只是过程版本号推进，未单独发布，改动一并归入本条目。
+> 本版覆盖 v3.2.8 之后的全部变更（81 个 PR，#10–#91，其中 2026-09-23 15 个 / 2026-09-26 66 个）。期间的 v3.2.9 与栈内 3.2.10–3.2.13 只是过程版本号推进，未单独发布，改动一并归入本条目。
 
 ### ✨ 新功能
 
 - **部件清单可交互**（#87）— `.parts-grid` 从纯展示变成可操作：点部件行即选中高亮并把相机聚焦到它，再点取消；点行尾眼睛按钮进入 isolate（其余 `mesh.visible = false`），`Esc` / 下一步 / 「全部显示」均可复原。顺带修掉一个只有真机才暴露的致命回归：`refresh()` 无条件重写眼睛按钮文本，与监听 `.parts-grid` 的 MutationObserver 互相喂养，点一下「单独显示」渲染进程就被拖死、整页无响应；修复双保险为「写前先比」加上「只在行集合真的变化时才 refresh」。
 - **侧栏可折叠**（#88）— 340px 工具面板可一键收起到视口外，快捷键 `H`，折叠态存 `localStorage("quest3-sidebar")`；收起时给面板打 `inert`，避免键盘用户 Tab 钻进看不见的面板，焦点也跟着面板走；不支持 `inert` 的浏览器退化成「只是看不见」。另补 `prefers-reduced-motion` 尊重。
 - **窄屏响应式双路径**（#90）— `style.css` 新增移动端 / 窄屏媒体块：`width <= 560px` 下 overlay 全宽、触控目标 ≥ 40px、滑块轨道加高到 7px、时间轴控件与 AI 输入行 wrap 独占整行；桌面窗口拉窄走媒体查询，平板竖屏走 `.mobile-device`（UA 检测），两条路径互补。可读性微调：`.panel-header` 加 0.3px letter-spacing，`.step-desc` 与 `.status-box` 的 padding 收敛到间距令牌。
+- **图片转3D 统一调度**（#17、#16）— 本地 / 云端 / VLM 三条图片转3D 路径收敛为统一调度器，新增「真实深度」模式（多线索单目先验 + 实体厚度）；VLM 生成产物 `_vlm_generated_blender.py` 移出版本控制（#19）。
 
 ### 🧱 模块化与工程化
 
-- **前端模块化收尾**（#26–#42、#54–#64）— `main.js` 3399 → 659 行，逐一抽出 `scene-setup` / `quest3-steps` / `lighting` / `render-loop` / `explode-controller` / `custom-model-loader` 等模块；`src/` 从 12 个文件长到 57 个（含 `panels/`、`providers/` 两层）。
+- **前端模块化收尾**（#22–#42、#54–#64）— `main.js` 3399 → 659 行，逐一抽出 `ar-preview` / `export-panel` / `upload-panel` / `explode-controller` / `scene-setup` / `quest3-steps` / `lighting` / `render-loop` / `custom-model-loader` 等模块；`src/` 从 12 个文件长到 57 个（含 `panels/`、`providers/` 两层）。
 - **服务端模块化**（#43–#53）— `server.js` 1776 → 391 行，AI 配置、静态服务、路由、AI 调用、代理探测、闭环任务、Blender 任务与 MCP 客户端各自成模块（`src/ai-config.js`、`src/routes-generate.js`、`src/closed-loop.js` 等）。
 - **three 同构镜像**（#86）— `vendor/three/` 纳入版本控制，dev 与生产共用同一套 three 0.186，importmap 直指 `vendor/three/build/three.module.js`，消除「开发能跑、线上报错」的分叉；`npm run vendor:sync` 负责同步，CI 有镜像守卫。
 - **死代码与单一数据源**（#65、#72、#74、#76、#80）— 删掉零引用的 `partInfo` / `SERVER_PORT` / `part-tooltip` / `upload-enhancement.css`，以及「写入即蒸发」的 `providers.hyper3d.mode`；模型默认值、API_BASE、配置提醒规则收口共享模块，静态页面改走单一数据源；eslint 把游离在外的 `src/` 文件纳入对应 files 块，告警从 48 条压到 43 条。
@@ -23,12 +24,14 @@
 
 - **单测规模** — 测试文件 22 → 56 个，`npm test` 3149 条断言 0 失败；为乐高材质、爆炸几何、`splitSpatially`、`model-loaders`、`quest3Specs`、`validateImageFile`、`nearestTemplateIndex` 等补首批直接单测，并普遍附变异验证。
 - **真机 UI 冒烟门禁**（#87、#88、#90）— 新增 `scripts/ui_smoke_lib.mjs`（headless Chrome + CDP 骨架共用）与三套冒烟：部件交互 15 条断言（配对截图差分证明 isolate 真的让其它部件从画面里消失）、侧栏折叠 17 条、窄屏 22 条，`npm run smoke:ui` 一次跑三个。
-- **CI 门禁**（#21、#91）— `blender-smoke` job 用真实 Blender 跑拆分与建模冒烟；`ci.yml` 的 `pull_request.branches` 补上 `'stack/**'`，此前 base 指向 `stack/*` 的堆叠 PR 一个门禁都不触发。
+- **CI 门禁**（#10、#12、#21、#91）— `blender-smoke` job 用真实 Blender 跑拆分与建模冒烟；`ci.yml` 的 `pull_request.branches` 补上 `'stack/**'`，此前 base 指向 `stack/*` 的堆叠 PR 一个门禁都不触发；合并重叠 workflow、lint 步骤只检查不改文件、`test:py` 跑满 15 项。Python 侧收敛 ruff 规则集并修掉全部 93 项真实缺陷，同时修掉 Linux CI 必红的导出路径断言（#10）。
 
 ### 🐛 修复
 
 - URDF 外部 mesh 引用的「需单独上传」提示不再被抹掉（#67，行为变更）。
 - `providers.meshy.model` 取不到元素时静默用默认值的坑修掉（#79）。
+- Blender 脚本两处 5.x 兼容缺陷修掉（`--` 分隔符参数解析 + Principled BSDF 本地化节点名，#14）；`use_nodes` 迁移至 Blender 6.0 兼容写法并修中文界面取节点（#20，含守卫测试）。
+- VLM 图片转3D 改用每次请求唯一的临时文件路径，修并发互踩（#13）。
 - 纯图标按钮补 `title`、数字读数改等宽、键盘焦点环统一（#89）。
 - 文档里四处「悬停/点击看部件信息」的过期描述修正（#77）。
 
