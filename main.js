@@ -33,6 +33,7 @@ import { createExplodeController } from "./src/explode-controller.js";
 import { createAssemblyAnalysis } from "./src/assembly-analysis.js";
 import { createModelDisposal, disposeNodeTree } from "./src/model-disposal.js";
 import { createModelFit } from "./src/model-fit.js";
+import { createCustomModelFinalizer } from "./src/custom-model-finalize.js";
 import { createCustomModelLoader } from "./src/custom-model-loader.js";
 import { createCustomModelPanel } from "./src/custom-model-panel.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
@@ -561,62 +562,17 @@ modelFit = createModelFit({
 });
 
 
-/**
- * 自定义模型加载后的统一收尾流程（消除三个 loader 中的重复代码）。
- * 调用方在加载/拆分完成后调用此函数，传入差异化参数。
- * @param {string} fileName
- * @param {object} [opts]
- * @param {string} [opts.modelType]   autoScaleModel 的类型标签
- * @param {boolean} [opts.adjustExplode=true] 是否调用 adjustSmartExplodeDistances
- * @param {boolean} [opts.applyStyle=true]    是否调用 applyModelStyle
- */
+// ===== 自定义模型加载统一收尾 =====
+// 实现迁至 src/custom-model-finalize.js：finalizeCustomModelLoad 整段搬迁，
+// 行为不变（可见性切换/样式/动态步骤/UI/缩放相机/爆炸距离/装配分析/回到合体/
+// 少点击自动播放）。九个共享状态经文件末尾 customModelFinalize 实例的
+// getState/setState 桥接读写，与 explodeCtl / customModelPanel 同一约定。
+// 早声明、后赋值：createCustomModelLoader（下方）与 uploadDeps（文件尾）都
+// 注入此函数引用，运行期才调用，而 finalizer 需要 explodeCtl / assembly 等
+// 更下方才创建的实例，故实例在 assembly 实例之后统一创建。
+let customModelFinalize = null;
 function finalizeCustomModelLoad(fileName, opts = {}) {
-  const { modelType, adjustExplode = true, applyStyle = true } = opts;
-
-  hasCustomModel = true;
-  questGroup.visible = false;
-  customModelGroup.visible = true;
-
-  if (applyStyle) applyModelStyle(currentModelStyle);
-
-  // 生成动态步骤
-  stepGroups = assembly.generateCustomStepGroups(customModelParts, fileName);
-  totalSteps = stepGroups.length;
-  currentStep = 0;
-  displayedStep = 0;
-  animatingStep = 0;
-
-  // 更新 UI
-  customModelPanel.updateCustomModelUI(customModelParts.length, fileName);
-  explodeCtl.updateStepUI();
-
-  // 自动缩放
-  modelFit.autoScaleModel(modelType);
-
-  // 自动适配相机
-  fitCameraToModel(customModelGroup, false);
-
-  // 智能调整爆炸距离
-  if (adjustExplode) modelFit.adjustSmartExplodeDistances();
-
-  // 装配分析（非阻塞）
-  assembly.maybeApplyAssemblySequence(fileName);
-
-  // 回到合体状态
-  explodeCtl.goToStep(0);
-  isExploded = false;
-  explodeBtn.classList.remove("exploded");
-  explodeBtn.textContent = "💥 爆炸";
-
-  // 「少点击」：上传/AI 生成完成后自动播一次爆炸，用户无需再点「💥爆炸视图」
-  // 就能直接看到拆解结果（若用户已开启循环播放则不打扰）。
-  if (!explodeLoop) {
-    clearTimeout(autoExplodeTimer);
-    autoExplodeTimer = setTimeout(() => {
-      autoExplodeTimer = null;
-      if (!isExploded && !explodeLoop) explodeCtl.toggleExplode();
-    }, 500);
-  }
+  customModelFinalize.finalizeCustomModelLoad(fileName, opts);
 }
 
 // ===== 模型自动拆分系统 =====
@@ -834,6 +790,45 @@ assembly = createAssemblyAnalysis({
     if (typeof explodeCtl?.updateStepUI === "function") explodeCtl.updateStepUI();
   },
   showStatus,
+});
+
+// 自定义模型加载统一收尾（实现迁至 src/custom-model-finalize.js）。
+// 桥接的九个键与原 finalizeCustomModelLoad 直接操作的那些 let 完全对应；
+// customModelParts / currentModelStyle 惰性读取；四个协作者至此已全部创建。
+customModelFinalize = createCustomModelFinalizer({
+  getState: () => ({
+    hasCustomModel,
+    stepGroups,
+    totalSteps,
+    currentStep,
+    displayedStep,
+    animatingStep,
+    isExploded,
+    explodeLoop,
+    autoExplodeTimer,
+  }),
+  setState: patch => {
+    if ("hasCustomModel" in patch) hasCustomModel = patch.hasCustomModel;
+    if ("stepGroups" in patch) stepGroups = patch.stepGroups;
+    if ("totalSteps" in patch) totalSteps = patch.totalSteps;
+    if ("currentStep" in patch) currentStep = patch.currentStep;
+    if ("displayedStep" in patch) displayedStep = patch.displayedStep;
+    if ("animatingStep" in patch) animatingStep = patch.animatingStep;
+    if ("isExploded" in patch) isExploded = patch.isExploded;
+    if ("explodeLoop" in patch) explodeLoop = patch.explodeLoop;
+    if ("autoExplodeTimer" in patch) autoExplodeTimer = patch.autoExplodeTimer;
+  },
+  getCustomModelParts: () => customModelParts,
+  customModelGroup,
+  questGroup,
+  explodeBtn,
+  assembly,
+  customModelPanel,
+  explodeCtl,
+  modelFit,
+  fitCameraToModel,
+  applyModelStyle,
+  getCurrentModelStyle: () => currentModelStyle,
 });
 
 // 移动端检测
