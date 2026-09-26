@@ -179,19 +179,53 @@ describe("style.css 的 class 选择器都真实生效", () => {
 
 // ===== 反向守卫：JS 要取的 id 必须有着落 =====
 describe("JS 取的每个 id 都有着落", () => {
+  // 两个来源都要查：src + main.js，以及 ai-config.html 自己的内联脚本
+  // （meshy-model 那个静默故障就藏在后者里）
+  const jsSources = [mainJs, inlineScripts(readText("ai-config.html"))];
   const requested = [
-    ...new Set([...mainJs.matchAll(/getElementById\(\s*\\?["']([^"']+)["']\s*\)/g)].map((m) => m[1])),
+    ...new Set(jsSources.flatMap((src) =>
+      [...src.matchAll(/getElementById\(\s*\\?["']([^"']+)["']\s*\)/g)].map((m) => m[1]),
+    )),
+  ].sort();
+  const templates = [
+    ...new Set(jsSources.flatMap((src) =>
+      [...src.matchAll(/getElementById\(\s*`([^`]*)`\s*\)/g)].map((m) => m[1]),
+    )),
   ].sort();
   const declared = new Set([...allHtml.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
   // JS 自己造出来的元素（createElement 后 .id = "..."），HTML 里当然找不到声明
   const created = new Set([
-    ...[...mainJs.matchAll(/\.id\s*=\s*\\?["']([^"']+)["']/g)].map((m) => m[1]),
-    ...[...mainJs.matchAll(/setAttribute\(\s*\\?["']id["']\s*,\s*\\?["']([^"']+)["']/g)].map((m) => m[1]),
+    ...jsSources.flatMap((src) =>
+      [...src.matchAll(/\.id\s*=\s*\\?["']([^"']+)["']/g)].map((m) => m[1]),
+    ),
+    ...jsSources.flatMap((src) =>
+      [...src.matchAll(/setAttribute\(\s*\\?["']id["']\s*,\s*\\?["']([^"']+)["']/g)].map((m) => m[1]),
+    ),
   ]);
   const universe = new Set([...declared, ...created]);
 
+  // 模板目标：把 ${...} 换成通配，要求至少命中一个已声明 id。
+  // 这样既能放行 `${provider}-api-key` 这类真拼接，也不会放过写错的静态名。
+  const templateHits = (tpl) => {
+    let pattern = "";
+    tpl.split("${").forEach((part, i) => {
+      if (i === 0) {
+        pattern += part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return;
+      }
+      const close = part.indexOf("}");
+      pattern += ".+";
+      if (close >= 0 && close + 1 < part.length) {
+        pattern += part.slice(close + 1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      }
+    });
+    const rx = new RegExp(`^${pattern}$`);
+    return [...declared].filter((id) => rx.test(id));
+  };
+
   it("数量与现状一致", () => {
-    assert(requested.length === 75, `JS 里字面量 getElementById ${requested.length} 个，预期 75`);
+    assert(requested.length === 113, `字面量 getElementById ${requested.length} 个，预期 113`);
+    assert(templates.length === 5, `模板 getElementById ${templates.length} 个，预期 5`);
   });
 
   it("每个 id 都能在 HTML 声明或 JS 自建里找到", () => {
@@ -199,8 +233,18 @@ describe("JS 取的每个 id 都有着落", () => {
     assert(
       missing.length === 0,
       missing.length === 0 ?
-        "75 个 getElementById 目标全部有着落（HTML 声明 + JS 自建）" :
+        "113 个 getElementById 目标全部有着落（HTML 声明 + JS 自建）" :
         `取不到的 id: ${missing.join(", ")}`,
+    );
+  });
+
+  it("每个模板 getElementById 目标都能对上已声明的 id", () => {
+    const unmatched = templates.filter((tpl) => templateHits(tpl).length === 0);
+    assert(
+      unmatched.length === 0,
+      unmatched.length === 0 ?
+        "5 个模板目标全部能对上已声明 id" :
+        `模板对不上任何 id: ${unmatched.join(", ")}`,
     );
   });
 });
