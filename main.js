@@ -11,6 +11,7 @@ import { createGLTFLoaderProvider } from "./src/gltf-loader.js";
 import { createStatusUI } from "./src/status-ui.js";
 import { createLighting } from "./src/lighting.js";
 import { createExplodeController } from "./src/explode-controller.js";
+import { createPartInteractions } from "./src/part-interactions.js";
 import { createModelStyleSwitcher } from "./src/model-style.js";
 import { createAssemblyAnalysis } from "./src/assembly-analysis.js";
 import { createModelDisposal, disposeNodeTree } from "./src/model-disposal.js";
@@ -119,6 +120,7 @@ const stepUi = {
 // 早声明、后赋值：finalizeCustomModelLoad 等前部函数要在运行时调用它，
 // 而 createExplodeController 需要 axisMat（下方才创建）等依赖
 let explodeCtl = null;
+let partInteractions = null; // src/part-interactions.js 实例
 let assembly = null; // 装配顺序对接 / 自定义步骤生成（src/assembly-analysis.js）
 let modelDisposal = null; // 自定义模型拆卸与 GPU 资源释放（src/model-disposal.js）
 let modelFit = null; // 模型加载后归一化（src/model-fit.js）
@@ -601,7 +603,30 @@ const { updateStepDescAnimation } = createStepDescAnimation({ stepDescEl });
 
 // 在 updateStepUI 的最后调用动画（替代原先对 updateStepUI 的猴子补丁）。
 // 挂载时机与原版一致：首屏那次 updateStepUI() 之后才挂上钩子。
-explodeCtl.setStepUIHook(updateStepDescAnimation);
+// 钩子上再挂一件正事：换步骤时退出「单独显示」——只在实际换步时判断，
+// 鼠标微调炸开深度触发的那批 updateStepUI 不打扰用户。
+let lastHookStep = -1;
+explodeCtl.setStepUIHook(() => {
+  updateStepDescAnimation();
+  if (displayedStep !== lastHookStep) {
+    lastHookStep = displayedStep;
+    partInteractions.exitIsolate();
+  }
+});
+
+// ===== 部件清单交互（点击高亮 / 相机聚焦 / 单独显示）=====
+// 实现迁至 src/part-interactions.js。部件行有两个产出方：index.html 的静态清单与
+// src/custom-model-panel.js 动态生成的清单，因此模块内部做事件委托 + MutationObserver，
+// 主模块只需把「当前全部部件」和 explode-controller 的 focusPart / highlightPart 接上。
+// getParts 用 getter 而不是快照：parts 只 push，customModelParts 会被整体替换。
+partInteractions = createPartInteractions({
+  getParts: () => [...parts, ...customModelParts],
+  focusPart: name => explodeCtl.focusPart(name),
+  highlightPart: name => explodeCtl.highlightPart(name),
+  root: document,
+  showAllBtn: document.getElementById("parts-show-all"),
+});
+
 
 // ===== WebXR AR 预览（实现迁至 src/ar-preview.js）=====
 // ar* 状态与启停逻辑收敛在 createARPreview 闭包内；主模块只保留引导代码。
