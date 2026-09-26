@@ -42,6 +42,11 @@ export default [
       'src/panels/ai-paint-panel.js',
       'src/panels/config-panel.js',
       'src/render-loop.js',
+      'src/config.js',
+      'src/explode-geometry.js',
+      'src/lego-materials.js',
+      'src/model-loaders.js',
+      'src/quest3-parts.js',
       'src/utils.js'
     ],
     languageOptions: {
@@ -186,6 +191,11 @@ export default [
       'src/blender-runner.js',
       'src/routes-generate.js',
       'src/routes-blender.js',
+      'src/body.js',
+      'src/image-to-3d-router.js',
+      'src/logger.js',
+      'src/providers/image-to-3d.js',
+      'src/provider-models.js',
     ],
     languageOptions: {
       ecmaVersion: 'latest',

@@ -62,7 +62,7 @@ export function assignQuest3PartNames(parts, modelBox) {
   const halfExtents = new Vector3(
     Math.max(size.x / 2, 0.001),
     Math.max(size.y / 2, 0.001),
-    Math.max(size.z / 2, 0.001)
+    Math.max(size.z / 2, 0.001),
   );
 
   // 将每个部件的中心位置归一化到 [-1, 1]
@@ -70,7 +70,7 @@ export function assignQuest3PartNames(parts, modelBox) {
     return new Vector3(
       part.partCenter.x / halfExtents.x,
       part.partCenter.y / halfExtents.y,
-      part.partCenter.z / halfExtents.z
+      part.partCenter.z / halfExtents.z,
     );
   });
 
@@ -116,7 +116,7 @@ export function assignQuest3PartNames(parts, modelBox) {
     parts.map((p, i) => ({
       name: assignments[i],
       center: p.partCenter.toArray().map(v => v.toFixed(2)),
-    }))
+    })),
   );
 
   return assignments;
@@ -169,7 +169,7 @@ export function mergePartsToQuest3(splitParts, modelBox) {
   const halfExtents = new Vector3(
     Math.max(size.x / 2, 0.001),
     Math.max(size.y / 2, 0.001),
-    Math.max(size.z / 2, 0.001)
+    Math.max(size.z / 2, 0.001),
   );
 
   // 为每个 splitPart 找最近的 Quest 3 模板
@@ -217,9 +217,9 @@ export function mergePartsToQuest3(splitParts, modelBox) {
       const mergedGeo = mergeGeometries(geometries);
       // 使用第一个 mesh 的材质
       const firstMesh = meshes[0];
-      const material = Array.isArray(firstMesh.material)
-        ? firstMesh.material[0]
-        : firstMesh.material;
+      const material = Array.isArray(firstMesh.material) ?
+        firstMesh.material[0] :
+        firstMesh.material;
       const newMesh = new Mesh(mergedGeo, material);
       newMesh.position.set(0, 0, 0);
       newMesh.rotation.set(0, 0, 0);
@@ -273,7 +273,7 @@ export function splitModelToQuest3Regions(model) {
   const halfExtents = new Vector3(
     Math.max(size.x / 2, 0.001),
     Math.max(size.y / 2, 0.001),
-    Math.max(size.z / 2, 0.001)
+    Math.max(size.z / 2, 0.001),
   );
 
   // 3. 居中所有几何体
@@ -351,10 +351,10 @@ export function splitModelToQuest3Regions(model) {
     const sourceFaces = templateFaces[bestSourceT].faces;
     sourceFaces.sort((a, b) => {
       const da = Math.sqrt(
-        (a.nx - emptyPos[0]) ** 2 + (a.ny - emptyPos[1]) ** 2 * 0.7 + (a.nz - emptyPos[2]) ** 2
+        (a.nx - emptyPos[0]) ** 2 + (a.ny - emptyPos[1]) ** 2 * 0.7 + (a.nz - emptyPos[2]) ** 2,
       );
       const db = Math.sqrt(
-        (b.nx - emptyPos[0]) ** 2 + (b.ny - emptyPos[1]) ** 2 * 0.7 + (b.nz - emptyPos[2]) ** 2
+        (b.nx - emptyPos[0]) ** 2 + (b.ny - emptyPos[1]) ** 2 * 0.7 + (b.nz - emptyPos[2]) ** 2,
       );
       return da - db;
     });
@@ -362,7 +362,7 @@ export function splitModelToQuest3Regions(model) {
     // 借取最近的 15% 面（至少 5 个，最多 50%）
     const stealCount = Math.max(
       5,
-      Math.min(Math.floor(sourceFaces.length * 0.15), Math.floor(sourceFaces.length * 0.5))
+      Math.min(Math.floor(sourceFaces.length * 0.15), Math.floor(sourceFaces.length * 0.5)),
     );
     const stolenFaces = sourceFaces.splice(0, stealCount);
     templateFaces[t].faces = stolenFaces;
@@ -371,7 +371,7 @@ export function splitModelToQuest3Regions(model) {
     }
 
     console.log(
-      `🔄 面重分配: "${QUEST3_PART_TEMPLATES[t].name}" 从 "${QUEST3_PART_TEMPLATES[bestSourceT].name}" 借取 ${stealCount} 个面`
+      `🔄 面重分配: "${QUEST3_PART_TEMPLATES[t].name}" 从 "${QUEST3_PART_TEMPLATES[bestSourceT].name}" 借取 ${stealCount} 个面`,
     );
   }
 
