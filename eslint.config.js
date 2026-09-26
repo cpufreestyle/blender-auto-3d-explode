@@ -174,6 +174,7 @@ export default [
       'src/blender-mcp-client.js',
       'src/static-server.js',
       'src/proxy-detect.js',
+      'src/closed-loop.js',
     ],
     languageOptions: {
       ecmaVersion: 'latest',

@@ -46,6 +46,7 @@ import path from "path";
 import os from "os";
 import { createStaticServer } from "./src/static-server.js";
 import { createBlenderMcpClient } from "./src/blender-mcp-client.js";
+import { createClosedLoop } from "./src/closed-loop.js";
 import { callAI } from "./src/ai-call.js";
 import { detectProxy } from "./src/proxy-detect.js";
 import { fileURLToPath } from "url";
@@ -947,183 +948,19 @@ async function handleAssemblyAnalysis(req, res, url) {
 }
 
 // ── 全自动闭环：云端生成 → 导入 Blender 实时场景 → 读回 ──────────
-
-// 记录最近一次由本服务器导入 Blender 的对象名，供「读回」默认使用。
-let lastImportedObject = null;
-
-/**
- * 等待 Blender MCP addon(9876) 就绪；autoLaunch 为真时先尝试拉起 Blender GUI。
- * @returns {Promise<boolean>} 是否就绪
- */
-async function waitForBlenderAddon({ autoLaunch = true, timeoutMs = 30_000 } = {}) {
-  const probe = async () => {
-    try {
-      await callBlenderMcp("get_addon_status", {}, 2000);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  if (await probe()) return true;
-  if (!autoLaunch) return false;
-  try {
-    launchBlenderApp();
-  } catch {
-    /* 拉不起来就继续轮询 */
-  }
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 1500));
-    if (await probe()) return true;
-  }
-  return false;
-}
-
-/**
- * POST /api/gen-to-blender
- * Body: { image: "data:image/...;base64,...", deploy?: "tripo"|"meshy"|"hyper3d", name?, autoLaunch? }
- * 全自动：云端生成 GLB → 落盘 → 导入 Blender 实时场景 → 返回导入对象与场景信息。
- */
-async function handleGenToBlender(req, res) {
-  const startTime = Date.now();
-  try {
-    const body = await readBody(req, { maxSize: 25 * 1024 * 1024 });
-    const imageDataUrl = body.image;
-    if (!imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
-      sendJSON(res, 400, { success: false, error: "缺少有效的图片数据（image 字段应为 data URL）" });
-      return;
-    }
-    const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/.exec(imageDataUrl);
-    if (!match) {
-      sendJSON(res, 400, { success: false, error: "图片 data URL 格式错误" });
-      return;
-    }
-    const imageBase64 = match[2];
-    // 只允许三家云端 provider（历史默认 tripo），其余值一律按 tripo 处理
-    const mode = ["meshy", "tripo", "hyper3d"].includes(body.deploy) ? body.deploy : "tripo";
-
-    // 1. 云端生成 GLB（统一走图片转3D 调度器，与 /api/image-to-3d 同一实现）
-    const out = await generateImageTo3D({
-      mode,
-      body,
-      imageBase64,
-      mime: match[1],
-      config: AI_CONFIG,
-      deps: IMAGE_TO_3D_DEPS,
-    });
-
-    // 2. 落盘（持久化，便于后续拆解/复现）
-    const savedPath = saveGeneratedModel(out.glbBuffer, `${mode}-to-blender`);
-    // 供前端直接取回展示的相对 URL（静态服务托管 models/generated/）
-    const modelUrl = "/" + path.relative(__dirname, savedPath).split(path.sep).join("/");
-
-    // 3. 确保 Blender MCP addon 就绪（必要时自动拉起 Blender GUI）
-    const ready = await waitForBlenderAddon({ autoLaunch: body.autoLaunch !== false });
-    if (!ready) {
-      sendJSON(res, 502, {
-        success: false,
-        savedPath,
-        modelUrl,
-        error:
-          "Blender MCP addon 未就绪（9876 未监听）。请打开 Blender 并在侧栏点击「Connect to MCP server」后重试。",
-      });
-      return;
-    }
-
-    // 4. 导入 Blender 实时场景
-    const name = body.name || `${mode}_model`;
-    const imported = await callBlenderMcp("import_glb_from_file", { filepath: savedPath, name }, 120_000);
-    if (!imported || imported.succeed === false) {
-      sendJSON(res, 502, { success: false, savedPath, error: (imported && imported.error) || "导入 Blender 失败" });
-      return;
-    }
-    lastImportedObject = imported.name || name;
-
-    // 5. 回传场景信息
-    let scene = null;
-    try {
-      scene = await callBlenderMcp("get_scene_info", {}, 10_000);
-    } catch {
-      /* 非致命：场景信息拿不到也视为导入成功 */
-    }
-
-    sendJSON(res, 200, {
-      success: true,
-      elapsed: elapsedSeconds(startTime),
-      savedPath,
-      modelUrl,
-      imported,
-      scene,
-    });
-  } catch (err) {
-    sendJSON(res, err.status || 500, { success: false, error: err.message });
-  }
-}
-
-/**
- * GET /api/blender/export?name=<对象名>
- * 从 Blender 实时场景导出指定对象为 GLB（默认导出最近一次导入的对象），二进制回传。
- */
-async function handleBlenderExport(req, res, url) {
-  let name = url.searchParams.get("name") || lastImportedObject;
-
-  // 无显式对象名时，回退到 Blender 当前激活对象 / 场景首个网格对象，
-  // 使「从 Blender 读回」在用户未先执行「生成并发送」时也能使用。
-  if (!name) {
-    try {
-      const pick = await callBlenderMcp(
-        "execute_code",
-        {
-          code:
-            "import bpy; a=bpy.context.active_object; " +
-            "mesh=[o.name for o in bpy.data.objects if o.type=='MESH']; " +
-            "print((a.name if (a and a.type=='MESH') else (mesh[0] if mesh else '')))",
-        },
-        10_000,
-      );
-      const picked = String((pick && pick.result) || "").trim();
-      if (picked) name = picked;
-    } catch {
-      /* 忽略探测错误，交给下方 400 处理 */
-    }
-  }
-
-  if (!name) {
-    sendJSON(res, 400, {
-      success: false,
-      error: "Blender 场景中尚无可导出的网格对象，请先在 Blender 中创建或导入对象后再读回",
-    });
-    return;
-  }
-  const exportPath = path.join(UPLOAD_DIR, `export-${Date.now()}.glb`);
-  try {
-    const result = await callBlenderMcp("export_object_glb", { name, filepath: exportPath }, 120_000);
-    if (!result || result.succeed === false) {
-      sendJSON(res, 502, { success: false, error: (result && result.error) || "从 Blender 导出失败" });
-      return;
-    }
-    if (!fs.existsSync(exportPath)) {
-      sendJSON(res, 502, { success: false, error: "导出文件不存在" });
-      return;
-    }
-    const buf = fs.readFileSync(exportPath);
-    res.writeHead(200, {
-      "Content-Type": "application/octet-stream",
-      "Content-Length": buf.length,
-      "X-Object-Name": encodeURIComponent(name),
-      ...getCORSHeaders(),
-    });
-    res.end(buf);
-  } catch (err) {
-    sendJSON(res, 502, { success: false, error: err.message });
-  } finally {
-    try {
-      fs.unlinkSync(exportPath);
-    } catch {
-      /* 文件不存在则忽略 */
-    }
-  }
-}
+// 实现（waitForBlenderAddon / handleGenToBlender / handleBlenderExport）抽至
+// src/closed-loop.js；lastImportedObject 的读写随之封闭在新模块内（grep 确认原
+// 先没有任何外部读者），这里只创建闭合并把两个 handler 接进下方路由。
+const { handleGenToBlender, handleBlenderExport } = createClosedLoop({
+  sendJSON,
+  generateImageTo3D,
+  callBlenderMcp,
+  launchBlenderApp,
+  saveGeneratedModel,
+  IMAGE_TO_3D_DEPS,
+  UPLOAD_DIR,
+  rootDir: __dirname,
+});
 
 // ── 创建 HTTP 服务器 ──────────────────────────────────
 
