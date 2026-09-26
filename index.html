@@ -357,10 +357,10 @@
   <script type="module" src="main.js?v=3.2.13"></script>
 
   <!-- 首次使用：检测是否已配置，未配置则弹出模型配置 -->
-  <script>
+  <script type="module">
+    import { API_BASE } from "/src/config.js";
+
     (function () {
-      // 与 src/config.js 保持一致；修改时请同步
-      const API_BASE = document.querySelector('meta[name="api-base"]')?.content || "http://localhost:3001";
       const overlay = document.getElementById('first-config-modal');
       if (!overlay) return;
       const iframe = document.getElementById('fcm-iframe');
