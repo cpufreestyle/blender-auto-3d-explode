@@ -15,6 +15,7 @@ export default [
       'src/assembly-analysis.js',
       'src/custom-model-loader.js',
       'src/custom-model-panel.js',
+      'src/geometry-split.js',
       'src/model-disposal.js',
       'src/model-fit.js',
       'src/explode-controller.js',
