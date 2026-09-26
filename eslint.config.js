@@ -22,6 +22,7 @@ export default [
       'src/model-disposal.js',
       'src/model-fit.js',
       'src/model-style.js',
+      'src/status-ui.js',
       'src/explode-controller.js',
       'src/export-panel.js',
       'src/upload-panel.js',

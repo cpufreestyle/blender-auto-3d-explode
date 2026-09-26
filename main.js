@@ -24,6 +24,7 @@ import {
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { createCameraFitter } from "./src/camera-fit.js";
 import { createGLTFLoaderProvider } from "./src/gltf-loader.js";
+import { createStatusUI } from "./src/status-ui.js";
 import { createExplodeController } from "./src/explode-controller.js";
 import { createModelStyleSwitcher } from "./src/model-style.js";
 import { createAssemblyAnalysis } from "./src/assembly-analysis.js";
@@ -51,6 +52,11 @@ import { API_BASE } from "./src/config.js";
 
 // 实现迁至 src/gltf-loader.js：loadGLTFLoader 与惰性缓存整段搬迁，行为不变
 const { loadGLTFLoader } = createGLTFLoaderProvider();
+
+// 实现迁至 src/status-ui.js：showStatus / setModelLoading 与 MODEL_LOADING_BTN_IDS
+// 整段搬迁，行为不变（状态条写 #upload-status；loading 覆盖层显隐 + 按钮统一切换）。
+// 必须建在「场景初始化」之前：下方 WebGL 上下文丢失/恢复回调引用 showStatus。
+const { showStatus, setModelLoading } = createStatusUI();
 
 // ===== WebGL 支持检测 =====
 try {
@@ -734,52 +740,13 @@ requestAnimationFrame(animate);
 
 // 隐藏加载提示
 const loadingEl = document.getElementById("loading");
-const uploadStatusEl = document.getElementById("upload-status"); // 全局上传状态元素
 setTimeout(() => {
   if (loadingEl) loadingEl.classList.add("hidden");
 }, 100);
 
 // ===== 文件上传与自定义模型 =====
-// base64ToUtf8 已从 src/utils.js 导入（支持浏览器和 Node.js 双环境）
-
-function showStatus(msg, type = "info") {
-  if (!uploadStatusEl) return;
-  uploadStatusEl.textContent = msg;
-  uploadStatusEl.className = "status-box " + type;
-  uploadStatusEl.classList.remove("hidden");
-}
-
-const modelLoadingEl = document.getElementById("model-loading");
-const modelLoadingTextEl = document.getElementById("model-loading-text");
-const MODEL_LOADING_BTN_IDS = [
-  "upload-btn",
-  "clear-model-btn",
-  "prev-step",
-  "next-step",
-  "reset-step",
-  "style-toggle",
-  "explode-btn",
-  "explode-loop",
-  "timeline-play",
-  "timeline-reset",
-  "generated-load",
-  "img-to-3d-btn",
-  "open-config-btn",
-  "blender-launch",
-];
-
-function setModelLoading(loading, text = "正在准备模型...") {
-  if (modelLoadingEl) modelLoadingEl.classList.toggle("hidden", !loading);
-  if (modelLoadingTextEl) modelLoadingTextEl.textContent = text;
-  MODEL_LOADING_BTN_IDS.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.disabled = loading;
-  });
-}
-
-// ===== 文件上传与自定义模型 =====
 // 实现迁至 src/upload-panel.js（setupUpload，依赖注入）。
-// showStatus 的状态条 DOM 归 main.js 持有（十余处复用它写进度）；
+// showStatus 已由 src/status-ui.js 持有（十余处复用它写进度）；
 // customModelParts 是会被整体替换的 let，必须经 getCustomModelParts() 现取。
 const uploadDeps = {
   showStatus,
