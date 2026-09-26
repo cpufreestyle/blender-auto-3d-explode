@@ -36,7 +36,6 @@ import {
 import { readBody } from "./src/body.js";
 import { runHyper3DTextTo3D } from "./src/providers/image-to-3d.js";
 import { generateImageTo3D } from "./src/image-to-3d-router.js";
-import { DEFAULT_MODELS } from "./src/provider-models.js";
 import {
   AI_CONFIG,
   loadAIConfig,
@@ -48,6 +47,7 @@ import path from "path";
 import os from "os";
 import { createStaticServer } from "./src/static-server.js";
 import { createBlenderMcpClient } from "./src/blender-mcp-client.js";
+import { callAI } from "./src/ai-call.js";
 import { fileURLToPath } from "url";
 import { ProxyAgent, setGlobalDispatcher } from "undici";
 
@@ -741,108 +741,12 @@ const {
 
 /**
  * 调用 AI 模型 — 统一路由
+ *
+ * 四层调度（callAI / callOpenAICompatible / callAnthropic / callOllama）
+ * 已抽至 src/ai-call.js：AI_CONFIG 经 ESM live binding 读到最新值，
+ * DEFAULT_MODELS 仍取 src/provider-models.js 单一来源。
  */
-async function callAI(prompt) {
-  const { provider } = AI_CONFIG;
 
-  // OpenAI 兼容的提供商（共享 /chat/completions 接口）
-  const OPENAI_COMPATIBLE = {
-    openai: { cfg: AI_CONFIG.openai, url: 'https://api.openai.com/v1', label: 'OpenAI' },
-    lmstudio: { cfg: AI_CONFIG.lmstudio, url: AI_CONFIG.lmstudio.url, label: 'LM Studio' },
-    stepfun: { cfg: AI_CONFIG.stepfun, url: 'https://api.stepfun.com/v1', label: 'StepFun' },
-    nvidia: {
-      cfg: AI_CONFIG.nvidia,
-      url: AI_CONFIG.nvidia.base_url || 'https://integrate.api.nvidia.com/v1',
-      label: 'NVIDIA',
-      systemPrompt: '你是一个乐高积木模型专家。根据用户的描述，用标准的乐高砖块拼接出模型。返回 JSON 格式：{ "bricks": [{ "name": "名称", "type": "2x4|2x2|1x2", "position": [x,y,z], "rotation": 0|90|180|270, "color": "red|blue|green" }] }',
-    },
-    kimi: {
-      cfg: AI_CONFIG.kimi,
-      url: 'https://api.moonshot.cn/v1',
-      label: 'Kimi',
-    },
-  };
-
-  const compat = OPENAI_COMPATIBLE[provider];
-  if (compat) return await callOpenAICompatible(prompt, compat);
-
-  switch (provider) {
-    case 'anthropic':
-      return await callAnthropic(prompt);
-    case 'ollama':
-      return await callOllama(prompt);
-    default:
-      throw new Error('未知的 AI 提供商: ' + provider);
-  }
-}
-
-/**
- * 调用 OpenAI 兼容接口（OpenAI / LM Studio / StepFun / NVIDIA 共用）
- */
-async function callOpenAICompatible(prompt, { cfg, url, label, systemPrompt }) {
-  const { key, model } = cfg;
-  if (key === '' && label !== 'LM Studio') throw new Error(`${label} API Key 未配置`);
-
-  const messages = systemPrompt
-    ? [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }]
-    : [{ role: 'user', content: prompt }];
-
-  const response = await fetch(`${url}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      ...(key ? { Authorization: `Bearer ${key}` } : {}),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ model: model || undefined, messages, temperature: 0.7, max_tokens: 4096 }),
-  });
-
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error?.message || `${label} API 错误`);
-  return data.choices[0].message.content;
-}
-
-/**
- * 调用 Anthropic Claude（独立接口格式）
- */
-async function callAnthropic(prompt) {
-  const { key, model } = AI_CONFIG.anthropic;
-  if (!key) throw new Error('Anthropic API Key 未配置');
-
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: model || DEFAULT_MODELS.anthropic,
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
-
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error?.message || 'Anthropic API 错误');
-  return data.content[0].text;
-}
-
-/**
- * 调用 Ollama（本地推理，独立接口格式）
- */
-async function callOllama(prompt) {
-  const { url, model } = AI_CONFIG.ollama;
-
-  const response = await fetch(`${url}/api/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: model || DEFAULT_MODELS.ollama, prompt, stream: false }),
-  });
-
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Ollama 错误');
-  return data.response;
-}
 
 /**
  * 健康检查
