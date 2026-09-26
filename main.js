@@ -47,6 +47,7 @@ import { splitModelToQuest3Regions } from "./src/quest3-parts.js";
 import { setupUpload } from "./src/upload-panel.js";
 import { setupGeneratedLibrary } from "./src/generated-library.js";
 import { setupKeyboardShortcuts } from "./src/keyboard-shortcuts.js";
+import { createStepDescAnimation } from "./src/step-desc.js";
 import { setupThemeToggle } from "./src/theme-toggle.js";
 import { setupStyleToggle } from "./src/style-toggle.js";
 import { setupAIPaint } from "./src/panels/ai-paint-panel.js";
@@ -736,19 +737,9 @@ setupStyleToggle({ applyModelStyle });
 // ===== Blender 状态检测 + 一键启动（已迁移到 src/panels/config-panel.js） =====
 
 // ===== 步骤描述淡入动画 =====
-let lastStepDesc = "";
-function updateStepDescAnimation() {
-  if (!stepDescEl) return;
-
-  const currentDesc = stepDescEl.textContent;
-  if (currentDesc !== lastStepDesc) {
-    stepDescEl.style.animation = "none";
-    // 触发重排
-    void stepDescEl.offsetHeight;
-    stepDescEl.style.animation = "fadeInUp 0.5s ease-out";
-    lastStepDesc = currentDesc;
-  }
-}
+// 实现迁至 src/step-desc.js：updateStepDescAnimation 与 lastStepDesc 整段
+// 搬迁，行为不变。stepDescEl 与本文件上方 stepUi 解构同一引用。
+const { updateStepDescAnimation } = createStepDescAnimation({ stepDescEl });
 
 // 在 updateStepUI 的最后调用动画（替代原先对 updateStepUI 的猴子补丁）。
 // 挂载时机与原版一致：首屏那次 updateStepUI() 之后才挂上钩子。

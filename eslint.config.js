@@ -27,6 +27,7 @@ export default [
       'src/theme-toggle.js',
       'src/generated-library.js',
       'src/keyboard-shortcuts.js',
+      'src/step-desc.js',
       'src/explode-controller.js',
       'src/export-panel.js',
       'src/upload-panel.js',
