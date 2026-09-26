@@ -569,7 +569,12 @@ describe("parseMultipartBuffer 安全边界", () => {
   // 二进制内容包含 null 字节
   const binaryContent = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]);
   const binaryMultipart = Buffer.concat([
-    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="binary.glb"\r\nContent-Type: model/gltf-binary\r\n\r\n`, "latin1"),
+    Buffer.from(
+      `--${boundary}\r\n` +
+        "Content-Disposition: form-data; name=\"file\"; filename=\"binary.glb\"\r\n" +
+        "Content-Type: model/gltf-binary\r\n\r\n",
+      "latin1",
+    ),
     binaryContent,
     Buffer.from(`\r\n--${boundary}--\r\n`, "latin1"),
   ]);
@@ -671,7 +676,6 @@ describe("computeExplodeVector 爆炸方向计算", () => {
   // 中心部件（距离 < 0.001）：均匀角度分布
   const center0 = computeExplodeVector({ x: 0, y: 0, z: 0 }, 0, 4);
   const center1 = computeExplodeVector({ x: 0, y: 0, z: 0 }, 1, 4);
-  const center2 = computeExplodeVector({ x: 0, y: 0, z: 0 }, 2, 4);
   assert(center0.x !== center1.x || center0.y !== center1.y, "不同索引的中心部件方向不同");
   assertApprox(Math.sqrt(center0.x ** 2 + center0.y ** 2), 1.0, 1e-10, "中心部件爆炸距离 = 1.0");
   assertApprox(Math.sqrt(center1.x ** 2 + center1.y ** 2), 1.0, 1e-10, "中心部件爆炸距离 = 1.0");
@@ -781,7 +785,11 @@ describe("createVlmJobPaths 每次请求唯一临时路径", () => {
   // 允许注入 jobId：便于复现与断言具体文件名
   const fixed = serverUtils.createVlmJobPaths(tmpDir, mockPath, "job-123");
   assertEqual(fixed.image, `${tmpDir}/vlm-in-job-123.png`, "注入 jobId 时路径可预测");
-  assertEqual(serverUtils.createVlmJobPaths(tmpDir, mockPath, "x").code, `${tmpDir}/vlm-code-x.py`, "注入 jobId 时代码路径可预测");
+  assertEqual(
+    serverUtils.createVlmJobPaths(tmpDir, mockPath, "x").code,
+    `${tmpDir}/vlm-code-x.py`,
+    "注入 jobId 时代码路径可预测",
+  );
 });
 
 // ===== 结果汇总 =====
