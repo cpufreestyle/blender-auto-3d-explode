@@ -210,10 +210,9 @@ function fitCameraToModel(modelGroup) {
 - 模型加载与管理
 
 ### 数据模块 (`src/quest3-data.js`, `src/quest3-steps.js`)
-- 模型配置数据
-- 拆解步骤定义
-- 动画参数设置
-- 部件信息描述
+- Quest 3 技术规格（`quest3Specs`：芯片 / 屏幕 / 摄像头 / 电池等）
+- 默认分步拆解方案（`defaultStepGroups`：每步的部件、工具与说明文案）
+- 部件到步骤的归属推算（`assignPartStepIndices`）
 
 ### 服务器模块 (`server.js`)
 - HTTP API 接口
