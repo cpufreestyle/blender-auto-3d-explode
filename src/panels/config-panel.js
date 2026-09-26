@@ -1,4 +1,6 @@
 // 配置面板 + Blender 健康检测（L2 前端模块化拆分）
+import { configNeedsHighlight } from "./config-check.js";
+
 // 从 main.js 抽取：AI 配置拉取与高亮、配置保存消息监听、Blender 后端健康检测与一键启动。
 // 仅依赖 DOM 与 fetch，不触碰 3D 场景状态，便于独立维护与测试。
 // 注意：本模块在导入时即执行顶部「Blender 健康检测」初始化与事件绑定。
@@ -9,15 +11,7 @@ export function fetchConfigAndHighlight(btn) {
   fetch("ai-config.json")
     .then(r => (r.ok ? r.json() : null))
     .then(cfg => {
-      if (!cfg) {
-        btn.classList.add("need-config");
-        return;
-      }
-      const provider = cfg.provider;
-      const hasProvider = !!provider && provider !== "img3d";
-      const key = provider && cfg[provider] && cfg[provider].key;
-      const hasKey = !!(key && key !== "***");
-      if (!hasProvider || !hasKey) {
+      if (configNeedsHighlight(cfg)) {
         btn.classList.add("need-config");
       }
     })
@@ -48,7 +42,7 @@ async function fetchBlenderHealth() {
     try {
       const r = await fetch(u, { method: "GET" });
       if (r.ok) return await r.json();
-    } catch (_) {
+    } catch {
       /* 尝试下一个地址 */
     }
   }
@@ -98,7 +92,7 @@ async function launchBlender() {
     try {
       const r = await fetch(u, { method: "POST" });
       if (r.ok) { ok = true; break; }
-    } catch (_) {
+    } catch {
       /* 尝试下一个地址 */
     }
   }
