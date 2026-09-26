@@ -60,7 +60,7 @@ export let AI_CONFIG = {
   providers: {
     meshy: { apiKey: '' },
     tripo: { apiKey: '', model: 'v3.1-20260211' },
-    hyper3d: { apiKey: '', mode: 'MAIN_SITE' },
+    hyper3d: { apiKey: '' },
   },
 };
 
