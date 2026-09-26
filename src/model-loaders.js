@@ -377,14 +377,24 @@ export async function loadURDFModel(urdfText, fileName, deps) {
       customModelParts.forEach((part, i) => {
         part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
         part.name = quest3NamesURDF[i];
-        part.mesh.userData = { name: part.name, isURDF: true };
+        // meshFile 必须跟着搬过来：它由装配阶段写进 userData，而收尾的
+        // meshNote 要靠它判断这个 URDF 是否引用了需要单独上传的外部 mesh
+        part.mesh.userData = {
+          name: part.name,
+          isURDF: true,
+          meshFile: part.mesh.userData.meshFile,
+        };
         part.mesh.name = part.name;
       });
     } else {
       // 非 Quest 3 模型：使用 URDF link 原始名称
       customModelParts.forEach((part, i) => {
         part.stepIndex = Math.min(Math.floor(i / partsPerGroup) + 1, groupCount);
-        part.mesh.userData = { name: part.name, isURDF: true };
+        part.mesh.userData = {
+          name: part.name,
+          isURDF: true,
+          meshFile: part.mesh.userData.meshFile,
+        };
         part.mesh.name = part.name;
       });
     }
@@ -392,10 +402,12 @@ export async function loadURDFModel(urdfText, fileName, deps) {
     // 统一收尾：隐藏默认模型、生成步骤、适配相机、回到合体
     finalizeCustomModelLoad(fileName, { modelType: "URDF", adjustExplode: true });
 
-    const meshNote =
-      partCount > 0 && splitParts[0]?.mesh?.userData?.meshFile ?
-        `\n⚠️ 注意: URDF 引用的 mesh 文件 (${splitParts[0].mesh.userData.meshFile}) 需单独上传\n当前使用占位几何体` :
-        "";
+    // 合并之后 splitParts[0] 未必是带着外部引用的那一个（按模板序号重排过），
+    // 因此取第一个带引用的部件，否则合并场景下这条提示会时有时无。
+    const meshRef = partCount > 0 ? splitParts.find(p => p?.mesh?.userData?.meshFile) : null;
+    const meshNote = meshRef ?
+      `\n⚠️ 注意: URDF 引用的 mesh 文件 (${meshRef.mesh.userData.meshFile}) 需单独上传\n当前使用占位几何体` :
+      "";
     showStatus(`✅ URDF 解析完成：${partCount} 个 link（部件）${meshNote}`, "success");
 
     console.log(`✅ URDF 模型加载完成：${partCount} 个部件`);

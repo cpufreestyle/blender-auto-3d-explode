@@ -245,8 +245,40 @@ describe("mergePartsToQuest3 — 同模板多件合并为一个", async() => {
     2 * 36,
     "合并几何体顶点数等于两个盒子之和（BoxGeometry 索引合并后转非索引，每盒 12 三角面 = 36 顶点）",
   );
+  assertEqual(board.mesh.userData.meshFile, "", "没有外部引用时 meshFile 为空串");
   const strap = merged.find(p => p.name === "头带");
   assert(strap && strap.mesh === parts[2].mesh, "单件组仍然透传原部件");
+});
+
+describe("mergePartsToQuest3 — 合并项带上源 mesh 的 meshFile", async() => {
+  const [x, y, z] = DEFAULT_TEMPLATES[7][1]; // 主板
+  const a = boxMeshAt(x * CANON_HALF.x, y * CANON_HALF.y, z * CANON_HALF.z);
+  a.userData.meshFile = "meshes/board.dae"; // 只有第一件带外部引用
+  const b = boxMeshAt((x + 0.02) * CANON_HALF.x, y * CANON_HALF.y, z * CANON_HALF.z);
+  const c = boxMeshAt(
+    DEFAULT_TEMPLATES[14][1][0] * CANON_HALF.x,
+    DEFAULT_TEMPLATES[14][1][1] * CANON_HALF.y,
+    DEFAULT_TEMPLATES[14][1][2] * CANON_HALF.z,
+  );
+  const merged = mergePartsToQuest3(
+    [{ mesh: a, isOriginal: true }, { mesh: b, isOriginal: true }, { mesh: c, isOriginal: true }],
+    fakeCanonBox,
+  );
+
+  // URDF 链路靠 userData.meshFile 走到收尾的「需单独上传」提示，合并重建
+  // userData 时会把它丢掉；这里取源 mesh 里第一个非空引用
+  const board = merged.find(p => p.name === "主板");
+  assert(!!board, "存在名为主板的合并项");
+  assertEqual(
+    board.mesh.userData.meshFile,
+    "meshes/board.dae",
+    "合并项沿用源 mesh 的外部 mesh 文件名",
+  );
+
+  // 单件组透传原 mesh，userData 原样不动，因此这一项没有被补过 meshFile
+  const strap = merged.find(p => p.name === "头带");
+  assert(strap && strap.mesh === c, "单件组仍然透传原部件");
+  assertEqual(strap.mesh.userData.meshFile, undefined, "透传项的 userData 保持原样");
 });
 
 describe("mergePartsToQuest3 — 空输入原样返回", async() => {
