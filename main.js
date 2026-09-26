@@ -34,6 +34,7 @@ import { createStepDescAnimation } from "./src/step-desc.js";
 import { createRenderLoop } from "./src/render-loop.js";
 import { createSceneSetup } from "./src/scene-setup.js";
 import { setupThemeToggle } from "./src/theme-toggle.js";
+import { setupSidebarToggle } from "./src/sidebar-toggle.js";
 import { setupStyleToggle } from "./src/style-toggle.js";
 import { setupAIPaint } from "./src/panels/ai-paint-panel.js";
 // 副作用导入：确保 config-panel.js 加载并初始化 Blender 健康检测/配置高亮（不依赖 ai-paint 面板是否启用）
@@ -518,15 +519,23 @@ const exportPanel = createExportPanel({
   }),
 });
 
+// ===== 侧栏折叠 =====
+// 实现自成一体：src/sidebar-toggle.js 按 id 自取面板与两个按钮，
+// localStorage("quest3-sidebar") 记忆收起状态。必须先于快捷键建立，
+// 因为 H 键要拿它的 toggle。
+const sidebar = setupSidebarToggle();
+
 // 键盘快捷键
 // 实现迁至 src/keyboard-shortcuts.js：keydown 分发 + autoRotate change 整段
 // 搬迁，行为不变。displayedStep 经 getDisplayedStep() 惰性读取（let 会重赋值）。
+// toggleSidebar 由上面的侧栏折叠模块提供；面板缺失时为空操作。
 setupKeyboardShortcuts({
   explodeCtl,
   controls,
   autoRotateCheck,
   exportPanel,
   getDisplayedStep: () => displayedStep,
+  toggleSidebar: () => (sidebar ? sidebar.toggle() : undefined),
 });
 
 explodeCtl.updateStepUI();

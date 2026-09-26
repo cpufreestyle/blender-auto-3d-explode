@@ -62,13 +62,19 @@
     });
   </script>
 
-  <div class="ui-overlay">
+  <!-- 侧栏收起后唯一的回来入口：浮动圆钮，只有侧栏收起时才出现 -->
+  <button id="sidebar-expand" class="sidebar-expand hidden" type="button" title="展开侧栏（H）" aria-expanded="false">▶</button>
+
+  <div class="ui-overlay" id="ui-overlay">
     <!-- ===== 紧凑头部 ===== -->
     <div class="ui-header">
       <div class="header-row">
         <h1>🔧 3D 拆解教学</h1>
         <span id="blender-status" class="blender-chip unknown" title="Blender 状态">⏳ Blender…</span>
-        <button id="theme-toggle" class="theme-toggle" title="切换主题">🌙</button>
+        <div class="header-actions">
+          <button id="sidebar-collapse" class="theme-toggle" type="button" title="收起侧栏，让 3D 视图全宽（H）" aria-expanded="true" aria-controls="ui-overlay">◀</button>
+          <button id="theme-toggle" class="theme-toggle" title="切换主题">🌙</button>
+        </div>
       </div>
     </div>
 
