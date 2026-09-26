@@ -17,7 +17,7 @@
 
 import path from "path";
 import os from "os";
-import { generateImageTo3D, IMAGE_TO_3D_TIMEOUTS } from "../src/image-to-3d-router.js";
+import { generateImageTo3D, readLocalJobResult, IMAGE_TO_3D_TIMEOUTS } from "../src/image-to-3d-router.js";
 
 // ===== 测试框架（与 unit-test.mjs / provider-test.mjs 一致）=====
 let passed = 0;
@@ -481,6 +481,87 @@ describe("VLM 路线", async() => {
     assertEqual(removed.length, 3, "失败也清理三个临时文件");
   });
 });
+
+describe("readLocalJobResult — 本地产物回读（TripoSR / Blender 两条本地路线共用）", async() => {
+  const JOB = {
+    image: "/tmp/fake-uploads/img3d-x.png",
+    output: "/tmp/fake-uploads/img3d-x.glb",
+    manifest: "/tmp/fake-uploads/img3d-x.json",
+  };
+
+  await it("GLB 原样返回，不做任何缓冲复制", async() => {
+    const { deps, removed } = makeDeps();
+    deps.fs.writeFileSync(JOB.output, GLB_BYTES);
+    const out = await readLocalJobResult(deps, JOB);
+    assert(out.glbBuffer === GLB_BYTES, "同一个 Buffer 实例原样返回");
+    assertEqual(removed.length, 3, "三个临时文件都被清理");
+  });
+
+  await it("manifest 合法时按 UTF-8 JSON 解析（含中文）", async() => {
+    const { deps } = makeDeps();
+    deps.fs.writeFileSync(JOB.output, GLB_BYTES);
+    deps.fs.writeFileSync(JOB.manifest, JSON.stringify({ total_parts: 7, parts: [{ 名称: "机壳" }] }));
+    // 夹具的假 fs 不区分编码，所以额外记录 readFile 实际收到的编码参数：
+    // 少了这一条，把 "utf-8" 改成 "base64" 的变异在夹具里完全观测不到。
+    const encodings = [];
+    const realRead = deps.fs.promises.readFile;
+    deps.fs.promises.readFile = async(p, enc) => {
+      encodings.push([p, enc]);
+      return realRead(p, enc);
+    };
+    const { manifest } = await readLocalJobResult(deps, JOB);
+    assertEqual(manifest.total_parts, 7, "total_parts 解析出来");
+    assertEqual(manifest.parts[0].名称, "机壳", "中文键名按 UTF-8 正确解出");
+    assertEqual(encodings[1][1], "utf-8", "manifest 必须以 utf-8 读取（否则中文会乱码）");
+    assertEqual(encodings[0][1], undefined, "GLB 走二进制读取，不传编码");
+  });
+
+  await it("manifest 不存在时回落默认值", async() => {
+    const { deps } = makeDeps();
+    deps.fs.writeFileSync(JOB.output, GLB_BYTES);
+    const { manifest } = await readLocalJobResult(deps, JOB);
+    assertEqual(manifest.total_parts, 0, "total_parts 回落 0");
+    assertEqual(manifest.parts.length, 0, "parts 回落空数组");
+  });
+
+  await it("manifest 内容非法 JSON 时回落默认值而不抛", async() => {
+    const { deps, removed } = makeDeps();
+    deps.fs.writeFileSync(JOB.output, GLB_BYTES);
+    deps.fs.writeFileSync(JOB.manifest, "{ 这不是 JSON");
+    const { manifest } = await readLocalJobResult(deps, JOB);
+    assertEqual(manifest.total_parts, 0, "非法 JSON 不炸，回落默认值");
+    assertEqual(removed.length, 3, "manifest 坏了也照样清理");
+  });
+
+  await it("manifest 是空文件时同样回落默认值", async() => {
+    const { deps } = makeDeps();
+    deps.fs.writeFileSync(JOB.output, GLB_BYTES);
+    deps.fs.writeFileSync(JOB.manifest, "");
+    const { manifest } = await readLocalJobResult(deps, JOB);
+    assertEqual(manifest.total_parts, 0, "空 manifest 回落 0");
+  });
+
+  await it("GLB 不存在时错误上抛（调用方已用 existsSync 预检，此路径实际不可达）", async() => {
+    const { deps } = makeDeps();
+    let threw = null;
+    try {
+      await readLocalJobResult(deps, JOB);
+    } catch (e) {
+      threw = e;
+    }
+    assert(threw !== null, "GLB 缺失时抛错");
+    assert(String(threw.message).includes("ENOENT"), `错误带上路径: ${threw && threw.message}`);
+  });
+
+  await it("manifest 解出来是个标量时原样透传（不做形状校验）", async() => {
+    const { deps } = makeDeps();
+    deps.fs.writeFileSync(JOB.output, GLB_BYTES);
+    deps.fs.writeFileSync(JOB.manifest, "\"just-a-string\"");
+    const { manifest } = await readLocalJobResult(deps, JOB);
+    assertEqual(manifest, "just-a-string", "JSON 合法但不是对象时也照原样返回");
+  });
+});
+
 
 // ===== 运行 =====
 (async() => {

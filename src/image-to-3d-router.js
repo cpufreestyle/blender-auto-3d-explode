@@ -140,15 +140,7 @@ async function runLocalTripoSRImageTo3D(body, imageBase64, rep, deps, env) {
     );
   }
 
-  const glbBuffer = await deps.fs.promises.readFile(job.output);
-  let manifest = { total_parts: 0, parts: [] };
-  if (deps.fs.existsSync(job.manifest)) {
-    try {
-      manifest = JSON.parse(await deps.fs.promises.readFile(job.manifest, "utf-8"));
-    } catch { /* 用默认 manifest */ }
-  }
-
-  await cleanupJob(deps, job);
+  const { glbBuffer, manifest } = await readLocalJobResult(deps, job);
 
   console.log(`  ✅ 图片转3D（本地·TripoSR 真重建）完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, parts=${manifest.total_parts})`);
   return { glbBuffer, manifest };
@@ -228,15 +220,7 @@ async function runLocalReliefImageTo3D(body, imageBase64, rep, deps) {
     );
   }
 
-  const glbBuffer = await deps.fs.promises.readFile(job.output);
-  let manifest = { total_parts: 0, parts: [] };
-  if (deps.fs.existsSync(job.manifest)) {
-    try {
-      manifest = JSON.parse(await deps.fs.promises.readFile(job.manifest, "utf-8"));
-    } catch { /* 用默认 manifest */ }
-  }
-
-  await cleanupJob(deps, job);
+  const { glbBuffer, manifest } = await readLocalJobResult(deps, job);
 
   console.log(`  ✅ 图片转3D（本地·可拆解·${tiles}×${tiles}块）完成 (${(glbBuffer.length / 1024).toFixed(1)} KB, parts=${manifest.total_parts})`);
   return { glbBuffer, manifest };
@@ -438,4 +422,22 @@ async function cleanupJob(deps, job) {
   await Promise.all(
     [job.image, job.output, job.manifest].map(f => deps.fs.promises.unlink(f).catch(() => {}))
   );
+}
+
+/**
+ * 读回本地推理产物（GLB + manifest）并清理临时目录。
+ * manifest 缺失或非法时回落 { total_parts: 0, parts: [] }，清理必定执行；
+ * TripoSR 真重建与 Blender 可拆解重建两条本地路线的回读逻辑逐字相同。
+ */
+export async function readLocalJobResult(deps, job) {
+  const glbBuffer = await deps.fs.promises.readFile(job.output);
+  let manifest = { total_parts: 0, parts: [] };
+  if (deps.fs.existsSync(job.manifest)) {
+    try {
+      manifest = JSON.parse(await deps.fs.promises.readFile(job.manifest, "utf-8"));
+    } catch { /* 用默认 manifest */ }
+  }
+
+  await cleanupJob(deps, job);
+  return { glbBuffer, manifest };
 }
