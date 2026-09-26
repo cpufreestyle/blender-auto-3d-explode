@@ -20,7 +20,11 @@
  *   - style.css 的每个 @keyframes 都必须被某条 animation / animation-name
  *     声明引用；
  *   - 仓库根目录的每个 .css 都必须被某个 html 的 link 标签加载——
- *     upload-enhancement.css 曾经躺在根目录没人链，构建也没 copy 它。
+ *     upload-enhancement.css 曾经躺在根目录没人链，构建也没 copy 它；
+ *   - 反向：JS 里每个字面量 getElementById 目标都必须有着落，要么是某个
+ *     html 里声明的 id，要么是 JS 自己 createElement 出来的。docs/BUG_REPORT.md
+ *     记的第一个 bug（#uploaded-file-name 在 CSS 和 JS 里都有、唯独 HTML 里缺）
+ *     正是这条要拦的。
  *
  * 用法：node tests/dead-markup-test.mjs
  */
@@ -170,6 +174,34 @@ describe("style.css 的 class 选择器都真实生效", () => {
   it("白名单里每条都在 style.css 里确实存在（防止过期条目）", () => {
     const stale = [...RUNTIME_TEMPLATED.keys()].filter((c) => !classes.includes(c));
     assert(stale.length === 0, stale.length === 0 ? "白名单无过期条目" : `白名单已过期: ${stale.join(", ")}`);
+  });
+});
+
+// ===== 反向守卫：JS 要取的 id 必须有着落 =====
+describe("JS 取的每个 id 都有着落", () => {
+  const requested = [
+    ...new Set([...mainJs.matchAll(/getElementById\(\s*\\?["']([^"']+)["']\s*\)/g)].map((m) => m[1])),
+  ].sort();
+  const declared = new Set([...allHtml.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
+  // JS 自己造出来的元素（createElement 后 .id = "..."），HTML 里当然找不到声明
+  const created = new Set([
+    ...[...mainJs.matchAll(/\.id\s*=\s*\\?["']([^"']+)["']/g)].map((m) => m[1]),
+    ...[...mainJs.matchAll(/setAttribute\(\s*\\?["']id["']\s*,\s*\\?["']([^"']+)["']/g)].map((m) => m[1]),
+  ]);
+  const universe = new Set([...declared, ...created]);
+
+  it("数量与现状一致", () => {
+    assert(requested.length === 75, `JS 里字面量 getElementById ${requested.length} 个，预期 75`);
+  });
+
+  it("每个 id 都能在 HTML 声明或 JS 自建里找到", () => {
+    const missing = requested.filter((id) => !universe.has(id));
+    assert(
+      missing.length === 0,
+      missing.length === 0 ?
+        "75 个 getElementById 目标全部有着落（HTML 声明 + JS 自建）" :
+        `取不到的 id: ${missing.join(", ")}`,
+    );
   });
 });
 
