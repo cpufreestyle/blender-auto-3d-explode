@@ -291,6 +291,27 @@ describe("根目录 .css 都被页面加载", () => {
   });
 });
 
+// ===== 静态资源版本键守卫 =====
+describe("index.html 静态资源版本键与 package.json version 一致", () => {
+  it("?v= 缓存键不漂移", () => {
+    // src/static-server.js 的 staticCacheControl 对带 ?v= 的 URL 给
+    // immutable + max-age=31536000：版本键与 package.json version 不一致时，
+    // 静态服务模式（node server.js / npx serve .）会把旧资产当新缓存用一年，
+    // 而 webpack dist 产物走 contenthash 不吃这条——漂移只在静态模式显形，
+    // 更难被发现，故在此钉住。
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+    const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+    const refs = [...html.matchAll(/(?:href|src)="([^"]+\?v=[^"]*)"/g)].map((m) => m[1]);
+    assert(refs.length >= 2, `index.html 带版本键的静态资源共 ${refs.length} 处（style.css 与 main.js 各一）`);
+    assert(refs.some((r) => r.startsWith("style.css?v=")), "style.css 带版本键");
+    assert(refs.some((r) => r.startsWith("main.js?v=")), "main.js 带版本键");
+    for (const ref of refs) {
+      const v = ref.slice(ref.lastIndexOf("?v=") + 3);
+      assert(v === pkg.version, `${ref} 的版本键 ${v} 与 package.json version ${pkg.version} 一致`);
+    }
+  });
+});
+
 // ===== 汇总 =====
 for (const { name, fn } of describeQueue) {
   console.log(`\n${name}`);
