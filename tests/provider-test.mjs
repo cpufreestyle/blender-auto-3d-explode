@@ -312,6 +312,220 @@ describe("Hyper3D 作业 Failed 时上抛（图生/文生共用逻辑，重构�
   restoreFetch();
 });
 
+// ===== Hyper3D 建任务收尾（createHyper3DTask）接缝锁定 =====
+// 图片 / 文本两条路线共用这段：POST rodin → 错误文案截断 400 →
+// 两级回退取任务标识。以前只有“顶层字段的成功路径”在看守，
+// data 下嵌套、标识缺失、错误截断三者均无用例，故补齐。
+const H3D_CREATE_URL = "https://hyperhuman.deemos.com/api/v2/rodin";
+
+describe("Hyper3D 建任务：表单默认值与请求头（图生/文生一致）", async() => {
+  clearProviderEnv();
+  const routes = [
+    ["图生", () => runHyper3DImageTo3D({ apiKey: "test-key" }, SAMPLE_BODY, SAMPLE_B64)],
+    ["文生", () => runHyper3DTextTo3D({ apiKey: "test-key" }, "一架红色客机")],
+  ];
+  for (const [label, run] of routes) {
+    let seen = null;
+    installFetch((url, opts) => {
+      if (url === H3D_CREATE_URL) {
+        seen = { method: opts.method, headers: opts.headers || {}, form: opts.body };
+        return jsonResponse({ uuid: "u-1", subscription_key: "sk-1" });
+      }
+      return successResponder(url);
+    });
+    let err = null;
+    try {
+      await run();
+    } catch (e) {
+      err = e;
+    } finally {
+      restoreFetch();
+    }
+    assert(!err, `${label}路线建任务不应抛异常: ${err && err.message}`);
+    assert(seen !== null, `${label}路线确实 POST 到 rodin 端点`);
+    if (!seen) continue;
+    assertEqual(seen.headers.Authorization, "Bearer test-key", `${label}路线 Authorization 为 Bearer <apiKey>`);
+    assertEqual(seen.method, "POST", `${label}路线使用 POST 提交表单`);
+    assertEqual(seen.form && seen.form.get("tier"), "Sketch", `${label}路线表单 tier=Sketch`);
+    assertEqual(seen.form && seen.form.get("mesh_mode"), "Raw", `${label}路线表单 mesh_mode=Raw`);
+    assertEqual(seen.form && seen.form.get("texture_mode"), "high", `${label}路线表单 texture_mode=high`);
+    if (label === "图生") {
+      const img = seen.form && seen.form.get("images");
+      assert(img && typeof img === "object", "图生路线携带 images 文件字段");
+      assertEqual(img && img.name, "0000.png", "图生路线 images 文件名为 0000.png");
+      assertEqual(img && img.type, "image/png", "图生路线 images MIME 与 data URI 一致");
+      assertEqual(seen.form && seen.form.get("prompt"), null, "图生路线不带 prompt 字段");
+    } else {
+      assertEqual(seen.form && seen.form.get("prompt"), "一架红色客机", "文生路线携带 prompt 字段");
+      assertEqual(seen.form && seen.form.get("images"), null, "文生路线不带 images 字段");
+    }
+  }
+});
+
+describe("Hyper3D 图生路线：images 的 MIME 与文件后缀随 data URI 推导", async() => {
+  clearProviderEnv();
+  const variants = [
+    ["image/png", ".png"],
+    ["image/jpeg", ".jpg"],
+    ["image/webp", ".webp"],
+    // data URI 里没有 MIME 时回落 png
+    ["", ".png"],
+  ];
+  for (const [mime, wantExt] of variants) {
+    const image = mime ? `data:${mime};base64,iVBORw0KGgo=` : "data:;base64,iVBORw0KGgo=";
+    let img = null;
+    installFetch((url, opts) => {
+      if (url === H3D_CREATE_URL) {
+        img = opts.body && opts.body.get("images");
+        return jsonResponse({ uuid: "u-1", subscription_key: "sk-1" });
+      }
+      if (url.startsWith("https://cdn/")) return glbResponse();
+      return successResponder(url);
+    });
+    let err = null;
+    try {
+      await runHyper3DImageTo3D({ apiKey: "test-key" }, { image }, SAMPLE_B64);
+    } catch (e) {
+      err = e;
+    } finally {
+      restoreFetch();
+    }
+    assert(!err, `MIME=${mime || "(空)"} 时建任务不应抛异常: ${err && err.message}`);
+    assert(!!img, `MIME=${mime || "(空)"} 时仍带 images 字段`);
+    assertEqual(img && img.name, `0000${wantExt}`, `MIME=${mime || "(空)"} 推导文件名`);
+    assertEqual(img && img.type, mime || "image/png", `MIME=${mime || "(空)"} 推导 Blob MIME`);
+  }
+});
+
+describe("Hyper3D 建任务：任务标识两级回退后确实注入轮询与下载请求", async() => {
+  clearProviderEnv();
+  const cases = [
+    ["顶层字段", { uuid: "u-top", subscription_key: "sk-top" }, "u-top", "sk-top"],
+    ["data 下嵌套", { data: { uuid: "u-nested", subscription_key: "sk-nested" } }, "u-nested", "sk-nested"],
+    ["混搭（uuid 顶层 / key 嵌套）", { uuid: "u-mix", data: { subscription_key: "sk-mix" } }, "u-mix", "sk-mix"],
+  ];
+  for (const [label, payload, wantUuid, wantSubKey] of cases) {
+    const seen = { status: [], download: [] };
+    installFetch((url, opts) => {
+      if (url === H3D_CREATE_URL) return jsonResponse(payload);
+      if (url === "https://hyperhuman.deemos.com/api/v2/status") {
+        seen.status.push(JSON.parse(opts.body));
+        return jsonResponse({ jobs: [{ status: "Done" }] });
+      }
+      if (url === "https://hyperhuman.deemos.com/api/v2/download") {
+        seen.download.push(JSON.parse(opts.body));
+        return jsonResponse({ list: [{ name: "model.glb", url: "https://cdn/glb.h3d" }] });
+      }
+      if (url.startsWith("https://cdn/")) return glbResponse();
+      return jsonResponse({ error: "unexpected url: " + url }, 500);
+    });
+    const routes = [
+      ["图生", () => runHyper3DImageTo3D({ apiKey: "test-key" }, SAMPLE_BODY, SAMPLE_B64)],
+      ["文生", () => runHyper3DTextTo3D({ apiKey: "test-key" }, "一架红色客机")],
+    ];
+    for (const [route, run] of routes) {
+      // 每个路线独立重装 fetch（上一轮的 restoreFetch 已经拆掉 mock）
+      installFetch((url, opts) => {
+        if (url === H3D_CREATE_URL) return jsonResponse(payload);
+        if (url === "https://hyperhuman.deemos.com/api/v2/status") {
+          seen.status.push(JSON.parse(opts.body));
+          return jsonResponse({ jobs: [{ status: "Done" }] });
+        }
+        if (url === "https://hyperhuman.deemos.com/api/v2/download") {
+          seen.download.push(JSON.parse(opts.body));
+          return jsonResponse({ list: [{ name: "model.glb", url: "https://cdn/glb.h3d" }] });
+        }
+        if (url.startsWith("https://cdn/")) return glbResponse();
+        return jsonResponse({ error: "unexpected url: " + url }, 500);
+      });
+      let err = null;
+      try {
+        await run();
+      } catch (e) {
+        err = e;
+      } finally {
+        restoreFetch();
+      }
+      const lastStatus = seen.status[seen.status.length - 1];
+      const lastDownload = seen.download[seen.download.length - 1];
+      assert(!err, `${label}/${route}：取到标识后应顺利走完轮询与下载: ${err && err.message}`);
+      assertEqual(lastStatus && lastStatus.subscription_key, wantSubKey, `${label}/${route}：轮询请求携带 subscription_key`);
+      assertEqual(lastDownload && lastDownload.task_uuid, wantUuid, `${label}/${route}：下载请求携带 task_uuid`);
+    }
+  }
+});
+
+describe("Hyper3D 建任务：缺任务标识时抛错并止步于建任务", async() => {
+  clearProviderEnv();
+  const badPayloads = [
+    ["空对象", {}],
+    ["只有 uuid", { uuid: "u-only" }],
+    ["只有 subscription_key", { subscription_key: "sk-only" }],
+    ["data 为空对象", { data: {} }],
+  ];
+  for (const [label, payload] of badPayloads) {
+    let statusCalls = 0;
+    installFetch((url) => {
+      if (url === H3D_CREATE_URL) return jsonResponse(payload);
+      statusCalls++;
+      return successResponder(url);
+    });
+    let imgErr = null;
+    let textErr = null;
+    try {
+      await runHyper3DImageTo3D({ apiKey: "test-key" }, SAMPLE_BODY, SAMPLE_B64);
+    } catch (e) {
+      imgErr = e;
+    }
+    try {
+      await runHyper3DTextTo3D({ apiKey: "test-key" }, "一架红色客机");
+    } catch (e) {
+      textErr = e;
+    } finally {
+      restoreFetch();
+    }
+    assertEqual(imgErr && imgErr.message, "Hyper3D 未返回任务标识 (uuid/subscription_key)", `${label}：图生路线抛出标识缺失错误`);
+    assertEqual(textErr && textErr.message, "Hyper3D 未返回任务标识 (uuid/subscription_key)", `${label}：文生路线抛出同一错误`);
+    assertEqual(statusCalls, 0, `${label}：两次调用均未进入轮询`);
+  }
+});
+
+describe("Hyper3D 建任务失败：透传状态码与响应体（截断 400 字符）", async() => {
+  clearProviderEnv();
+  const longText = "E".repeat(900);
+  const failRes = (status, text) => ({ ok: false, status, text: async() => text, json: async() => ({}) });
+  const prefix = "Hyper3D 创建任务失败 503: ";
+  const routes = [
+    ["图生", () => runHyper3DImageTo3D({ apiKey: "test-key" }, SAMPLE_BODY, SAMPLE_B64)],
+    ["文生", () => runHyper3DTextTo3D({ apiKey: "test-key" }, "一架红色客机")],
+  ];
+  for (const [label, run] of routes) {
+    installFetch((url) => (url === H3D_CREATE_URL ? failRes(503, longText) : successResponder(url)));
+    let err = null;
+    try {
+      await run();
+    } catch (e) {
+      err = e;
+    } finally {
+      restoreFetch();
+    }
+    assert(!!err && err.message.startsWith(prefix), `${label}：错误文案带状态码 503 与既定前缀`);
+    assertEqual(err && err.message.length, prefix.length + 400, `${label}：响应体被截断到 400 字符`);
+    assertEqual(err && err.message.slice(prefix.length), "E".repeat(400), `${label}：保留响应体前 400 字符`);
+  }
+  // 短响应体不应被截断（slice 上限只限长文件）
+  installFetch((url) => (url === H3D_CREATE_URL ? failRes(429, "quota exceeded") : successResponder(url)));
+  let shortErr = null;
+  try {
+    await runHyper3DTextTo3D({ apiKey: "test-key" }, "一架红色客机");
+  } catch (e) {
+    shortErr = e;
+  } finally {
+    restoreFetch();
+  }
+  assertEqual(shortErr && shortErr.message, "Hyper3D 创建任务失败 429: quota exceeded", "短响应体完整透传不被截断");
+});
+
 // ===== pollTask：供 server.js 内联 Replicate 轮询复用的共享轮询器 =====
 
 describe("pollTask 导出与轮询契约（回归锁，保护 Replicate 轮询去重）", async() => {
