@@ -14,6 +14,9 @@
 | 🧨 **3D 爆炸视图** | 滑块控制拆解程度，鼠标拖拽旋转/缩放，按步骤高亮部件 |
 | 🤖 **AI 生成模型** | 文字提示词生成 3D 模型（乐高人仔、汽车、房子、超级英雄等） |
 | 🖼️ **图片转 3D** | 上传图片自动重建为 3D 模型，支持纹理烘焙 |
+| 🧩 **部件清单交互** | 点部件行高亮并相机聚焦，点行尾眼睛单独显示该部件（`Esc` / 换步 / 「全部显示」复原） |
+| 🧰 **侧栏可折叠** | 340px 工具面板一键收起到视口外（快捷键 `H`），折叠状态记在本地 |
+| 📐 **窄屏自适应** | 桌面窗口拉窄与手机竖屏双路径：触控目标 ≥ 40px，时间轴与 AI 输入行自动换行独占整行 |
 | 📱 **WebXR AR 预览** | 在支持 AR 的设备上将模型投射到现实空间 |
 | 🧱 **乐高砖块拼接** | 2x4, 2x2, 1x2 等标准砖块，真实积木拼接效果 |
 | 🎨 **自定义模型上传** | 上传 GLB 模型直接预览拆解效果 |
@@ -61,6 +64,11 @@ node server.js
 - 鼠标拖拽旋转视角，滚轮缩放
 - 每一步自动高亮该步骤涉及的部件
 
+### 面板与部件交互
+
+- **侧栏折叠**：点面板头部收起钮或按 `H`，把 340px 工具面板滑出视口，只留一个浮动展开钮；再按一次还原，折叠状态记在本地
+- **部件清单**：点某一部件行即选中高亮并把相机聚焦到它，再点一次取消；点行尾的眼睛按钮只显示该部件、其余临时隐藏，按 `Esc` / 下一步 / 「全部显示」复原
+
 ### AI 模型生成
 
 1. 访问 `http://localhost:3001/ai-config.html` 配置 AI 提供商
@@ -87,6 +95,7 @@ node server.js
 | `R` | 重置到初始状态 |
 | `A` | 切换自动旋转 |
 | `F` | 聚焦当前步骤的部件 |
+| `H` | 收起 / 展开工具侧栏 |
 | `S` | 导出当前视图截图（PNG） |
 
 ---
@@ -96,11 +105,14 @@ node server.js
 ```text
 ├── index.html          # 主页面（3D 拆解预览）
 ├── ai-config.html      # AI 模型配置页
-├── main.js             # Three.js 场景 & 拆解逻辑
-├── server.js           # Node.js 后端服务
-├── scripts/            # 图片转3D / 纹理烘焙 / 工具脚本
-├── src/                # 前端模块
-├── tests/              # 单元 & E2E 测试
+├── main.js             # 前端入口装配（659 行，逻辑在 src/）
+├── server.js           # Node.js 入口（391 行，逻辑在 src/routes-* 等）
+├── src/                # 前端与服务端模块（57 个）
+│   ├── panels/         # AI 面板 / 配置提醒 / GLB 请求等界面件
+│   └── providers/      # 图片转 3D 提供方适配
+├── vendor/three/       # three 0.186 同构镜像，importmap 直指，dev 与生产同源
+├── scripts/            # 图片转3D / 纹理烘焙 / MCP 服务器 / CI 冒烟
+├── tests/              # 单元 & 真机 UI 冒烟（Node 套件 + Python）
 ├── docs/               # 详细文档
 └── blender_scripts/    # Blender Python 脚本
 ```
@@ -110,11 +122,14 @@ node server.js
 ## 🛠️ 开发
 
 ```bash
-npm run dev           # 启动开发服务器
-npm run server        # 启动 Blender 集成服务器
-npm run format:all    # 代码格式化
-npm run test          # 运行测试
-npm run build         # 生产构建
+npm run dev             # 启动开发服务器
+npm run server          # 启动 Blender 集成服务器
+npm run format:all      # 代码格式化
+npm run lint:all:check  # 代码风格检查（只检查，不改文件）
+npm run test            # Node 单测全量
+npm run test:py         # Python 单元测试
+npm run smoke:ui        # 真机 UI 冒烟（部件 / 侧栏 / 窄屏，需本机 Chrome）
+npm run build           # 生产构建
 ```
 
 ---
