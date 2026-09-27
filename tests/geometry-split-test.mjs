@@ -39,15 +39,24 @@ import {
   autoSplitModel,
   splitSpatially,
   generatePartName,
+  splitByCutPlanes,
+  splitByConnectedComponents,
   splitByMaterialGroups,
+  weldVertices,
 } from "../src/geometry-split.js";
 import {
   Box3,
   BufferGeometry,
+  CapsuleGeometry,
+  ConeGeometry,
+  CylinderGeometry,
   Float32BufferAttribute,
   Group,
+  IcosahedronGeometry,
   Mesh,
   MeshStandardMaterial,
+  SphereGeometry,
+  TorusGeometry,
   Vector3,
 } from "three";
 
@@ -143,7 +152,117 @@ function expectedNames(parts) {
   });
 }
 
+// 细分「壳」方块：只生成 6 个外表面并细分，顶点不焊接。
+// 它是 splitByCutPlanes 的头号陷阱形状——盒壳中段的剖面只有侧壁穿过，
+// 面数远低于两端（两端整面铺满），按「面数分桶」的旧判据会把它误判成细颈。
+function meshedBoxGeometry(bmin, bmax, segs, offset = 0) {
+  const position = [];
+  const index = [];
+  const add = (p) => { position.push(p[0] + offset, p[1], p[2]); return position.length / 3 - 1; };
+  for (const n of [0, 1, 2]) {
+    const [u, v] = [0, 1, 2].filter((d) => d !== n);
+    for (const side of [bmin, bmax]) {
+      const du = (bmax[u] - bmin[u]) / segs[u];
+      const dv = (bmax[v] - bmin[v]) / segs[v];
+      for (let i = 0; i < segs[u]; i++) {
+        for (let j = 0; j < segs[v]; j++) {
+          const corner = (a, b) => {
+            const p = [0, 0, 0];
+            p[n] = side[n];
+            p[u] = bmin[u] + a * du;
+            p[v] = bmin[v] + b * dv;
+            return add(p);
+          };
+          const a = corner(i, j), b = corner(i + 1, j), c = corner(i + 1, j + 1), d = corner(i, j + 1);
+          index.push(a, b, c, a, c, d);
+        }
+      }
+    }
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute("position", new Float32BufferAttribute(position, 3));
+  geo.setIndex(index);
+  return geo;
+}
+
+// 简单并集：顶点块直接拼接、索引整体偏移（各块之间不共享顶点）
+function mergeGeometries(geometries) {
+  const position = [];
+  const index = [];
+  let base = 0;
+  for (const g of geometries) {
+    for (const v of g.attributes.position.array) position.push(v);
+    for (const i of g.index.array) index.push(i + base);
+    base += g.attributes.position.array.length / 3;
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute("position", new Float32BufferAttribute(position, 3));
+  geo.setIndex(index);
+  return geo;
+}
+
+// 环形截面的空心管：管壁由 (R + r·cos phi) 绕 Y 轴扫成，两端带环形端盖。
+// 沿轴看它的中孔会让「实心面积」骤降，是空心件的代表形状（不该被拆）。
+function tubeShellGeometry(R, r, L, N = 24, P = 12, M = 6) {
+  const position = [];
+  const index = [];
+  const add = (p) => { position.push(p[0], p[1], p[2]); return position.length / 3 - 1; };
+  for (let i = 0; i <= N; i++) {
+    const th = (i / N) * Math.PI * 2, c = Math.cos(th), s = Math.sin(th);
+    for (let k = 0; k <= P; k++) {
+      const ph = (k / P) * Math.PI * 2;
+      const rho = R + r * Math.cos(ph);
+      for (let j = 0; j <= M; j++) add([c * rho, -L / 2 + (j / M) * L, s * rho]);
+    }
+  }
+  const stride = M + 1;
+  for (let i = 0; i < N; i++) {
+    for (let k = 0; k < P; k++) {
+      for (let j = 0; j < M; j++) {
+        const a = i * (P + 1) * stride + k * stride + j;
+        const b = (i + 1) * (P + 1) * stride + k * stride + j;
+        index.push(a, b, b + 1, a, b + 1, a + 1);
+      }
+    }
+  }
+  for (const side of [-1, 1]) {
+    const y = (side * L) / 2, base = position.length / 3;
+    for (let i = 0; i <= N; i++) {
+      const th = (i / N) * Math.PI * 2, c = Math.cos(th), s = Math.sin(th);
+      add([c * r, y, s * r]);
+      add([c * R, y, s * R]);
+    }
+    for (let i = 0; i < N; i++) {
+      const a = base + i * 2, b = base + (i + 1) * 2;
+      index.push(a, b, b + 1, a, b + 1, a + 1);
+    }
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute("position", new Float32BufferAttribute(position, 3));
+  geo.setIndex(index);
+  return geo;
+}
+
+// 哑铃：两端 9x8x8 的实体块 + 中间一段细颈（沿 X），共 1616 面。
+// 颈两侧各有 776/840 面、剖面落差 8 倍，是「焊死装配体」的标准形。
+function dumbbellGeometry() {
+  return mergeGeometries([
+    meshedBoxGeometry([-10, -4, -4], [-5, 4, 4], [8, 8, 8]),
+    meshedBoxGeometry([-5, -1, -1], [-1, 1, 1], [4, 2, 2]),
+    meshedBoxGeometry([-1, -4, -4], [9, 4, 4], [8, 8, 8]),
+  ]);
+}
+
+const faceCountOf = (g) => (g.index ? g.index.count / 3 : g.attributes.position.count / 3);
+const bboxOf = (g) => new Box3().setFromBufferAttribute(g.attributes.position);
+const bboxText = (g) => {
+  const b = bboxOf(g);
+  const r = (v) => v.toFixed(2);
+  return `x[${r(b.min.x)},${r(b.max.x)}] y[${r(b.min.y)},${r(b.max.y)}] z[${r(b.min.z)},${r(b.max.z)}]`;
+};
+
 // ===== 多 mesh 直通 =====
+
 describe("autoSplitModel 多 mesh 直通", async() => {
   await it(">= 2 个 mesh：原样返回、isOriginal 为真、引用不变", async() => {
     const a = makeMesh("Alpha", weldedBoxGeometry(0));
@@ -468,7 +587,237 @@ describe("splitSpatially — 索引、退化与 material 形参", async() => {
   });
 });
 
+// ===== weldVertices：焊接语义与索引类型 =====
+// 这里锁的是真实修过的 bug：welded.setIndex(new Uint32Array(...)) 直接塞裸
+// TypedArray，three 不会把它包装成 BufferAttribute，于是 index.count 变成
+// undefined，下游 splitByConnectedComponents 整个失能——哑铃焊接后仍是「一整块」，
+// 部件数、面数全都对不上。断言刻意同时盯住顶点数下降、面数不变、index.count 可用。
+describe("weldVertices — 焊接语义与索引类型", async() => {
+  const shell = () => meshedBoxGeometry([0, 0, 0], [1, 1, 1], [2, 2, 2]);
+
+  await it("焊接合并重合顶点但不丢面", () => {
+    const raw = shell();
+    const welded = weldVertices(raw);
+    assert(raw.attributes.position.count === 96 && faceCountOf(raw) === 48,
+      `焊接前 96 顶点 / 48 面（实得 ${raw.attributes.position.count} / ${faceCountOf(raw)}）`);
+    assert(welded.attributes.position.count === 26,
+      `焊接后顶点合并到 26（实得 ${welded.attributes.position.count}）`);
+    assert(faceCountOf(welded) === 48, `面数守恒 48（实得 ${faceCountOf(welded)}）`);
+  });
+
+  await it("产出的 index 是带有效 count 的 BufferAttribute", () => {
+    const welded = weldVertices(shell());
+    const idx = welded.index;
+    assert(!!idx && typeof idx.count === "number" && idx.count === 144,
+      `index.count === 144（实得 ${idx ? String(idx.count) : "无 index"}）`);
+    assert(typeof idx.getX === "function", "index 暴露 getX（说明是 BufferAttribute 而非裸 TypedArray）");
+  });
+
+  await it("tolerance <= 0 退化为原样克隆", () => {
+    const a = weldVertices(shell(), 0);
+    const b = weldVertices(shell(), -1);
+    assert(a.attributes.position.count === 96 && faceCountOf(a) === 48,
+      `tolerance=0 时 96 顶点 / 48 面不变（实得 ${a.attributes.position.count} / ${faceCountOf(a)}）`);
+    assert(b.attributes.position.count === 96, `tolerance=-1 同样不变（实得 ${b.attributes.position.count}）`);
+  });
+
+  await it("贴合的方块焊成同一分量，远处的方块独立成件", () => {
+    const stacked = mergeGeometries([
+      meshedBoxGeometry([-4, -4, -4], [4, 4, 4], [8, 8, 8]),
+      meshedBoxGeometry([-4, 4, -4], [4, 12, 4], [8, 8, 8]),
+      meshedBoxGeometry([20, -4, -4], [24, 4, 4], [4, 4, 4]),
+    ]);
+    const comps = splitByConnectedComponents(weldVertices(stacked)).map(faceCountOf);
+    assert(comps.length === 2 && comps[0] === 1536 && comps[1] === 192,
+      `贴合两块并成 1536 面、远处一块 192 面（实得 ${JSON.stringify(comps)}）`);
+    assert(comps.reduce((s, n) => s + n, 0) === faceCountOf(stacked),
+      `分量面数之和等于原面数 1728（实得 ${comps.reduce((s, n) => s + n, 0)}）`);
+  });
+});
+
+// ===== splitByCutPlanes：不该被拆的形状 =====
+// 判据用「沿轴的面密度 dA/da」而不是「面数分桶」。凸体与空心件沿任何一根轴
+// 都是一条平线（圆柱、盒壳、空心管）、穹顶（球、胶囊、半球）或单边斜坡（圆锥），
+// 只有真的细颈才会在中间凹下去。下面每一条都是历史假阳性：曾把整颗球切成 8 块。
+describe("splitByCutPlanes — 凸体与空心件保持完整", async() => {
+  const sphereFlat = () => {
+    const g = new IcosahedronGeometry(1, 3);
+    g.deleteAttribute("uv");
+    g.deleteAttribute("normal");
+    return g;
+  };
+  const cases = [
+    ["盒壳（中段剖面最稀，旧判据的头号误判）", () => meshedBoxGeometry([-1, -1, -1], [1, 1, 1], [4, 4, 4])],
+    ["球体（带 uv/normal，索引）", () => new SphereGeometry(1, 24, 16)],
+    ["球体（非索引、无 normal/uv）", sphereFlat],
+    ["圆锥", () => new ConeGeometry(1, 3, 24, 4)],
+    ["圆柱", () => new CylinderGeometry(1, 1, 3, 16, 4)],
+    ["胶囊", () => new CapsuleGeometry(1, 3, 8, 16)],
+    ["圆环", () => new TorusGeometry(2, 1, 16, 32)],
+    ["空心管（环截面 + 环形端盖）", () => tubeShellGeometry(2, 1, 6)],
+    ["薄壁空心管", () => tubeShellGeometry(3, 1, 6)],
+    ["半球", () => new SphereGeometry(1, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 3, 0)],
+    ["平板", () => meshedBoxGeometry([-4, -4, -0.4], [4, 4, 0.4], [8, 8, 1])],
+    ["U 形支架（两臂之间是空档）", () => mergeGeometries([
+      meshedBoxGeometry([-3, 0, -1], [3, 1, 1], [6, 1, 1]),
+      meshedBoxGeometry([-3, 1, -1], [-2, 5, 1], [1, 4, 1]),
+      meshedBoxGeometry([2, 1, -1], [3, 5, 1], [1, 4, 1]),
+    ])],
+    ["L 形角码", () => mergeGeometries([
+      meshedBoxGeometry([-3, 0, -1], [3, 1, 1], [6, 1, 1]),
+      meshedBoxGeometry([-3, 1, -1], [-2, 5, 1], [1, 4, 1]),
+    ])],
+    ["T 形接头", () => mergeGeometries([
+      meshedBoxGeometry([-4, -0.6, -0.6], [4, 0.6, 0.6], [8, 1, 1]),
+      meshedBoxGeometry([-0.6, 0.6, -0.6], [0.6, 4, 0.6], [1, 4, 1]),
+    ])],
+    // 已知并接受的漏检：桌腿平贴在台面上，剖面是「阶跃」而不是「凹陷」，
+    // 判据据此不切。宁可漏切桌腿，也不能把球切成碎片。
+    ["台面 + 桌腿（平贴面，接受不切）", () => mergeGeometries([
+      meshedBoxGeometry([-6, -6, -6], [6, 6, -4], [6, 6, 1]),
+      meshedBoxGeometry([4.5, 4.5, -4], [5.5, 5.5, 8], [1, 1, 4]),
+    ])],
+  ];
+  for (const [name, build] of cases) {
+    await it(`${name} → 1 件`, () => {
+      const geo = build();
+      const got = splitByCutPlanes(geo).map(faceCountOf);
+      assert(got.length === 1, `${name}：期望 1 件（实得 ${got.length} 件 ${JSON.stringify(got)}）`);
+      assert(got.reduce((s, n) => s + n, 0) === faceCountOf(geo),
+        `${name}：面数守恒 ${faceCountOf(geo)}（实得 ${got.reduce((s, n) => s + n, 0)}）`);
+    });
+  }
+});
+
+// ===== splitByCutPlanes：该拆的形状 =====
+describe("splitByCutPlanes — 真颈切分", async() => {
+  await it("哑铃沿颈切 2 件", () => {
+    const geo = dumbbellGeometry();
+    const parts = splitByCutPlanes(geo);
+    const got = parts.map(faceCountOf);
+    assert(parts.length === 2, `期望 2 件（实得 ${parts.length} 件 ${JSON.stringify(got)}）`);
+    assert(got.reduce((s, n) => s + n, 0) === 1616, `面数守恒 1616（实得 ${got.reduce((s, n) => s + n, 0)}）`);
+    assert(got[0] === 808 && got[1] === 808, `两侧各 808 面，正落在颈正中（实得 ${JSON.stringify(got)}）`);
+    const [a, b] = parts.map(bboxOf);
+    assert(a.max.x <= b.min.x || b.max.x <= a.min.x,
+      `两块包围盒沿 X 不重叠（${parts.map(bboxText).join(" | ")}）`);
+  });
+
+  await it("两侧大小不等的颈也切，且切口贴着颈", () => {
+    // 左块 192 面 + 颈 64 面 + 右块 300 面。颈在 x=0 处正好对半（各 32 面），
+    // 所以理想的切法是 192+32 / 300+32；切口偏一格就会变成 200/356 那种一边倒。
+    const geo = mergeGeometries([
+      meshedBoxGeometry([-8, -2, -2], [-3, 2, 2], [4, 4, 4]),
+      meshedBoxGeometry([-3, -0.5, -0.5], [3, 0.5, 0.5], [3, 2, 2]),
+      meshedBoxGeometry([3, -5, -5], [10, 5, 5], [5, 5, 5]),
+    ]);
+    const parts = splitByCutPlanes(geo);
+    const got = parts.map(faceCountOf);
+    assert(parts.length === 2 && got.reduce((s, n) => s + n, 0) === 556,
+      `2 件且面数守恒 556（实得 ${parts.length} 件 / ${got.reduce((s, n) => s + n, 0)} 面）`);
+    assert(got.includes(224) && got.includes(332), `两侧 224 / 332 面（实得 ${JSON.stringify(got)}）`);
+  });
+
+  await it("方桥沿横梁切 2 件", () => {
+    const geo = mergeGeometries([
+      meshedBoxGeometry([-8, -3, -3], [-2, 3, 3], [6, 6, 6]),
+      meshedBoxGeometry([-2, -0.5, -0.5], [2, 0.5, 0.5], [4, 1, 1]),
+      meshedBoxGeometry([2, -5, -5], [8, 5, 5], [6, 5, 5]),
+    ]);
+    const got = splitByCutPlanes(geo).map(faceCountOf);
+    assert(got.length === 2, `期望 2 件（实得 ${got.length} 件 ${JSON.stringify(got)}）`);
+  });
+
+  await it("棒棒糖在接缝处分离糖棍，不切进球体", () => {
+    const stick = meshedBoxGeometry([-0.4, -0.4, -2.2], [0.4, 0.4, 0], [1, 1, 4]);
+    const candy = new SphereGeometry(1.2, 16, 10).translate(0, 0, 1.5);
+    const parts = splitByCutPlanes(mergeGeometries([stick, candy]));
+    assert(parts.length === 2, `期望 2 件（实得 ${parts.length} 件 ${JSON.stringify(parts.map(faceCountOf))}）`);
+    const stickPart = parts.find((p) => faceCountOf(p) === 36);
+    assert(!!stickPart, `糖棍 36 面完整成件（实得 ${JSON.stringify(parts.map(faceCountOf))}）`);
+    assert(!stickPart || bboxOf(stickPart).max.z <= 0,
+      `糖棍包围盒 z 上界 ≤ 0，未被切伤（${stickPart ? bboxText(stickPart) : "未成件"}）`);
+  });
+
+  await it("互不接触的三段递归切成 3 件", () => {
+    const geo = mergeGeometries([
+      new SphereGeometry(2, 20, 12).translate(-4, 0, 0),
+      new SphereGeometry(2, 20, 12).translate(4, 0, 0),
+      new CapsuleGeometry(0.5, 2.4, 4, 12).rotateZ(Math.PI / 2),
+    ]);
+    const got = splitByCutPlanes(geo).map(faceCountOf).sort((a, b) => b - a);
+    assert(got.length === 3 && got[0] === 440 && got[1] === 440 && got[2] === 216,
+      `球头 440 + 球头 440 + 连杆 216（实得 ${JSON.stringify(got)}）`);
+    assert(got.reduce((s, n) => s + n, 0) === faceCountOf(geo), "三段面数之和等于原面数");
+  });
+
+  await it("锥体 + 圆柱基座：锥尖段是真颈，切口落在整段最薄处", () => {
+    // 锥尖埋进圆柱底座，y 向剖面在锥尖段真的凹下去（0.31 → 0.18 → 0.07 → 0.65），
+    // 两侧分别是锥体下段和圆柱，既够厚又够长，符合「两侧都撑得住 + 整段一致」，
+    // 所以这里该切。切口取整段最薄的那一格（y≈0.37），不是锥柱接缝 y=0.5——
+    // 判据找的是「材料最薄处」，不是「零件接缝」。
+    const geo = mergeGeometries([
+      new ConeGeometry(1, 2, 24, 3),
+      new CylinderGeometry(1, 1, 2, 24, 3).translate(0, 1.5, 0),
+    ]);
+    const got = splitByCutPlanes(geo).map(faceCountOf);
+    assert(got.length === 2 && got.reduce((s, n) => s + n, 0) === faceCountOf(geo),
+      `切成 2 件且面数守恒（实得 ${got.length} 件 ${JSON.stringify(got)}）`);
+  });
+});
+
+// ===== splitByCutPlanes：退化输入与形参 =====
+describe("splitByCutPlanes — 退化输入与形参", async() => {
+  await it("退化输入统一返回空数组", () => {
+    const empty = new BufferGeometry();
+    const noPosition = new BufferGeometry();
+    noPosition.setAttribute("color", new Float32BufferAttribute([1, 0, 0, 0, 1, 0], 3));
+    assert(splitByCutPlanes(null).length === 0, "null → []");
+    assert(splitByCutPlanes(undefined).length === 0, "undefined → []");
+    assert(splitByCutPlanes(empty).length === 0, "空几何体 → []");
+    assert(splitByCutPlanes(noPosition).length === 0, "无 position 属性 → []");
+  });
+
+  await it("面数不足或门槛过高时不切", () => {
+    const small = meshedBoxGeometry([-1, -1, -1], [1, 1, 1], [1, 1, 1]);
+    assert(splitByCutPlanes(small).length === 1,
+      `12 面低于 minFaces*2 → 原样返回 1 件（实得 ${splitByCutPlanes(small).length}）`);
+    const big = dumbbellGeometry();
+    assert(splitByCutPlanes(big, { minFaces: 1000 }).length === 1,
+      `minFaces=1000 时哑铃也不切（实得 ${splitByCutPlanes(big, { minFaces: 1000 }).length}）`);
+  });
+
+  await it("maxParts 限制递归深度", () => {
+    const big = dumbbellGeometry();
+    const one = splitByCutPlanes(big, { maxParts: 1 });
+    const two = splitByCutPlanes(big, { maxParts: 2 });
+    assert(one.length === 1, `maxParts=1 时不切（实得 ${one.length} 件）`);
+    assert(two.length === 2, `maxParts=2 时切到底（实得 ${two.length} 件）`);
+  });
+
+  await it("粗分桶（bins=8）仍然不误拆球体", () => {
+    const parts = splitByCutPlanes(new SphereGeometry(1, 24, 16), { bins: 8 });
+    assert(parts.length === 1, `bins=8 时球体仍 1 件（实得 ${parts.length} 件）`);
+  });
+
+  await it("共面退化几何体不抛错", () => {
+    const flat = meshedBoxGeometry([-4, -4, 0], [4, 4, 0], [8, 8, 1]);
+    let parts = null;
+    let threw = null;
+    try {
+      parts = splitByCutPlanes(flat);
+    } catch (err) {
+      threw = err;
+    }
+    assert(threw === null, `不抛异常（实得 ${threw ? threw.message : "无"}）`);
+    assert(Array.isArray(parts), `返回数组（实得 ${Array.isArray(parts) ? parts.length + " 件" : String(parts)}）`);
+  });
+});
+
 // ===== 变异测试记录（/tmp/mutate_splitspatial.py，共 11 个变异：11 杀 0 存活）=====
+
+
+
 // maxAxis 并列时改严格大于 / maxAxis 恒为 x / maxAxis 的 y/z 支路恒为 z /
 // 退化守卫改成恒真 / 退化阈值改负数 / 末段闭区间改成开区间 / 段下界闭改开 /
 // 成段面数门槛 3 改 1 / 分段起点整体后移一段 / 索引路径的首顶点改成几何体首
