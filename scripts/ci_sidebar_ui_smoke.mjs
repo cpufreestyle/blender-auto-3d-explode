@@ -7,6 +7,9 @@
  * 记得、inert 真的让键盘进不去那块看不见的面板。这个脚本用真实 Chrome 逐个点一遍。
  *
  * 覆盖：
+ *   0. 页面就绪（加载遮罩收起 / 画布与清单就位），且没有被「首次配置」弹窗盖住
+ *      —— 那层弹窗的 iframe 会吃掉全部鼠标事件，是这里 9 条失败的真因；
+ *      点收起钮前先做一次命中测试；
  *   1. 收起按钮存在且带 title（含快捷键提示）；
  *   2. 点收起：.collapsed + 面板整体移出视口左侧 + 浮动展开钮显身 + aria-expanded=false
  *     + inert（键盘不该被困在看不见的面板里）+ 写回 localStorage；
@@ -63,7 +66,9 @@ const readState = () => evaluate(`JSON.stringify((() => {
 })())`);
 
 try {
-  await sleep(9000);
+  const rdy = await ui.waitReady();
+  A(rdy.ok, `页面就绪：加载遮罩收起 / 画布就位 / 部件 ${rdy.rows} 行（耗时 ${rdy.ms}ms）`);
+  A((await ui.hideFirstRunModal()) === false, "首屏没有被「首次配置」弹窗遮挡（被 iframe 盖住时鼠标事件全落空）");
   A(pageErrors.length === 0, `页面 0 运行时异常（实际 ${pageErrors.length}）`);
 
   const btn = JSON.parse(await evaluate(`JSON.stringify((() => {
@@ -71,6 +76,8 @@ try {
     return b ? { title: b.getAttribute('title'), rect: b.getBoundingClientRect().toJSON() } : null;
   })())`));
   A(btn !== null && !!btn.title && btn.title.includes("H"), `收起按钮带 title 且提示快捷键（实际：${btn && btn.title}）`);
+  const hit = await ui.hitTest(btn.rect.x + btn.rect.width / 2, btn.rect.y + btn.rect.height / 2, "#sidebar-collapse");
+  A(hit.inside, `收起钮是可点中的最上层元素（实际命中 ${hit.hit}）`);
 
   const before = JSON.parse(await readState());
   A(before.collapsed === false && before.expandHidden === true && before.ariaCollapse === "true", "初始展开：面板在位、展开钮隐藏、aria-expanded=true");
@@ -89,8 +96,8 @@ try {
   A(after.saved === "collapsed", `写回 localStorage（${after.saved}）`);
 
   // ===== 刷新后仍然收起（localStorage 记忆）=====
-  await ui.send("Page.reload", { ignoreCache: false });
-  await sleep(9000);
+  const rdy2 = await ui.reload();
+  A(rdy2.ok, `刷新后再次就绪（耗时 ${rdy2.ms}ms）`);
   const reloaded = JSON.parse(await readState());
   A(reloaded.collapsed === true && reloaded.inert === true && reloaded.expandHidden === false,
     `刷新后仍是收起状态（collapsed=${reloaded.collapsed}, inert=${reloaded.inert}）`);
