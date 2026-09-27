@@ -11,12 +11,13 @@
 >
 > **2026-09-23 复核后**：上述待办已全部处理（见 §1 末尾「复核后落地」与 §7）。当前 `origin/main` = `8c128cd`（图片转3D 统一调度器 #17 已合入），CI 双 job 全绿。
 > **2026-09-26 发布 v3.3.0 后**：本轮 66 个堆叠 PR（#26–#91，连同 09-23 的 15 个共 81 个）按栈序自底向上全部合入 `main`（栈链用 merge commit，#91 用 squash），内容与栈顶 `stack/065-narrow-ui-smoke` 一致；版本号 3.3.0，`package.json` 与 `index.html` 两处 `?v=` 版本键同步（有单测钉住一致）；CI 四门禁（Frontend / Python / Blender 冒烟 / sync）全绿，`npm test` 3149 条断言 0 失败。合并前 main 的备份在 `backup/pre-merge-main`。
+> **2026-09-27 发布 v3.3.1 后**：「意义」专项第一轮落地两个 PR —— **#93 拆分引擎窄颈判据重写**（导入一颗球曾被切成 8 块、圆柱 7 块；改为按 dA/da 面密度判据后球/柱/锥/环/胶囊/空心管一律保持 1 件，哑铃 808/808 正中切开；顺带修掉 `weldVertices` 传裸 `Uint32Array` 导致 `index.count` 变 `undefined` 的静默失能）、**#94 教学核心上移到侧栏首屏**（三块教学 UI 上移，AI 生成入口降级为一行，`#assembly-panel` 默认展开）。版本号 3.3.1，`package.json` / `package-lock.json` / `index.html` 两处 `?v=` 全部同步——lockfile 根版本此前漏在 3.2.11，本次补齐。CI 三门禁全绿，`npm test` 53 个套件 0 失败，`tests/geometry-split-test.mjs` 63 → 126 条。已知遗留：`smoke:parts`（8 通过 7 失败）与 `smoke:sidebar`（8 通过 9 失败）在本机改动前后失败项一字不差，属既有问题（疑似本机 Chrome / headless 行为），`smoke:narrow` 22 条全绿，待单独排查。
 
 ---
 
 ## 1. 交接概览
 
-一个基于 **Three.js + Node.js + Blender** 的交互式 3D 拆解教学工具：加载/生成模型 → 爆炸视图动画 → 分步骤拆解教学 → WebXR AR 预览。当前版本 `3.2.12`（本地）/ `3.2.13`（远程）。
+一个基于 **Three.js + Node.js + Blender** 的交互式 3D 拆解教学工具：加载/生成模型 → 爆炸视图动画 → 分步骤拆解教学 → WebXR AR 预览。当前版本 `3.3.1`（本地与远程一致）。
 
 **最近一轮成果：**
 
