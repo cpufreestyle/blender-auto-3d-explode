@@ -442,16 +442,23 @@ input[type="range"]::-moz-range-thumb {
 
 .btn-ar { background: linear-gradient(135deg,#00d4aa,#00b894); color: #fff; border-color: transparent; font-weight: 600; }
 
-/* 首页顶部：配置 AI 入口（显眼）+ 缺配置提醒 */
+/* AI 配置入口：教学核心上移后，从首页主 CTA 降级成一行安静的自适应入口。
+   不再满幅渐变、不再抢第一屏；只有真的没配 AI 时才用 .need-config 抢回来。 */
 .btn-config {
-  display: block; width: 100%; margin: 10px 0 4px;
-  background: linear-gradient(135deg,#7c5cff,#5b8def); color: #fff; border-color: transparent;
-  font-weight: 600; padding: 13px 18px; font-size: var(--font-md);
+  display: inline-block; width: auto; margin: 8px 0 4px; padding: 9px 12px;
+  background: rgb(255 255 255 / 5%); color: var(--text-dim);
+  border: 1px solid rgb(255 255 255 / 10%);
+  font-size: var(--font-sm); font-weight: 500;
 }
-.btn-config:hover:not(:disabled) { box-shadow: 0 4px 16px rgb(124 92 255 / 40%); }
+
+.btn-config:hover:not(:disabled) {
+  color: var(--text); background: rgb(255 255 255 / 10%);
+  border-color: rgb(255 255 255 / 20%); box-shadow: none;
+}
 
 .btn-config.need-config {
-  background: linear-gradient(135deg,#ff8a3d,#ff5252); animation: remind-pulse 1.6s ease-in-out infinite;
+  background: linear-gradient(135deg,#ff8a3d,#ff5252); color: #fff; border-color: transparent;
+  animation: remind-pulse 1.6s ease-in-out infinite;
 }
 
 @keyframes remind-pulse {
