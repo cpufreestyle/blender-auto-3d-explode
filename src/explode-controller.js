@@ -120,6 +120,10 @@ export function createExplodeController({
   let mouseControlEnabled = false; // 是否启用鼠标控制
   const stepDuration = 600; // 每步动画时长（毫秒）
   let isAnimating = false;
+  let timelineDragging = false; // 用户是否正在拖动时间轴（拖动中禁止程序回写滑块值）
+  let depthActive = false; // 爆炸深度滑块是否接管了观看姿态（此时忽略分步位置）
+  let depthDragging = false; // 用户是否正在拖动深度滑块（拖动中禁止程序回写）
+  let depthFactor = 0; // 滑块设定的观看因子 (0-1)
 
   // ===== 一键爆炸/合体的平滑动画（所有部件同时炸开/合体）=====
   let explodeAnimActive = false; // 是否正在播放爆炸/合体动画
@@ -207,8 +211,19 @@ export function createExplodeController({
 
     // 更新时间轴
     if (timelineSlider) {
-      timelineSlider.value = displayStep;
+      // 用户正在拖动时不要回写，否则会把拖动的目标值冲掉（表现为「拖时间轴没反应」）
+      // 赋字符串：真实 DOM 会自动 normalize，测试假 DOM 不会，类型不一致会埋坑
+      if (!timelineDragging) timelineSlider.value = String(displayStep);
       timelineStepEl.textContent = displayStep;
+    }
+
+    // 深度读数跟着教学进度走：炸开程度由当前步骤的进度决定，
+    // 避免出现时间轴说第 6 步、深度滑块还停在 20% 的自相矛盾。
+    // 滑块正被拖动、或滑块正在接管观看姿态时都不回写。
+    if (depthSlider && !depthActive && !depthDragging) {
+      const pct = Math.round((s.currentStep / s.totalSteps) * 100);
+      depthSlider.value = String(pct);
+      depthValueEl.textContent = pct + "%";
     }
 
     if (stepUIHook) stepUIHook();
@@ -217,6 +232,7 @@ export function createExplodeController({
   // 退出鼠标控制模式，将当前 mouseFactor 同步到 currentStep/displayedStep
   function exitMouseControl() {
     mouseControlEnabled = false;
+    depthActive = false; // 鼠标控制退出后交回分步进度
     needsExplodeUpdate = true; // 标记需要重新计算
     s.isExploded = false;
     explodeBtn?.classList.remove("exploded");
@@ -230,6 +246,7 @@ export function createExplodeController({
     newStep = MathUtils.clamp(newStep, 0, s.totalSteps);
     if (newStep === s.displayedStep || isAnimating) return;
 
+    depthActive = false; // 分步控制接管，深度滑块退出
     stopExplodeLoop(); // 手动分步控制接管，停止循环播放
     needsExplodeUpdate = true; // 标记需要重新计算部件位置
     animationFrom = s.currentStep;
@@ -256,6 +273,23 @@ export function createExplodeController({
       const step = parseInt(e.target.value);
       goToStep(step);
     });
+  }
+
+  // 拖动期间锁定滑块值，松手时才让 updateStepUI 重新接管显示
+  if (timelineSlider) {
+    timelineSlider.addEventListener("pointerdown", () => { timelineDragging = true; });
+    timelineSlider.addEventListener("pointerup", () => { timelineDragging = false; });
+    timelineSlider.addEventListener("pointercancel", () => { timelineDragging = false; });
+    timelineSlider.addEventListener("blur", () => { timelineDragging = false; });
+  }
+
+  // 深度滑块同理：拖动中不被 updateStepUI 回写覆盖
+  if (depthSlider) {
+    depthSlider.addEventListener("pointerdown", () => { depthDragging = true; });
+    const endDepthDrag = () => { depthDragging = false; };
+    depthSlider.addEventListener("pointerup", endDepthDrag);
+    depthSlider.addEventListener("pointercancel", endDepthDrag);
+    depthSlider.addEventListener("blur", endDepthDrag);
   }
 
   if (timelinePlayBtn) {
@@ -317,6 +351,7 @@ export function createExplodeController({
     s.isExploded = !s.isExploded;
     // 退出其它控制模式，由本次爆炸动画接管
     mouseControlEnabled = false;
+    depthActive = false; // 一键爆炸接管，深度滑块退出
     explodeAllMode = true;
     isAnimating = false;
     clearInterval(playInterval);
@@ -404,13 +439,15 @@ export function createExplodeController({
       // 计算炸开因子 (0-1)
       const factor = depth / 100;
 
-      // 如果不在动画中，直接应用
+      // 如果不在动画中，直接应用。注意：这里只改「观看姿态」，
+      // 不写 currentStep/displayedStep —— 那两个字段属于教学步骤（学到第几步），
+      // 深度滑块回答的是「现在拆得多开」，两者混用会让调深度把课程进度一起改掉，
+      // 时间轴读数也会跟着跳到意料之外的位置。
       if (!isAnimating) {
         needsExplodeUpdate = true; // 标记需要重新计算
-        s.currentStep = factor * s.totalSteps;
-        s.displayedStep = Math.round(s.currentStep);
+        depthFactor = factor; // 滑块接管时的观看因子
+        depthActive = true; // 滑块接管，直到分步/一键爆炸把姿态抢回去
         explodeAnimFactor = factor; // 同步整体炸开因子，供后续动画续接
-        updateStepUI();
       }
 
       // 更新爆炸状态
@@ -551,17 +588,23 @@ export function createExplodeController({
       explodeAnimFactor :
       mouseControlEnabled ?
         mouseFactor :
-        s.currentStep / s.totalSteps;
+        depthActive ?
+          depthFactor :
+          s.currentStep / s.totalSteps;
     axisMat.opacity = globalFactor * 0.5;
 
     // 统一的部件更新函数（避免重复代码）
     const updatePart = part => {
+      // 观看因子：整体炸开 > 鼠标控制 > 深度滑块 > 分步进度。
+      // 深度滑块只改「整体观看姿态」，部件仍按各自的 stepIndex 渐进展开，
+      // 所以下面依旧走 smoothStep，只是把进度换成滑块给出的连续值。
+      const depthProgress = depthActive ? depthFactor * s.totalSteps : s.currentStep;
       const partFactor = explodeAllMode ?
         explodeAnimFactor :
         smoothStep(
           part.stepIndex - 1,
           part.stepIndex,
-          mouseControlEnabled ? mouseFactor * s.totalSteps : s.currentStep,
+          mouseControlEnabled ? mouseFactor * s.totalSteps : depthProgress,
         );
 
       part.mesh.position.lerpVectors(part.homePos, part.explodePos, partFactor);

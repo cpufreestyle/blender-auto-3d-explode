@@ -333,8 +333,8 @@ describe("updateStepUI 与 highlightPart", async() => {
     assert(ui.stepDescEl.innerHTML === "断开电池排线", "说明写入 innerHTML");
     assert(ui.toolsListEl.innerHTML === "<div class=\"tools-none\">✅ 本步骤无需工具</div>", "无工具文案");
     assert(ui.progressFillEl.style.width === `${(1 / 3) * 100}%`, "进度条宽度按显示步占比");
-    assert(ui.timelineSlider.value === 1, "时间轴滑块跟随");
-    assert(ui.timelineStepEl.textContent === 1, "时间轴步号文案");
+    assert(ui.timelineSlider.value === "1", "时间轴滑块跟随");
+    assert(String(ui.timelineStepEl.textContent) === "1", "时间轴步号文案");
   });
 
   await it("有工具时渲染 tool-item 清单", () => {
@@ -539,15 +539,40 @@ describe("updateExplodedView 三条插值路径", async() => {
 });
 
 describe("深度滑块", async() => {
-  await it("拖到 50%：文案/状态/按钮/步骤同步", () => {
+  await it("拖到 50%：文案/状态/按钮切换，但不改教学步骤", () => {
     const { ui, store } = setup();
     ui.depthSlider.fire("input", { target: { value: "50" } });
     assert(ui.depthValueEl.textContent === "50%", "深度文案");
     assert(store.state.isExploded === true, "isExploded 置 true");
     assert(ui.explodeBtn.classList.contains("exploded"), "按钮加 exploded");
     assert(ui.explodeBtn.textContent === "🔄 合体", "按钮切合体");
-    assert(store.state.currentStep === 1.5, "currentStep = 0.5*totalSteps");
-    assert(store.state.displayedStep === 2, "displayedStep 取整");
+    // 深度滑块只改观看姿态，不写 currentStep/displayedStep：
+    // 否则「把模型拆得开一点」会把教学进度一起改掉，时间轴也会乱跳
+    assert(store.state.currentStep === 0, "currentStep 保持原步骤");
+    assert(store.state.displayedStep === 0, "displayedStep 保持原步骤");
+  });
+
+  await it("深度滑块接管后，goToStep 把姿态交还给分步控制", () => {
+    const { ui, store, ctl } = setup();
+    ui.depthSlider.fire("input", { target: { value: "100" } });
+    assert(store.state.currentStep === 0, "滑块不推进度");
+    ctl.goToStep(2);
+    ctl.updateExplodedView(100000); // 落定动画（本套件用假 performance.now，见既有用例写法）
+    assert(store.state.currentStep === 2 && store.state.displayedStep === 2, "goToStep 落定");
+    // 交还后深度读数跟着步骤走，不再停留在 100%
+    ctl.updateStepUI();
+    assert(ui.depthSlider.value === String(Math.round((2 / store.state.totalSteps) * 100)), "深度读数同步到步骤");
+  });
+
+  await it("拖动时间轴会同步深度读数，两处读数不再矛盾", () => {
+    const { ui, ctl } = setup();
+    ui.timelineSlider.value = "3";
+    ui.timelineSlider.fire("input", { target: { value: "3" } });
+    ctl.updateExplodedView(100000); // 落定动画
+    ctl.updateStepUI();
+    assert(ui.timelineSlider.value === "3", "时间轴滑块值");
+    assert(String(ui.timelineStepEl.textContent) === "3", "时间轴文字");
+    assert(ui.depthSlider.value === "100", "深度读数与步骤一致（3/3 = 100%）");
   });
 
   await it("拖回 0：退出爆炸态", () => {
