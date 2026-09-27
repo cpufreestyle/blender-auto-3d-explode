@@ -2,7 +2,7 @@
 
 > 交接对象：`blender-auto-3d-explode` / 本地目录名 `quest3-exploded`
 > 远程：`https://github.com/cpufreestyle/blender-auto-3d-explode.git`
-> 文档日期：2026-09-20（末次修订 2026-09-23，见下方「复核后落地」）
+> 文档日期：2026-09-20（末次修订 2026-09-27，见下方「二次修订」与「第三轮交叉验证」）
 > 交接时状态（2026-09-20，三条不同指针，别搞混）：
 > - 本地 `main` = `dc0678b`，**落后 origin/main 恰好 1 个提交、无分叉**（`gh api compare` 实测 ahead_by=1 / behind_by=0，可快进）
 > - 远程 `origin/main` = `101e7ec`（v3.2.13 拆解状态导出 GLB，由另一会话/机器推入；因 git 直连被墙，本地 `origin/main` 引用仍是过期的 `dc0678b`，见 §6）
@@ -13,13 +13,19 @@
 > **2026-09-26 发布 v3.3.0 后**：本轮 66 个堆叠 PR（#26–#91，连同 09-23 的 15 个共 81 个）按栈序自底向上全部合入 `main`（栈链用 merge commit，#91 用 squash），内容与栈顶 `stack/065-narrow-ui-smoke` 一致；版本号 3.3.0，`package.json` 与 `index.html` 两处 `?v=` 版本键同步（有单测钉住一致）；CI 四门禁（Frontend / Python / Blender 冒烟 / sync）全绿，`npm test` 3149 条断言 0 失败。合并前 main 的备份在 `backup/pre-merge-main`。
 > **2026-09-27 发布 v3.3.1 后**：「意义」专项第一轮落地两个 PR —— **#93 拆分引擎窄颈判据重写**（导入一颗球曾被切成 8 块、圆柱 7 块；改为按 dA/da 面密度判据后球/柱/锥/环/胶囊/空心管一律保持 1 件，哑铃 808/808 正中切开；顺带修掉 `weldVertices` 传裸 `Uint32Array` 导致 `index.count` 变 `undefined` 的静默失能）、**#94 教学核心上移到侧栏首屏**（三块教学 UI 上移，AI 生成入口降级为一行，`#assembly-panel` 默认展开）。版本号 3.3.1，`package.json` / `package-lock.json` / `index.html` 两处 `?v=` 全部同步——lockfile 根版本此前漏在 3.2.11，本次补齐。CI 三门禁全绿，`npm test` 53 个套件 0 失败，`tests/geometry-split-test.mjs` 63 → 126 条。已知遗留：`smoke:parts`（8 通过 7 失败）与 `smoke:sidebar`（8 通过 9 失败）在本机改动前后失败项一字不差，属既有问题（疑似本机 Chrome / headless 行为），`smoke:narrow` 22 条全绿，待单独排查。
 > **2026-09-27 二次修订（v3.3.1 之后）**：上一条遗留的「`smoke:parts` 8 通过 7 失败、`smoke:sidebar` 8 通过 9 失败」已定位并修好，**真因不在产品，在门禁自己**——冒烟每次都拿全新 `--user-data-dir` 起 Chrome，于是必定撞上「首次使用：模型配置」引导弹窗（`index.html` 的 `#first-config-modal`）：它 `display:flex` 铺满视口、内层还是个 `iframe`，CDP 派发的鼠标事件全被这层 iframe 吃掉，所以「点部件行不激活 / 点收起钮没反应」清一色假阴性；而 Escape、H 走的是全局键盘监听，不受遮挡影响，于是只有鼠标断言红——看起来才那么像产品缺陷（`smoke:narrow` 只用 `setViewport` + DOM 断言、全程不点击，所以一直 22 条全绿，是同一条线索）。修法全在冒烟侧（`scripts/ui_smoke_lib.mjs`）：① 在页面脚本之前预置弹窗自己的 sessionStorage 钥匙 `configPromptDismissed=1`（与弹窗 `dismiss()` 同一把钥匙），并保留一条「万一还弹出来就明确报出来」的兜底断言；② 新增 `waitReady()`（加载遮罩收起 + 画布在 + 清单有行）取代每步硬 sleep 9 秒（实测就绪 3.7–4.1 秒），`hitTest()` 在点击前判定落点是否被浮层挡住，`reload()` 复用同一套等待；③ Chrome profile 目录加 pid、并把 Chrome 自己的输出留档，起不来时不再只有一句「没有 page target」（三条门禁并发跑时曾撞出过这个现象）。结果：`smoke:parts` **18/0**、`smoke:sidebar` **21/0**、`smoke:narrow` **24/0**，合计 **63 条断言 0 失败**（修前 38 通过 / 16 失败）。版本号 3.3.2。
+> **2026-09-27 第三轮交叉验证（同一真因的独立复现 + 两个被排除的假设）**：该修复经 PR #96 合入 `main`（merge `5eba183`）并发布 v3.3.2 后，另有一轮独立排查走了弯路，值得记下以免下一轮重走：
+> - **被排除的假设一：headless 页面无焦点导致 CDP 鼠标事件被丢弃。** 现象高度吻合——`document.hasFocus()` 确为 `false`，且 `ui.click()` 无效而 JS `el.click()` 完全正常。但 `Emulation.setFocusEmulationEnabled({enabled:true})` 与 `Page.bringToFront` 单独加上去都**无效**，该假设不成立。
+> - **被排除的假设二：`Input.dispatchMouseEvent` 缺 `buttons` 字段。** 按 CDP 规范补全 `mouseMoved → mousePressed(buttons:1) → mouseReleased(buttons:0)` 完整序列后仍**无效**。
+> - **决定性消融实验**：把临时加进 `ui_smoke_lib.mjs` 的 `Input.setIgnoreInputEvents({ignore:false})` 撤掉后重跑 `smoke:sidebar`，**仍是 21/0**——证明那行属冗余，已撤除，未进入提交。教训：单个探针里「加了 X 就好了」不等于 X 是根因，必须做消融；本例若不做消融，就会把一个无效的 CDP 调用当成修复固化下来。
+> - 排查中确认过的「应用侧无罪」证据（可复用）：`DOMDebugger.getEventListeners` 显示按钮监听器确实绑着；`document.elementFromPoint` 命中正确元素；`localStorage` 读写正常；`pageErrors` 为空；加载期无异常；`performance.getEntriesByType("resource")` 无 404（仅 `ai-config.json`、`favicon.ico` 两个预期 404）。
+> - **桌面版运行时已同步到 v3.3.2**（`git archive origin/main | tar -x -C ~/Apps/quest3-exploded` + launcher restart，实测首页返回 `?v=3.3.2`、`/api/health` ok、Blender 5.1.2 可用）。
 
 
 ---
 
 ## 1. 交接概览
 
-一个基于 **Three.js + Node.js + Blender** 的交互式 3D 拆解教学工具：加载/生成模型 → 爆炸视图动画 → 分步骤拆解教学 → WebXR AR 预览。当前版本 `3.3.1`（本地与远程一致）。
+一个基于 **Three.js + Node.js + Blender** 的交互式 3D 拆解教学工具：加载/生成模型 → 爆炸视图动画 → 分步骤拆解教学 → WebXR AR 预览。当前版本 `3.3.2`（本地、远程、桌面版运行时三处一致）。
 
 **最近一轮成果：**
 
