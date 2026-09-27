@@ -10,6 +10,7 @@
  * 纯图标按钮 title）收进门禁。
  *
  * 覆盖：
+ *   0. 页面就绪（加载遮罩收起 / 画布与清单就位），且没有被「首次配置」弹窗盖住；
  *   1. 390×844 下无横向溢出，面板宽度=视口-16px 且整体在视口内；
  *   2. 时间轴换行：滑块独占整行，播放 / 倍速留在第一行；
  *   3. AI 输入行换行：输入框独占整行，生成按钮被挤到下一行；
@@ -47,7 +48,9 @@ let failed = 0;
 const A = (cond, msg) => { OUT((cond ? "  OK   " : "  FAIL ") + msg); if (cond) passed++; else failed++; };
 
 try {
-  await sleep(9000);
+  const rdy = await ui.waitReady();
+  A(rdy.ok, `页面就绪：加载遮罩收起 / 画布就位 / 部件 ${rdy.rows} 行（耗时 ${rdy.ms}ms）`);
+  A((await ui.hideFirstRunModal()) === false, "首屏没有被「首次配置」弹窗遮挡（被 iframe 盖住时鼠标事件全落空）");
   A(pageErrors.length === 0, `页面 0 运行时异常（实际 ${pageErrors.length}）`);
 
   // ===== 视口收到 390×844（iPhone 口径，桌面 UA——顺便覆盖 UA 检测不到的窄设备）=====
