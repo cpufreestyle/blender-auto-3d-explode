@@ -260,6 +260,9 @@ BLENDER_PATH=/Applications/Blender.app/Contents/MacOS/Blender npm run test:blend
 - 排障：`TROUBLESHOOTING.md`、`EXPLOSION_TROUBLESHOOTING.md`、`BUG_REPORT.md`
 - 选型：`UNITY_MIGRATION_PLAN.md`（暂不迁移）
 - 版本：`CHANGELOG.md`、`RELEASE_NOTES_v3.0.0.md`
+- 可参考的开源项目（含实测 star / 许可 / 借了什么 / 落在哪）：`OSS_REFERENCES.md`
 
+> **2026-09-30 追加（「意义」专项第三轮）**：交付了步骤深链与分享（src/step-link.js，地址栏 #step=N + 复制本步链接按钮 + L 键 + 教案每步带链）、授课模式（src/teaching-mode.js，按钮 / T 键，AI 生成与上传入口整块收起并记忆状态）、部件清单前置为第一个面板且默认展开；新增真机门禁 smoke:teaching（26 条，已并入 smoke:ui）。参考依据与实测数据见 docs/OSS_REFERENCES.md。
+>
 > 本文档已于 2026-09-23 纳入版本控制（随本轮复核一起提交）。后续改动请直接改这里，别另起新文档——
 > `docs/` 下已经有 40+ 个阶段性总结文件，信息重复是最大的维护成本。

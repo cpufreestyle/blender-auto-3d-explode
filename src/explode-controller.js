@@ -23,6 +23,10 @@
 
 import { Color, MathUtils, Vector3 } from "three";
 import { easeOutCubic, smoothStep } from "./utils.js";
+// 步骤深链：把「学到第几步」镜像进地址栏，复制链接即可分发同一节课的进度。
+// 借鉴 47ng/nuqs（MIT，10.8k★）「URL 即状态」：真相仍在 currentStep/displayedStep，
+// 深链只是投影；写回走 replaceState，逐步点下来不会把浏览器历史灌爆。
+import { applyStepFromLocation, syncStepToUrl } from "./step-link.js";
 
 // 与 main.js 约定的共享状态键集合：s.* 读取走 getState()，写入走 setState({ key: value })
 const SHARED_STATE_KEYS = [
@@ -56,6 +60,10 @@ export function createExplodeController({
   ui,
   getState,
   setState,
+  // 地址栏写回目标：生产传 window.location / window.history，测试环境（Node）下
+  // window 不存在，两个默认值都是 null，所有写回自动退化成空操作。
+  location = typeof window !== "undefined" ? window.location : null,
+  history = typeof window !== "undefined" ? window.history : null,
 }) {
   // 共享状态响应式视图：读时现取、写时立即回写，等价于直接操作 main.js 的那些 let
   const s = {};
@@ -87,6 +95,11 @@ export function createExplodeController({
     explodeLoopBtn,
     explodeLoopSpeed,
   } = ui;
+
+  // 地址栏同步：值没变就不写（updateStepUI 会被动画每帧调用，白写会写穿 history）
+  function syncStepUrl(step) {
+    syncStepToUrl({ location, history, step });
+  }
 
   console.log("Step UI elements:", {
     prevBtn: !!prevBtn,
@@ -248,6 +261,7 @@ export function createExplodeController({
 
     depthActive = false; // 分步控制接管，深度滑块退出
     stopExplodeLoop(); // 手动分步控制接管，停止循环播放
+    syncStepUrl(newStep); // 深链跟着步骤走，点开链接即落在同一步
     needsExplodeUpdate = true; // 标记需要重新计算部件位置
     animationFrom = s.currentStep;
     s.animatingStep = newStep;
@@ -260,6 +274,7 @@ export function createExplodeController({
     isAnimating = false;
     s.currentStep = s.animatingStep;
     s.displayedStep = s.animatingStep;
+    syncStepUrl(s.displayedStep); // 动画落定后再同步一次，避免中途值覆盖最终值
     updateStepUI();
   }
 
@@ -626,9 +641,25 @@ export function createExplodeController({
       needsExplodeUpdate = false;
     }
   }
+  // 首屏应用深链：#step=N 比当前步大/小时由 goToStep 动画落位，重复或非法值不动
+  function applyDeepLink() {
+    return applyStepFromLocation({
+      location,
+      goToStep,
+      totalSteps: s.totalSteps,
+      currentStep: s.displayedStep,
+    });
+  }
+
+  // 地址栏被直接改写（用户粘贴链接、点历史记录）时跟着走
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    window.addEventListener("hashchange", () => applyDeepLink());
+  }
+
   return {
     updateStepUI,
     goToStep,
+    applyDeepLink,
     toggleExplode,
     focusCurrentPart,
     focusPart,

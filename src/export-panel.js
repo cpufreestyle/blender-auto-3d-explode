@@ -27,6 +27,9 @@ export function createExportPanel({
   // 仅测试注入的缝：生产中恒为 three 的 GLTFExporter。GLTFExporter.parse 在 Node 里
   // 会卡在 FileReader/纹理路径上，假实现让 GLB 的成功/失败回调用例不依赖浏览器。
   GLTFExporterClass = GLTFExporter,
+  // 步骤深链构造器（src/step-link.js）。缺省 null 时教案里不带链接、复制链接按钮
+  // 明确报错，而不是硬拼一个错的地址。由 main.js 注入，测试不必管地址栏。
+  buildStepUrl = null,
 }) {
   // ===== 可变状态（原 main.js 的模块级 let，会随加载/清除自定义模型重赋值）=====
   // 不能在建厂时拷一份快照：按钮点击发生在模块求值之后，必须每次读最新值。
@@ -149,6 +152,10 @@ export function createExportPanel({
       lines.push(`- **涉及部件（${stepParts.length}）**：${stepParts.length ? stepParts.join("、") : "无（概览步骤）"}`);
       const tools = step.tools || [];
       lines.push(`- **所需工具**：${tools.length ? tools.map(stripTags).join("、") : "无需工具"}`);
+      // 每一步一条深链：讲义可以直接发到群里，点开落在同一步（Tripo 之类的一次性
+      // 爆炸图给不了这个——那张图里没有「课程进度」这回事）。
+      const stepUrl = typeof buildStepUrl === "function" ? buildStepUrl(idx + 1) : "";
+      if (stepUrl) lines.push(`- **本步链接**：${stepUrl}`);
       lines.push("");
     });
 
@@ -182,33 +189,59 @@ export function createExportPanel({
     }
   }
 
-  // 复制教案到剪贴板：安全上下文用 Clipboard API，否则回退 execCommand
+  // 复制到剪贴板：安全上下文用 Clipboard API，否则回退 execCommand。
+  // 教案与步骤深链两条路径共用，fallback 的实现只有一份。
+  function writeClipboard(text, ok, fail) {
+    const fallback = () => {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const copied = document.execCommand && document.execCommand("copy");
+        ta.remove();
+        copied ? ok() : fail("浏览器不支持复制");
+      } catch (e) {
+        fail(e.message);
+      }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(ok).catch(fallback);
+    } else {
+      fallback();
+    }
+  }
+
+  // 复制教案到剪贴板
   function copyLessonMarkdown() {
     try {
       const text = buildLessonMarkdown();
-      const ok = () => showToast("📋 教案已复制到剪贴板", "success");
-      const fail = (msg) => showToast("❌ 复制失败：" + msg, "error");
-      const fallback = () => {
-        try {
-          const ta = document.createElement("textarea");
-          ta.value = text;
-          ta.style.position = "fixed";
-          ta.style.opacity = "0";
-          document.body.appendChild(ta);
-          ta.focus();
-          ta.select();
-          const copied = document.execCommand && document.execCommand("copy");
-          ta.remove();
-          copied ? ok() : fail("浏览器不支持复制");
-        } catch (e) {
-          fail(e.message);
-        }
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(ok).catch(fallback);
-      } else {
-        fallback();
+      writeClipboard(
+        text,
+        () => showToast("📋 教案已复制到剪贴板", "success"),
+        msg => showToast("❌ 复制失败：" + msg, "error"),
+      );
+    } catch (err) {
+      showToast("❌ 复制失败：" + err.message, "error");
+    }
+  }
+
+  // 复制「当前这一步」的深链：讲课/答疑时说「打开这个链接就是我此刻讲的地方」
+  function copyStepLink(step) {
+    try {
+      const url = typeof buildStepUrl === "function" ? buildStepUrl(step) : "";
+      if (!url) {
+        showToast("❌ 当前环境无法生成步骤链接", "error");
+        return;
       }
+      writeClipboard(
+        url,
+        () => showToast("🔗 已复制第 " + step + " 步的链接", "success"),
+        msg => showToast("❌ 复制失败：" + msg, "error"),
+      );
     } catch (err) {
       showToast("❌ 复制失败：" + err.message, "error");
     }
@@ -261,6 +294,7 @@ export function createExportPanel({
     exportScreenshot,
     exportLessonMarkdown,
     copyLessonMarkdown,
+    copyStepLink,
     exportGLB,
   };
 }

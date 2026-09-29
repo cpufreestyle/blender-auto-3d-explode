@@ -2,6 +2,26 @@
 
 所有项目的显著变更都将记录在此文件中。
 
+## [未发布] - 2026-09-30
+
+> 「意义」专项第三轮：直面「Tripo AI 已经能拆 3D」的冲击。生成与重建这一层确实被商品化了，本轮不追，转而加固它给不了的三件事——确定性的拆分、可复现的步骤、可分发的那条链接。
+
+### ✨ 新增
+
+- **步骤深链与分享**（src/step-link.js）— 「学到第几步」写进地址栏 #step=3：点开别人发的链接就落在同一步；换模型、刷新、点浏览器历史都同步。写回走 replaceState 而不是 pushState（逐步点下来不会把历史灌成几十条），且只在值真的变了时才碰 history——updateStepUI 每帧都被调，白写会把历史写穿。用 hash 而非 search：静态托管与 file:// 直开都能用，也不会让 step= 参与本仓库按 ?v= 给的 immutable 缓存键。配套：复制本步链接按钮与快捷键 L，以及教案里每一步都带一条可点链接——讲义可以直接发到群里。设计边界：深链只是 currentStep / displayedStep 的镜像，hashchange 只触发一次 goToStep，永远不反向当真相。
+- **授课模式**（src/teaching-mode.js）— 一键把 AI 绘画、上传自定义模型、AI 配置入口与页脚提示整块收起，只留 3D 视图与教学控件；按钮加快捷键 T，状态记忆在 localStorage 的 quest3-teaching-mode（讲台上刷新页面不该又见到满屏生成面板）。收起复用仓库既有的 .hidden，不新增 CSS。有个坑：#blender-banner 常态就是 .hidden，一刀切减类会把它「还」出来，所以收起前先记原状、还原时按原状决定去不去类。
+
+### 🎨 界面
+
+- **部件清单成为第一个面板且默认展开**— 教学核心（这一步拆什么、用哪些工具、共几个部件）原先排在 AI 绘画、上传、装配分析之后的折叠层里。现在它排在 AI 生成入口之前并默认展开，AI 绘画与上传保持默认折叠。
+
+### 🧪 测试与工程
+
+- **新增一条真机冒烟门禁**：scripts/ci_teaching_ui_smoke.mjs（26 条）钉住「部件清单默认展开且排在 AI 绘画之前」「授课模式四处收起再还原」「按方向键后地址栏跟着写成 #step=N」「带 #step=3 打开即落在第 3 步」「全程 0 运行时异常」，已挂进 npm run smoke:ui。三个既有门禁未被拖红：smoke:parts 18/0、smoke:sidebar 21/0、smoke:narrow 24/0。
+- 单测：新增 tests/step-link-test.mjs（30 条）与 tests/teaching-mode-test.mjs（38 条，后者当场抓出「一刀切减类会把常态隐藏的横幅还出来」这个设计缺陷），并给 explode-controller / export-panel / keyboard-shortcuts 三个既有套件补 43 条用例。npm test 由 3218 增至 3328 条断言 0 失败；lint:check 0 errors。
+- 排查实录（值得留下）：headless 视口只有 717px 高而侧栏内容约 1.4k px，按钮在折叠线以下时 document.elementsFromPoint 返回空数组、CDP 的点直接落到画布上——「点了没反应」在这里是假阴性，冒烟里必须先 scrollIntoView 再取矩形。另一条：连续两次方向键间隔若小于 600ms，第二次会被 goToStep 的 isAnimating 守卫挡掉，冒烟里要等动画落定。
+- 文档：新增 docs/OSS_REFERENCES.md——本轮调研过的开源项目清单（star / 许可 / 最近推送均为 2026-09-30 GitHub API 实测）、各自借了什么、落在哪个文件，以及「这个细分领域最高只有 2 星、没有同类作业可抄」这个关键发现。
+
 ## [v3.3.2] - 2026-09-27
 
 > 「意义」专项第二轮：把三条真机 UI 门禁从「本机常年红」修成真的能跑——它们此前从未在这台机器上绿过，等于本地唯一的真实浏览器覆盖形同虚设。
