@@ -110,6 +110,7 @@ function installBrowser({
   lightTheme = false,
   clipboardMode = "resolve", // resolve | reject | none
   glbOutcome = "ok", //         ok | error
+  stepUrl = null, //            步骤深链构造器；null 时教案不带链接（默认行为）
 } = {}) {
   const calls = {
     toasts: [],
@@ -250,6 +251,7 @@ function installBrowser({
     customModelGroup,
     getState: () => state,
     GLTFExporterClass: FakeExporter,
+    buildStepUrl: stepUrl,
   });
 
   const world = {
@@ -672,6 +674,78 @@ describe("导出模块（src/export-panel.js）", async() => {
       );
       const md = w.panel.buildLessonMarkdown();
       assert(md.includes("- 部件总数：2"), "教案也读到新 customModelParts");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("buildLessonMarkdown：未注入深链构造器时不出现链接行", () => {
+    const w = installBrowser({ state: makeState() });
+    try {
+      const md = w.panel.buildLessonMarkdown();
+      assert(!md.includes("本步链接"), "默认不注入时不写链接，教案格式不变");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("buildLessonMarkdown：注入后每一步都带一条可点深链", () => {
+    const w = installBrowser({
+      state: makeState(),
+      stepUrl: step => "http://localhost:3000/#step=" + step,
+    });
+    try {
+      const md = w.panel.buildLessonMarkdown();
+      assert(md.includes("- **本步链接**：http://localhost:3000/#step=1"), "第 1 步链接");
+      assert(md.includes("- **本步链接**：http://localhost:3000/#step=2"), "第 2 步链接");
+      assert(md.includes("- **本步链接**：http://localhost:3000/#step=3"), "第 3 步链接");
+      const count = Array.from(md.matchAll(/本步链接/g)).length;
+      assert(count === 3, "三步各一条，实际 " + count);
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("copyStepLink：Clipboard API 可用时直接写链接", async() => {
+    const w = installBrowser({ state: makeState(), stepUrl: step => "http://x/#step=" + step });
+    try {
+      w.panel.copyStepLink(4);
+      await flushMicrotasks();
+      assert(w.calls.clipboardWrites.length === 1, "写了 navigator.clipboard");
+      assert(w.calls.clipboardWrites[0] === "http://x/#step=4", "写的是第 4 步的深链");
+      assert(w.calls.textareasCreated === 0, "没有走 textarea 兜底");
+      assert(w.lastToast().textContent.includes("第 4 步"), "toast 报出步号");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("copyStepLink：Clipboard 被拒时回退 execCommand", async() => {
+    const w = installBrowser({
+      state: makeState(),
+      clipboardMode: "reject",
+      stepUrl: () => "http://x/#step=1",
+    });
+    try {
+      w.panel.copyStepLink(1);
+      await flushMicrotasks();
+      assert(w.calls.clipboardWrites.length === 1, "仍然先尝试 Clipboard API");
+      assert(w.calls.textareasCreated === 1, "回退创建隐藏 textarea");
+      assert(w.calls.execCommandCalls === 1, "走了一次 execCommand");
+      assert(w.lastToast().textContent.includes("第 1 步"), "兜底成功也报步号");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("copyStepLink：拿不到链接时明确报错，不硬拼地址", () => {
+    const w = installBrowser({ state: makeState() });
+    try {
+      w.panel.copyStepLink(2);
+      assert(w.calls.clipboardWrites.length === 0, "没有写剪贴板");
+      assert(w.calls.execCommandCalls === 0, "也没有走兜底复制");
+      assert(w.lastToast().className === "toast toast-error", "error toast");
+      assert(w.lastToast().textContent.includes("无法生成"), "文案说清是链接生成不了");
     } finally {
       restoreGlobals();
     }

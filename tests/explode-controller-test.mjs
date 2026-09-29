@@ -237,6 +237,17 @@ function setup(overrides) {
   const controls = { target: new Vector3(0, 0, 0) };
   const renderer = { domElement: makeEl("canvas") };
   const axisMat = { opacity: 0 };
+  // 假地址栏：replaceState 要像浏览器那样真的改掉 hash，否则
+  // 「同一步不重复写历史」这条断言在替身上恒真、在浏览器里恒假。
+  const url = { hash: (overrides && overrides.hash) || "" };
+  const writes = [];
+  const history = {
+    writes,
+    replaceState: (_s, _u, next) => {
+      writes.push(next);
+      url.hash = next; // 浏览器就是这样：写完 hash 立刻变
+    },
+  };
   const ctl = createExplodeController({
     camera,
     controls,
@@ -246,8 +257,10 @@ function setup(overrides) {
     ui,
     getState: store.getState,
     setState: store.setState,
+    location: url,
+    history,
   });
-  return { ctl, ui, store, parts, camera, controls, renderer, axisMat };
+  return { ctl, ui, store, parts, camera, controls, renderer, axisMat, url, history, writes };
 }
 
 // ===== 用例 =====
@@ -713,6 +726,78 @@ describe("鼠标控制默认路径", async() => {
     ui.explodeBtn.fire("dblclick");
     assert(store.state.isExploded === true, "炸开态 dblclick 保持炸开");
     assert(ui.explodeBtn.textContent === "🔄 合体", "按钮文本不变");
+  });
+});
+
+describe("步骤深链（地址栏同步）", async() => {
+  await it("goToStep 把目标步写进地址栏", () => {
+    const { ctl, url, store } = setup();
+    ctl.goToStep(2);
+    assert(url.hash === "#step=2", "地址栏写成 #step=2，实际 " + url.hash);
+    assert(store.state.animatingStep === 2, "同时照常启动分步动画");
+  });
+
+  await it("动画落定不重复写历史（值没变就不碰）", () => {
+    const { ctl, url, writes } = setup();
+    ctl.goToStep(2);
+    assert(writes.length === 1, "goToStep 写了一次");
+    ctl.updateExplodedView(100000); // 落定
+    assert(url.hash === "#step=2", "落定后仍是 #step=2");
+    assert(writes.length === 1, "落定那次没有重复写（真实浏览器里 hash 已相同）");
+  });
+
+  await it("只刷新 UI 不写地址栏", () => {
+    const { ctl, url } = setup();
+    ctl.updateStepUI();
+    assert(url.hash === "", "updateStepUI 不动地址栏（它每帧都会被调）");
+  });
+
+  await it("applyDeepLink：命中合法深链才落位", () => {
+    const w1 = setup({ hash: "#step=2" });
+    assert(w1.ctl.applyDeepLink() === true, "#step=2 被应用");
+    assert(w1.store.state.animatingStep === 2, "落到第 2 步");
+
+    const w2 = setup({ hash: "" });
+    assert(w2.ctl.applyDeepLink() === false, "没有 hash 时不动作");
+    assert(w2.store.state.animatingStep === 0, "仍在第 0 步");
+
+    const w3 = setup({ hash: "#step=99" });
+    assert(w3.ctl.applyDeepLink() === false, "越界深链被拒");
+
+    const w4 = setup({ hash: "#step=abc" });
+    assert(w4.ctl.applyDeepLink() === false, "非整数深链被拒");
+  });
+
+  await it("applyDeepLink：与当前步相同时不触发动画", () => {
+    const w = setup({ hash: "#step=0" });
+    assert(w.ctl.applyDeepLink() === false, "已在第 0 步，返回 false");
+    assert(w.store.state.animatingStep === 0, "没有启动动画");
+  });
+
+  await it("hashchange：用户粘贴 / 点历史记录时跟着跳步", () => {
+    const listeners = {};
+    const prevWindow = globalThis.window;
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        addEventListener: (type, fn) => { listeners[type] = fn; },
+      },
+    });
+    try {
+      const w = setup({ hash: "#step=1" });
+      assert(typeof listeners.hashchange === "function", "绑定了 hashchange");
+      w.url.hash = "#step=3";
+      listeners.hashchange();
+      assert(w.store.state.animatingStep === 3, "跳到第 3 步");
+      w.ctl.updateExplodedView(100000); // 落定，否则 isAnimating 会挡住下一次
+      w.url.hash = "#step=1";
+      listeners.hashchange();
+      assert(w.store.state.animatingStep === 1, "再跳到第 1 步");
+      assert(w.store.state.displayedStep === 3, "仍是 goToStep 起的头：动画未落定，displayedStep 尚未变");
+    } finally {
+      if (prevWindow === undefined) delete globalThis.window;
+      else Object.defineProperty(globalThis, "window", { configurable: true, value: prevWindow });
+    }
   });
 });
 

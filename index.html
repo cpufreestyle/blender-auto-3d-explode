@@ -144,9 +144,11 @@
         <input id="auto-rotate" type="checkbox" checked />
         <span>🔄自动旋转</span>
       </label>
+      <button id="teaching-mode-btn" class="btn" type="button" aria-pressed="false" title="授课模式：只留 3D 视图与教学控件（快捷键 T）">🎓 授课模式</button>
       <button id="shot-btn" class="btn" title="导出当前拆解视图为 PNG 图片（快捷键 S）">🖼️ 截图</button>
       <button id="export-md-btn" class="btn" title="导出完整拆解教案（Markdown，含步骤/部件/工具）">📄 导教案</button>
       <button id="copy-md-btn" class="btn" title="复制完整拆解教案到剪贴板（Markdown）">📋 复制教案</button>
+      <button id="copy-step-link-btn" class="btn" title="复制当前这一步的分享链接，对方打开即落在同一步（快捷键 L）">🔗 复制本步链接</button>
       <button id="export-glb-btn" class="btn" title="导出当前拆解状态为 GLB 3D 模型（可在 Blender / 其它查看器打开）">💾 导出GLB</button>
       <button id="ar-btn" class="btn btn-ar" style="display:none">📱 AR 预览</button>
     </div>
@@ -162,8 +164,37 @@
       </div>
     </div>
 
+    <!-- ===== 工具 + 部件清单（教学核心，默认展开）===== -->
+    <details class="panel collapsible" open>
+      <summary class="panel-header">
+        <span>🛠️ 工具 & 📦 部件清单</span>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="panel-body">
+        <div id="tools-list" class="tools-list">
+          <div class="tools-none">✅ 本步骤无需工具</div>
+        </div>
+        <div class="parts-list">
+          <div class="parts-header">
+            共 <span id="part-count">15</span> 个部件
+            <button id="parts-show-all" class="btn-mini parts-show-all hidden" type="button" title="恢复显示全部部件（Esc）">全部显示</button>
+          </div>
+          <div class="parts-grid">
+            <div class="part-item" data-part="前面板"><span class="part-dot" style="background:#f2f2f2"></span>前面板</div>
+            <div class="part-item" data-part="主机身"><span class="part-dot" style="background:#222225"></span>主机身</div>
+            <div class="part-item" data-part="左透镜模组"><span class="part-dot" style="background:#1e3a5f"></span>透镜x2</div>
+            <div class="part-item" data-part="左摄像头"><span class="part-dot" style="background:#0a0a0a"></span>摄像头x4</div>
+            <div class="part-item" data-part="左头带臂"><span class="part-dot" style="background:#3a3a3c"></span>头带臂x2</div>
+            <div class="part-item" data-part="面罩海绵"><span class="part-dot" style="background:#2c2c2e"></span>海绵</div>
+            <div class="part-item" data-part="主板/显示屏"><span class="part-dot" style="background:#0d4a22"></span>主板</div>
+            <div class="part-item" data-part="头带"><span class="part-dot" style="background:#3a3a3c"></span>头带</div>
+          </div>
+        </div>
+      </div>
+    </details>
+
     <!-- ===== AI 绘画（可折叠）===== -->
-    <details class="panel collapsible">
+    <details class="panel collapsible" id="ai-paint-panel">
       <summary class="panel-header">
         <span>🎨 AI 绘画</span>
         <span class="chevron">▾</span>
@@ -255,7 +286,7 @@
     </details>
 
     <!-- ===== 模型上传（可折叠）===== -->
-    <details class="panel collapsible">
+    <details class="panel collapsible" id="upload-panel">
       <summary class="panel-header">
         <span>📁 上传自定义模型</span>
         <span class="chevron">▾</span>
@@ -294,35 +325,6 @@
       <div class="panel-body">
         <button id="assembly-analyze-btn" class="btn btn-secondary">🔍 运行装配分析</button>
         <div id="assembly-result" class="status-box hidden"></div>
-      </div>
-    </details>
-
-    <!-- ===== 工具 + 部件（合并折叠）===== -->
-    <details class="panel collapsible">
-      <summary class="panel-header">
-        <span>🛠️ 工具 & 📦 部件清单</span>
-        <span class="chevron">▾</span>
-      </summary>
-      <div class="panel-body">
-        <div id="tools-list" class="tools-list">
-          <div class="tools-none">✅ 本步骤无需工具</div>
-        </div>
-        <div class="parts-list">
-          <div class="parts-header">
-            共 <span id="part-count">15</span> 个部件
-            <button id="parts-show-all" class="btn-mini parts-show-all hidden" type="button" title="恢复显示全部部件（Esc）">全部显示</button>
-          </div>
-          <div class="parts-grid">
-            <div class="part-item" data-part="前面板"><span class="part-dot" style="background:#f2f2f2"></span>前面板</div>
-            <div class="part-item" data-part="主机身"><span class="part-dot" style="background:#222225"></span>主机身</div>
-            <div class="part-item" data-part="左透镜模组"><span class="part-dot" style="background:#1e3a5f"></span>透镜x2</div>
-            <div class="part-item" data-part="左摄像头"><span class="part-dot" style="background:#0a0a0a"></span>摄像头x4</div>
-            <div class="part-item" data-part="左头带臂"><span class="part-dot" style="background:#3a3a3c"></span>头带臂x2</div>
-            <div class="part-item" data-part="面罩海绵"><span class="part-dot" style="background:#2c2c2e"></span>海绵</div>
-            <div class="part-item" data-part="主板/显示屏"><span class="part-dot" style="background:#0d4a22"></span>主板</div>
-            <div class="part-item" data-part="头带"><span class="part-dot" style="background:#3a3a3c"></span>头带</div>
-          </div>
-        </div>
       </div>
     </details>
 

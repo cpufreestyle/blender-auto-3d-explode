@@ -30,6 +30,8 @@ import { splitModelToQuest3Regions } from "./src/quest3-parts.js";
 import { setupUpload } from "./src/upload-panel.js";
 import { setupGeneratedLibrary } from "./src/generated-library.js";
 import { setupKeyboardShortcuts } from "./src/keyboard-shortcuts.js";
+import { buildStepUrl } from "./src/step-link.js";
+import { setupTeachingMode } from "./src/teaching-mode.js";
 import { createStepDescAnimation } from "./src/step-desc.js";
 import { createRenderLoop } from "./src/render-loop.js";
 import { createSceneSetup } from "./src/scene-setup.js";
@@ -517,13 +519,30 @@ const exportPanel = createExportPanel({
     stepGroups,
     parts,
   }),
+  // 步骤深链：教案里每一步都带一条可点链接，复制链接按钮也走同一构造器
+  buildStepUrl: step => buildStepUrl(location, step),
 });
+
+// 复制当前步骤的深链（教案分发的另一半：链接即进度）
+const copyStepLinkBtn = document.getElementById("copy-step-link-btn");
+if (copyStepLinkBtn) {
+  copyStepLinkBtn.addEventListener("click", () => exportPanel.copyStepLink(displayedStep));
+}
 
 // ===== 侧栏折叠 =====
 // 实现自成一体：src/sidebar-toggle.js 按 id 自取面板与两个按钮，
 // localStorage("quest3-sidebar") 记忆收起状态。必须先于快捷键建立，
 // 因为 H 键要拿它的 toggle。
 const sidebar = setupSidebarToggle();
+
+// ===== 授课模式 =====
+// 投影 / 讲台上只留 3D 视图与教学控件，AI 生成、上传、配置入口整块收起。
+// 实现迁至 src/teaching-mode.js（含 storage 记忆与 .hidden 原状保护）。
+// 必须在快捷键建立之前创建：t 键要拿它的 toggle。
+const teachingMode = setupTeachingMode({
+  btn: document.getElementById("teaching-mode-btn"),
+  storage: typeof localStorage !== "undefined" ? localStorage : null,
+});
 
 // 键盘快捷键
 // 实现迁至 src/keyboard-shortcuts.js：keydown 分发 + autoRotate change 整段
@@ -536,10 +555,13 @@ setupKeyboardShortcuts({
   exportPanel,
   getDisplayedStep: () => displayedStep,
   toggleSidebar: () => (sidebar ? sidebar.toggle() : undefined),
+  toggleTeachingMode: () => (teachingMode ? teachingMode.toggle() : undefined),
 });
 
 explodeCtl.updateStepUI();
 
+// 首屏应用深链：#step=N 命中时直接落到那一步（点开别人发的链接就在同一步）
+explodeCtl.applyDeepLink();
 
 // ===== 响应窗口大小 + 渲染循环 =====
 // 实现迁至 src/render-loop.js：resize 监听与 animate 自递归整段搬迁，行为
