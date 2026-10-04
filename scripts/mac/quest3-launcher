@@ -1,0 +1,326 @@
+#!/bin/bash
+# Quest 3D 拆解 桌面启动器（仓库源：scripts/mac/quest3-launcher）
+#
+# 双击 .app：定位 node -> 补依赖 -> 确认端口上的服务是不是自己 -> 拉起 server.js
+#           -> 确认就绪 -> 打开浏览器
+#
+# 服务由用户级 LaunchAgent（launchd）托管，所以本脚本退出后服务不会跟着退出，
+# 也不受启动它的进程生命周期影响。
+#
+#   不带参数      启动（或复用已在跑的同一版本服务）并打开浏览器
+#   stop          停止服务
+#   restart       重启服务并打开浏览器
+#   status        只报告端口占用者与版本，不动任何进程
+#
+# 端口归属判定：只有 GET /api/identity 回带的 app 标记等于下面的 APP_ID，才认为
+# 这个端口上是自己的服务（服务端实现见 src/routes-identity.js）。端口被别的程序
+# 占用时，本脚本不打开那个页面，而是把占用者是谁、怎么处理说清楚。老版本用
+# 「curl / 通不通」判断，端口被占时会把别的程序的首页当成本项目打开、通知还写
+# 「服务已在运行」——实测 :3001 被 freellmapi 占住时就是这么错的。
+set -u
+
+APP_ID="blender-auto-3d-explode"
+APP_NAME="Quest 3D 拆解"
+APP_DIR="${QUEST3_APP_DIR:-$HOME/Apps/quest3-exploded}"
+PORT="${QUEST3_PORT:-3001}"
+# 导出来：launchd 那条路靠 plist 的 EnvironmentVariables 传端口，nohup 兜底那条
+# 路只继承环境——少了这句，自定义端口时拉起的 server.js 会退回默认 3001，
+# 就绪轮询按自定义端口永远问不到自己，最后误报「端口被别的程序占用」。
+export PORT
+LABEL="${QUEST3_LABEL:-com.cpufreestyle.quest3exploded}"
+AGENT_DIR="${QUEST3_AGENT_DIR:-$HOME/Library/LaunchAgents}"
+AGENT_PLIST="$AGENT_DIR/$LABEL.plist"
+URL="http://localhost:${PORT}/"
+IDENTITY_URL="http://localhost:${PORT}/api/identity"
+LOG_FILE="${QUEST3_LOG_FILE:-$HOME/Library/Logs/quest3-exploded.log}"
+RUN_DIR="${QUEST3_RUN_DIR:-$HOME/Library/Application Support/quest3-exploded}"
+PID_FILE="$RUN_DIR/server.pid"
+OSA="${QUEST3_OSA:-/usr/bin/osascript}"
+OPEN_CMD="${QUEST3_OPEN_CMD:-open}"
+DOMAIN="gui/$(id -u)"
+
+mkdir -p "$(dirname "$LOG_FILE")" "$RUN_DIR" 2>/dev/null || true
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >>"$LOG_FILE"; }
+notify() { "$OSA" -e "display notification \"$2\" with title \"$1\"" >/dev/null 2>&1 || true; }
+alert()  { "$OSA" -e "display alert \"$1\" message \"$2\" as critical" >/dev/null 2>&1 || true; }
+
+# .app 由 Finder/launchd 拉起，PATH 极简，必须显式探测 node
+locate_node() {
+  local c p d n
+  if [ -n "${QUEST3_NODE:-}" ] && [ -x "${QUEST3_NODE}" ]; then
+    echo "$QUEST3_NODE"; return 0
+  fi
+  for c in node nodejs; do
+    p="$(command -v "$c" 2>/dev/null || true)"
+    if [ -n "$p" ] && [ -x "$p" ]; then echo "$p"; return 0; fi
+  done
+  for d in "$HOME/.local/bin" "$HOME/.volta/bin" "$HOME/.nodenv/shims" \
+           "$HOME/.hermes/node/bin" /opt/homebrew/bin /usr/local/bin /usr/bin /bin; do
+    for n in node nodejs; do
+      if [ -x "$d/$n" ]; then echo "$d/$n"; return 0; fi
+    done
+  done
+  p="$(/bin/zsh -lc 'command -v node' 2>/dev/null || true)"
+  if [ -n "$p" ] && [ -x "$p" ]; then echo "$p"; return 0; fi
+  return 1
+}
+
+NODE_BIN="$(locate_node || true)"
+if [ -z "$NODE_BIN" ]; then
+  log "FATAL node not found"
+  alert "$APP_NAME 无法启动" "未找到 Node.js，请先安装 Node 18 及以上版本。"
+  exit 1
+fi
+
+if [ ! -f "$APP_DIR/server.js" ]; then
+  log "FATAL server.js missing in $APP_DIR"
+  alert "$APP_NAME 无法启动" "运行目录不完整：$APP_DIR"
+  exit 1
+fi
+
+# 运行目录靠 git archive 重建时会丢 node_modules，而 server.js 需要 undici，这里自动补回
+ensure_deps() {
+  local marker="$APP_DIR/node_modules/undici/package.json"
+  local cand
+  if [ -f "$marker" ]; then return 0; fi
+  for cand in "$HOME/AI Shared/repo/quest3-exploded/node_modules/undici" \
+              "$APP_DIR/../node_modules/undici" \
+              "$HOME/node_modules/undici"; do
+    if [ -f "$cand/package.json" ]; then
+      mkdir -p "$APP_DIR/node_modules"
+      cp -R "$cand" "$APP_DIR/node_modules/" 2>/dev/null || true
+      log "auto-restored undici from $cand"
+      if [ -f "$marker" ]; then return 0; fi
+    fi
+  done
+  return 1
+}
+ensure_deps || log "WARN undici not resolvable, server.js may fail to boot"
+
+# ── 身份识别 ────────────────────────────────────────
+# /api/identity 是即时返回的（不 exec Blender），请求慢或失败基本只有一种原因：
+# 「这不是我们的服务」。四个字段按需取：app 用来认亲，version 用来发现旧实例，
+# pid 用来保证只终止自己拉起的进程。
+identity_body() {
+  curl -fsS --max-time 2 "$IDENTITY_URL" 2>/dev/null || true
+}
+
+is_own_service() {
+  local body
+  body="$(identity_body)"
+  [ -n "$body" ] || return 1
+  printf '%s' "$body" | command grep -q "\"app\":\"$APP_ID\"" || return 1
+  return 0
+}
+
+identity_field() {
+  identity_body | command sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p" | command head -n 1
+}
+
+identity_number() {
+  identity_body | command sed -n "s/.*\"$1\":\([0-9][0-9]*\).*/\1/p" | command head -n 1
+}
+
+listener_pids() {
+  lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null || true
+}
+
+# 期望版本：运行目录 package.json 里第一处 version。部署目录由 git archive
+# 产出，结构固定；读不到就给空串，此时跳过「旧实例换新」的判定，仍按
+# 「是不是我」走，不会因此拒绝启动。
+expected_version() {
+  command sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^\"]*\)".*/\1/p' \
+    "$APP_DIR/package.json" 2>/dev/null | command head -n 1
+}
+
+# ── LaunchAgent 托盘 ------------------------------------------------------
+# RunAtLoad/KeepAlive 都关掉：只在双击 .app 时才起服务，不开机自启。
+write_agent_plist() {
+  mkdir -p "$AGENT_DIR" 2>/dev/null || true
+  cat >"$AGENT_PLIST" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>$LABEL</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>$NODE_BIN</string>
+		<string>$APP_DIR/server.js</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>$APP_DIR</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PORT</key>
+		<string>$PORT</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>KeepAlive</key>
+	<false/>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>StandardOutPath</key>
+	<string>$LOG_FILE</string>
+	<key>StandardErrorPath</key>
+	<string>$LOG_FILE</string>
+</dict>
+</plist>
+PLIST_EOF
+}
+
+# 只停自己的服务：launchd bootout，外加「身份确认过且拿到了 PID」时按 PID
+# 收尾（nohup 起的实例 launchd 管不到）。身份不匹配就一个进程都不杀——别人家
+# 的进程哪怕占着同一个端口也不归我们管。
+stop_server() {
+  launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
+  local p=""
+  if is_own_service; then p="$(identity_number pid)"; fi
+  if [ -n "$p" ] && [ "$p" != "0" ]; then
+    kill "$p" 2>/dev/null || true
+    log "stopped own instance pid=$p on port $PORT"
+  else
+    log "stopped via bootout"
+  fi
+}
+
+# 拉起：先 bootout 清掉旧的，再 bootstrap + kickstart
+start_via_launchd() {
+  stop_server
+  write_agent_plist
+  if ! launchctl bootstrap "$DOMAIN" "$AGENT_PLIST" >/dev/null 2>&1; then
+    launchctl load "$AGENT_PLIST" >/dev/null 2>&1 || true
+  fi
+  launchctl kickstart -k "$DOMAIN/$LABEL" >/dev/null 2>&1 && return 0
+  return 1
+}
+
+# 兜底：launchd 不可用时退回 nohup
+start_via_nohup() {
+  cd "$APP_DIR" || return 1
+  nohup "$NODE_BIN" "$APP_DIR/server.js" >>"$LOG_FILE" 2>&1 &
+  disown 2>/dev/null || true
+  echo "$!" >"$PID_FILE"
+}
+
+# 端口被别的程序占用：不打开、不抢占、不谎报，把占用者说清楚后退出
+report_foreign_occupant() {
+  local pids detail pid line
+  pids="$(listener_pids)"
+  detail=""
+  for pid in $pids; do
+    line="$(ps -o command= -p "$pid" 2>/dev/null | command head -n 1)"
+    [ -n "$line" ] || line="(命令不可读，进程可能刚退出)"
+    detail="${detail:+${detail}; }PID $pid $line"
+  done
+  [ -n "$detail" ] || detail="PID $(echo "$pids" | command tr '\n' ' ')"
+  log "port $PORT occupied by a foreign process, refusing to open it: $detail"
+  echo "端口 $PORT 被其他程序占用，本程序没有启动，也没有打开该页面。" >&2
+  echo "占用进程：$detail" >&2
+  echo "处理方式：先结束上述进程再双击本图标；或 QUEST3_PORT=<其他端口> "$0" 换端口启动。" >&2
+  alert "$APP_NAME 无法启动" "端口 $PORT 被其他程序占用，已拒绝打开该页面。占用进程：${detail}。请先结束它，或换端口启动。日志：$LOG_FILE"
+  exit 2
+}
+
+case "${1:-start}" in
+  stop)
+    log "stop requested"
+    stop_server
+    notify "$APP_NAME" "服务已停止"
+    exit 0
+    ;;
+  restart)
+    log "restart requested"
+    stop_server
+    for _i in $(seq 1 20); do
+      [ -z "$(listener_pids)" ] && break
+      sleep 0.25
+    done
+    ;;
+  status)
+    if is_own_service; then
+      echo "端口 ${PORT}：本服务正在运行（版本 $(identity_field version)，PID $(identity_number pid)）"
+    else
+      pids="$(listener_pids)"
+      if [ -n "$pids" ]; then
+        echo "端口 ${PORT}：被其他程序占用（本服务未运行）："
+        for pid in $pids; do
+          echo "  PID $pid $(ps -o command= -p "$pid" 2>/dev/null | command head -n 1)"
+        done
+      else
+        echo "端口 ${PORT}：空闲（本服务未运行）"
+      fi
+    fi
+    exit 0
+    ;;
+esac
+
+log "launcher pid=$$ node=$NODE_BIN app=$APP_DIR action=${1:-start}"
+
+EXPECTED="$(expected_version)"
+
+# 已在运行：版本一致就直接复用；版本不一致说明是自己留下的旧实例，换新代码重启
+if is_own_service; then
+  RUNNING="$(identity_field version)"
+  if [ -z "$EXPECTED" ] || [ "$RUNNING" = "$EXPECTED" ]; then
+    log "already running (version=$RUNNING), open $URL"
+    "$OPEN_CMD" "$URL"
+    notify "$APP_NAME" "服务已在运行（v${RUNNING}），已打开浏览器"
+    exit 0
+  fi
+  log "stale instance on port $PORT: running=$RUNNING expected=$EXPECTED, restarting"
+  stop_server
+  for _i in $(seq 1 20); do
+    [ -z "$(listener_pids)" ] && break
+    sleep 0.25
+  done
+fi
+
+# 端口上有监听但身份不是自己 -> 别人的程序，拒绝打开
+if [ -n "$(listener_pids)" ]; then
+  report_foreign_occupant
+fi
+
+START_MODE="launchd"
+if ! start_via_launchd; then
+  START_MODE="nohup"
+  log "launchd start failed, fallback nohup"
+  start_via_nohup || true
+fi
+
+# 轮询就绪：判据是「身份标记匹配」而不是「端口有响应」。端口被外人抢走时，
+# 老逻辑会把外人的 HTTP 200 当成就绪然后把页面开给用户。
+READY=0
+for _i in $(seq 1 48); do
+  if is_own_service; then READY=1; break; fi
+  if [ "$START_MODE" = "nohup" ] && [ -s "$PID_FILE" ]; then
+    P="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [ -n "$P" ] && ! kill -0 "$P" 2>/dev/null; then
+      log "nohup server exited, see $LOG_FILE"
+      break
+    fi
+  fi
+  sleep 0.25
+done
+
+if [ "$READY" = "1" ]; then
+  RUNNING="$(identity_field version)"
+  PID_ON_PORT="$(identity_number pid)"
+  [ -n "$PID_ON_PORT" ] && echo "$PID_ON_PORT" >"$PID_FILE"
+  log "ready version=$RUNNING pid=$PID_ON_PORT mode=$START_MODE, open $URL"
+  "$OPEN_CMD" "$URL"
+  notify "$APP_NAME" "服务已启动（v${RUNNING}），已打开浏览器"
+  exit 0
+fi
+
+# 起好了却没就绪：端口被外人抢走的话必须报清楚，不能把外人的页面开给用户
+if [ -n "$(listener_pids)" ]; then
+  report_foreign_occupant
+fi
+
+log "NOT ready after wait, see $LOG_FILE"
+alert "$APP_NAME 启动异常" "服务未在预期时间内就绪，且端口未被本服务占用，请查看日志：$LOG_FILE"
+exit 1

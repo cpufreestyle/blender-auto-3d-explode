@@ -2,7 +2,7 @@
 
 所有项目的显著变更都将记录在此文件中。
 
-## [未发布] - 2026-09-30
+## [v3.3.3] - 2026-09-30
 
 > 「意义」专项第三轮：直面「Tripo AI 已经能拆 3D」的冲击。生成与重建这一层确实被商品化了，本轮不追，转而加固它给不了的三件事——确定性的拆分、可复现的步骤、可分发的那条链接。
 
@@ -10,6 +10,15 @@
 
 - **步骤深链与分享**（src/step-link.js）— 「学到第几步」写进地址栏 #step=3：点开别人发的链接就落在同一步；换模型、刷新、点浏览器历史都同步。写回走 replaceState 而不是 pushState（逐步点下来不会把历史灌成几十条），且只在值真的变了时才碰 history——updateStepUI 每帧都被调，白写会把历史写穿。用 hash 而非 search：静态托管与 file:// 直开都能用，也不会让 step= 参与本仓库按 ?v= 给的 immutable 缓存键。配套：复制本步链接按钮与快捷键 L，以及教案里每一步都带一条可点链接——讲义可以直接发到群里。设计边界：深链只是 currentStep / displayedStep 的镜像，hashchange 只触发一次 goToStep，永远不反向当真相。
 - **授课模式**（src/teaching-mode.js）— 一键把 AI 绘画、上传自定义模型、AI 配置入口与页脚提示整块收起，只留 3D 视图与教学控件；按钮加快捷键 T，状态记忆在 localStorage 的 quest3-teaching-mode（讲台上刷新页面不该又见到满屏生成面板）。收起复用仓库既有的 .hidden，不新增 CSS。有个坑：#blender-banner 常态就是 .hidden，一刀切减类会把它「还」出来，所以收起前先记原状、还原时按原状决定去不去类。
+
+### 🐛 修复
+
+- **桌面启动器会把别人的页面当成自己的打开**（scripts/mac/quest3-launcher + src/routes-identity.js）— 本机 :3001 早已被 freellmapi 占住，双击桌面图标后启动器 curl 到「端口有响应」就认定「服务已在运行」，于是打开的是那个 Vite 脚手架首页，通知却写着正常——用户双击得到的是个陌生应用。根因是启动器把「端口活着」当成了「是我的服务」。/api/health 顶不了这个缺：它要 execFile 跑一次 blender --version，最长 10s，Blender 慢起时会被误判成陌生人。因此新增 GET /api/identity：不 exec、不碰磁盘、不读配置，即时回 { app, name, version, pid, port }，启动器只认 app 是否等于 APP_ID。端口被陌生人占住时明确拒绝拉起并报出占用者；stop 只终止 identity 里自己那个 PID，不再对端口上所有监听进程下手——此前整端口扫 kill 会把别人的服务一起带走。identity_body 走 curl --max-time 2，识别不出的端口直接判陌生人，不会让启动器卡在黑屏。
+- **桌面启动器测试框架并发**（tests/desktop-launcher-test.mjs）— 该套件的 it() 自己 await 用例，而 describe() 的函数体是同步调用 it(...) 且没人 await 它，于是 6 个用例同时开跑，互相抢同一个端口 3457 与同一套夹具：日志里所有 ▶ 标题先打、assert 后打，用例异常变成 unhandledRejection 直接打挂进程（症状是 status 断言里 JSON.parse(body).pid 崩在空串上）。改为 it() 只入队、runner 串行 await，单例异常转成 assert(false) 而不是掀桌。顺带修掉三处会误伤的点：kill(0) 会射杀整个进程组（测试自己也在里面）故改成按 PID 定点 kill；pidAlive 对 pid<=0 补 false；4 处裸 process.kill 收敛到 killPid。
+
+### 🔧 依赖
+
+- **undici 8.10.0 → 8.10.2**（#99）— 跨源缓存投毒、BalancedPool 丢弃连接选项、WebSocket 子协议选择等多条高/中危漏洞（GHSA-vp8m-p9jh-q5pm / GHSA-w293-vg96-wgc3 / GHSA-rfgv-xxqx-mfg5）。
 
 ### 🎨 界面
 
@@ -19,6 +28,7 @@
 
 - **新增一条真机冒烟门禁**：scripts/ci_teaching_ui_smoke.mjs（26 条）钉住「部件清单默认展开且排在 AI 绘画之前」「授课模式四处收起再还原」「按方向键后地址栏跟着写成 #step=N」「带 #step=3 打开即落在第 3 步」「全程 0 运行时异常」，已挂进 npm run smoke:ui。三个既有门禁未被拖红：smoke:parts 18/0、smoke:sidebar 21/0、smoke:narrow 24/0。
 - 单测：新增 tests/step-link-test.mjs（30 条）与 tests/teaching-mode-test.mjs（38 条，后者当场抓出「一刀切减类会把常态隐藏的横幅还出来」这个设计缺陷），并给 explode-controller / export-panel / keyboard-shortcuts 三个既有套件补 43 条用例。npm test 由 3218 增至 3328 条断言 0 失败；lint:check 0 errors。
+- **新增桌面启动器测试**：tests/desktop-launcher-test.mjs（28 条）钉住「端口被别的程序占用时拒绝拉起、stop 一个都不杀」「端口是自己的就正常拉起、stop 只杀自己那个 PID」「identity 缺字段或端口不符都判陌生人」，已挂进 npm test。做过变异验证：把 is_own_service 的 grep 判据改成恒真，立刻报 8 失败并精准复现「误开别人的页面」这个原始 bug。启动器本身读 QUEST3_* 环境变量，手工搭 foreign stub 复现出的行为是正确的——接手时见到的红全是测试框架并发造成的假象。
 - 排查实录（值得留下）：headless 视口只有 717px 高而侧栏内容约 1.4k px，按钮在折叠线以下时 document.elementsFromPoint 返回空数组、CDP 的点直接落到画布上——「点了没反应」在这里是假阴性，冒烟里必须先 scrollIntoView 再取矩形。另一条：连续两次方向键间隔若小于 600ms，第二次会被 goToStep 的 isAnimating 守卫挡掉，冒烟里要等动画落定。
 - 文档：新增 docs/OSS_REFERENCES.md——本轮调研过的开源项目清单（star / 许可 / 最近推送均为 2026-09-30 GitHub API 实测）、各自借了什么、落在哪个文件，以及「这个细分领域最高只有 2 星、没有同类作业可抄」这个关键发现。
 
