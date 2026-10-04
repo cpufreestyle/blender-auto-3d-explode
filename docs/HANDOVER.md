@@ -19,13 +19,14 @@
 > - **决定性消融实验**：把临时加进 `ui_smoke_lib.mjs` 的 `Input.setIgnoreInputEvents({ignore:false})` 撤掉后重跑 `smoke:sidebar`，**仍是 21/0**——证明那行属冗余，已撤除，未进入提交。教训：单个探针里「加了 X 就好了」不等于 X 是根因，必须做消融；本例若不做消融，就会把一个无效的 CDP 调用当成修复固化下来。
 > - 排查中确认过的「应用侧无罪」证据（可复用）：`DOMDebugger.getEventListeners` 显示按钮监听器确实绑着；`document.elementFromPoint` 命中正确元素；`localStorage` 读写正常；`pageErrors` 为空；加载期无异常；`performance.getEntriesByType("resource")` 无 404（仅 `ai-config.json`、`favicon.ico` 两个预期 404）。
 > - **桌面版运行时已同步到 v3.3.2**（`git archive origin/main | tar -x -C ~/Apps/quest3-exploded` + launcher restart，实测首页返回 `?v=3.3.2`、`/api/health` ok、Blender 5.1.2 可用）。
+> **2026-10-03 发版进行中（v3.3.3）**：本轮收口桌面启动器修复——启动器原先拿「端口有响应」当「服务已在运行」，本机 :3001 被 freellmapi 占住时双击桌面图标会打开别人的 Vite 首页。新增 `GET /api/identity`（即时、不 exec、不碰磁盘）供启动器认亲，陌生人占用时拒绝拉起并报出占用者，stop 只终止自己那个 PID。分支 `chore/release-3.3.3`（基于 `origin/main` = `2488162`），版本号 `package.json` / `package-lock.json` / `index.html` 两处 `?v=` 全部同步到 3.3.3；`npm test` 新增 `tests/desktop-launcher-test.mjs`（28 条）后全绿，`lint:check` 0 errors。**推送/开 PR 待 GitHub 可达后补做**（本机直连与系统代理 :1082 均不通，CONNECT 返回 503）。
 
 
 ---
 
 ## 1. 交接概览
 
-一个基于 **Three.js + Node.js + Blender** 的交互式 3D 拆解教学工具：加载/生成模型 → 爆炸视图动画 → 分步骤拆解教学 → WebXR AR 预览。当前版本 `3.3.2`（本地、远程、桌面版运行时三处一致）。
+一个基于 **Three.js + Node.js + Blender** 的交互式 3D 拆解教学工具：加载/生成模型 → 爆炸视图动画 → 分步骤拆解教学 → WebXR AR 预览。当前版本 `3.3.2`（远程与桌面版运行时一致）；本地工作树 `~/worktrees/significance` 上 v3.3.3 发版改动已提交、待推送。
 
 **最近一轮成果：**
 
