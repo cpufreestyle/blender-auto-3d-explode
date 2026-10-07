@@ -19,7 +19,7 @@ npm run server
 # 运行全部单元测试
 npm test
 
-# 运行 Python 侧单元测试（15 项，零依赖，与 CI 的 pytest tests/ 同一批）
+# 运行 Python 侧单元测试（36 项，零依赖，与 CI 的 pytest tests/ 同一批）
 npm run test:py
 
 # 运行 E2E 测试
@@ -48,7 +48,7 @@ npm run format
 
 ### 1. 3D 场景引擎 — `main.js`
 
-前端入口，2886 行。负责 Three.js 场景初始化、WebGL/WebXR 检测、OrbitControls 相机控制、GLB/STL 模型加载、爆炸动画插值、乐高砖块拼接、AR 会话管理。所有用户交互与 UI 状态在此汇聚。
+前端入口，681 行。负责 Three.js 场景初始化、WebGL/WebXR 检测、OrbitControls 相机控制、GLB/STL 模型加载、爆炸动画插值、乐高砖块拼接、AR 会话管理。所有用户交互与 UI 状态在此汇聚。
 
 ### 2. Node.js 后端 — `server.js` + `src/server-utils.js` + `src/body.js` + `src/logger.js`
 

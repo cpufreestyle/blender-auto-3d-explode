@@ -105,9 +105,9 @@ node server.js
 ```text
 ├── index.html          # 主页面（3D 拆解预览）
 ├── ai-config.html      # AI 模型配置页
-├── main.js             # 前端入口装配（659 行，逻辑在 src/）
-├── server.js           # Node.js 入口（391 行，逻辑在 src/routes-* 等）
-├── src/                # 前端与服务端模块（57 个）
+├── main.js             # 前端入口装配（681 行，逻辑在 src/）
+├── server.js           # Node.js 入口（408 行，逻辑在 src/routes-* 等）
+├── src/                # 前端与服务端模块（60 个）
 │   ├── panels/         # AI 面板 / 配置提醒 / GLB 请求等界面件
 │   └── providers/      # 图片转 3D 提供方适配
 ├── vendor/three/       # three 0.186 同构镜像，importmap 直指，dev 与生产同源

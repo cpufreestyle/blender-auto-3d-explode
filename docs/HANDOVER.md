@@ -63,8 +63,8 @@
 npm install          # 安装依赖
 npm run dev          # 前端静态服务（npx serve . ，默认 3000）
 npm run server       # Node 后端（server.js，默认 3001，调用 Blender）
-npm test             # 单元（209 项）+ provider（38 项）测试
-npm run test:py      # Python 侧单测（20 项，零依赖，与 CI 的 pytest tests/ 同一批）
+npm test             # 56 个 .mjs 套件 / 3328 断言（见 harness.md §4）
+npm run test:py      # Python 侧单测（36 项，零依赖，与 CI 的 pytest tests/ 同一批）
 npm run test:e2e     # E2E
 npm run lint:all     # ESLint + StyleLint（带 --fix，会改文件）
 npm run lint:all:check  # 同上但不改文件，CI 用的就是这组
@@ -75,7 +75,7 @@ Python 侧工具**本机没装、也不必 pip 安装到系统环境**，用 `uv
 
 ```bash
 uvx ruff@0.16.8 check *.py scripts/*.py blender_scripts/*.py tests/*.py
-uvx --with numpy pytest@8 tests/ -q   # 34 passed（= ai_paint 9 + vlm_out_path 6 + img2depth 14 + 其余 5）
+uvx --with numpy pytest@8 tests/ -q   # 36 passed（= ai_paint 9 + vlm_out_path 11 + img2depth 14 + blender6_compat 2）
 ```
 
 > ⚠️ **numpy 必须显式给**：`img2depth_test` 的深度先验测试依赖 numpy，`uvx pytest@8` 默认隔离环境
@@ -96,7 +96,7 @@ uvx --with numpy pytest@8 tests/ -q   # 34 passed（= ai_paint 9 + vlm_out_path 
 
 | 模块 | 文件 | 职责 |
 |---|---|---|
-| 3D 场景引擎 | `main.js`（实测 2855 行） | Three.js 场景、OrbitControls、GLB/STL 加载、爆炸动画、乐高砖块、WebXR AR、导出 |
+| 3D 场景引擎 | `main.js`（实测 681 行） | Three.js 场景、OrbitControls、GLB/STL 加载、爆炸动画、乐高砖块、WebXR AR、导出 |
 | Node 后端 | `server.js`、`src/server-utils.js`、`src/body.js`、`src/logger.js` | 零外部依赖 HTTP 服务，调用 Blender CLI |
 | 数据/步骤 | `src/quest3-data.js`、`src/quest3-steps.js` | Quest 3 规格、分步骤拆解教学方案 |
 | 几何/材质 | `src/geometry-split.js`、`src/lego-materials.js`、`src/utils.js` | 连通分量/材质分组拆分、UnionFind、原生与乐高材质 |
@@ -214,7 +214,7 @@ Hyper3D 图生/文生共用模块私有的 `finishHyper3DTask`（轮询 → 取�
 | 优先级 | 事项 | 说明 |
 |---|---|---|
 | ~~**Next**~~ | ~~本地"真实深度"模式~~ | ✅ 已完成（见 §1）：`--mode depth` 多线索单目深度先验 + 真实厚度，离线即用与天生可拆解两个优点均保留；relief/voxel 仍可选 |
-| Later | `main.js` 继续拆分 | 实测 2886 行（`AGENTS.md` 已同步为 2886）；已抽出 `model-loaders.js`、`quest3-parts.js`、`explode-geometry.js`，建议继续拆爆炸动画 / AR / 面板 |
+| ~~Later~~ | ~~`main.js` 继续拆分~~ | ✅ 已完成：`main.js` 实测 681 行，应用外壳仅剩事件监听引导 / 桥接块与编排收尾函数 |
 | ~~Later~~ | ~~统一图片转3D调度器~~ | ✅ 已完成（见 §1）：`generateImageTo3D()` 收敛在 `src/image-to-3d-router.js`，deps 注入可单测，回退/超时规则各只有一份 |
 | ~~Later~~ | ~~E2E / Blender 冒烟进 CI~~ | ✅ 已完成（见 §1）：`blender-smoke` job 实跑两条 Blender 路径并对产物断言；断言脚本本机可复现，tarball 缓存后增量耗时约 1 分钟 |
 | Later | `Material.use_nodes` 迁移 | Blender 6.0 计划移除该属性（本机 5.1 已报 DeprecationWarning），涉及仓库所有材质创建处 |
@@ -227,11 +227,11 @@ Hyper3D 图生/文生共用模块私有的 `finishHyper3DTask`（轮询 → 取�
 ```bash
 # 1) Python 质量门（与 CI 的 Lint Python 完全一致）
 uvx ruff@0.16.8 check *.py scripts/*.py blender_scripts/*.py tests/*.py   # 期望 All checks passed!
-uvx --with numpy pytest@8 tests/ -q                                        # 期望 34 passed（不加 --with numpy 会 skip 6 项）
+uvx --with numpy pytest@8 tests/ -q                                        # 期望 36 passed（不加 --with numpy 会 skip 14 项）
 
 # 2) JS 质量门
-npm run lint:check  # 期望 0 errors（既有 26 条 warning 不阻断：CI 未加 --max-warnings 0）
-npm test         # 期望 unit 209/0、provider 38/0、router 45/0
+npm run lint:check  # 期望 0 errors（既有 52 条 warning 不阻断：CI 未加 --max-warnings 0）
+npm test         # 期望 56 套件 / 3328 断言 / 0 失败
 
 # 3) Blender 实跑（最硬的一条证据，证明 Python 侧行为没被改坏）
 /Applications/Blender.app/Contents/MacOS/Blender --background \
@@ -247,13 +247,14 @@ node /tmp/e2e_img3d.mjs    # 期望 200 / X-Success: true / X-Total-Parts: 9
 BLENDER_PATH=/Applications/Blender.app/Contents/MacOS/Blender npm run test:blender
 ```
 
-上述数字是**本地分支 `e2eb2fb` 上的实测值**。origin/main 已前进一个提交，其测试计数可能略有差异。
+上述数字是 **main `e8fb32e`（v3.3.3）上的实测值**，详见 `harness.md` §4。
 
 ---
 
 ## 9. 参考文档索引
 
 - 项目规范（**接手先读**）：`AGENTS.md` — 构建命令、模块架构、编码与 Python 脚本约定
+- 行为契约与验证台账：`spec.md` / `harness.md` — 端点、不变式、验证命令、核验结论与 Drift 台账
 - Python 质量门：`ruff.toml`（规则集收窄理由写在文件头注释里）
 - Blender 相关：`BLENDER_QUICK_START.md`、`BLENDER_MCP_INTEGRATION.md`、`BLENDER_MCP_TROUBLESHOOTING.md`、`BLENDER_PYTHON_API.md`
 - AR/WebXR：`WEBXR_AR_IMPLEMENTATION.md`、`AR_FEATURE_COMPLETE.md`、`AR_TEST_QUICKSTART.md`

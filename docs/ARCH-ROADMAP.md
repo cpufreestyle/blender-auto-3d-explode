@@ -4,12 +4,12 @@
 > 状态：持续更新。每次合并后回填「进度」。
 
 ## 现状（已核实）
-- `server.js` 当前实测 391 行（2026-09-25，main 上为 1828 行）：经 NE1 模块化、NE4 模型单一来源、L1 结构化日志/中间件、L2 试点、OBJ 支持之后，L5 又按「能力」把服务端拆成 10 个 ES module（见 L5 行，每块都带 DI 接缝、单测与变异验证）。剩余 391 行只做启动引导（代理探测 → Blender 探测 → 目录创建 → 定时清理）+ 目录/常量 + 各工厂接线 + 路由分发 + 静态文件服务 + 进程级异常守卫。
+- `server.js` 当前实测 408 行（2026-10-07）：L5 之后又经 NE4 / identity 端点 / 桌面启动器修复等增量，剩余 408 行只做启动引导（代理探测 → Blender 探测 → 目录创建 → 定时清理）+ 目录/常量 + 各工厂接线 + 路由分发 + 静态文件服务 + 进程级异常守卫。
 - 图片转3D 三厂商（Meshy/Tripo/Hyper3D）公共逻辑已抽为 `src/providers/image-to-3d.js`（`runMeshyImageTo3D` 等纯函数，返回 `{glbBuffer, manifest}`，N3+NE1 完成）。
 - 请求体解析已统一为 `src/body.js` 的 `readBody(req,{maxSize})`：按 Content-Type 分发 JSON/multipart，复用 `src/server-utils.js` 的 `parseMultipartBuffer` 提取文件（NE3 完成，原三套解析器 `parseMultipart`/`readJSONBodyMax`/`readJSONBody` 已移除）。
 - 模型清单单一来源：`src/provider-models.js` 供 server 与 `ai-config.html` 共享（NE4 完成）。
 - 上传格式支持：`.glb / .gltf / .stl / .obj`（前端 `main.js` `handleFile` 还接受 `.urdf`，由前端 XML 解析、不走 Blender 拆解）。上传大小上限 `MAX_FILE_SIZE = 150MB`（`src/server-utils.js`，前端 `main.js` 硬校验同步）。
-- `main.js` 当前实测 688 行（2026-09-25）：L2 前端模块化两轮完成（见下方 L2 行），3D 拆解控制、几何拆分、相机适配、样式切换、自定义模型加载/面板/收尾、模型归一化、拆卸释放、装配顺序对接、Quest 3 默认模型构建、GLTF 惰性加载、状态条/加载覆盖层、主题与样式切换、生成库加载、键盘快捷键、步骤描述淡入、场景初始化均已迁至 `src/` 下 ES module；剩余为渲染循环（`animate`）、窗口 resize、事件监听引导（`setupUpload` / `setupAIPaint` / `createARPreview` / `setStepUIHook`）、共享状态声明与各工厂实例的 getState/setState 桥接等应用外壳代码。
+- `main.js` 当前实测 681 行（2026-10-07）：L2 前端模块化已收口（含 `src/render-loop.js` 抽取），剩余仅事件监听引导（`setupUpload` / `setupAIPaint` / `createARPreview` / `setStepUIHook`）、共享状态声明与各工厂实例的 getState/setState 桥接等应用外壳代码。
 - 版本号曾脱节：`package.json` `2.0.0` vs release `v3.2.3`（N2 已对齐 `84c9cbd`）。
 - release 流程曾手动 `gh` 导致误标 Latest（已纠正为 v3.2.3；后续统一走 `scripts/create_release.sh`）。
 
