@@ -127,7 +127,7 @@ describe("index.html 的 id 都有消费者", () => {
   ].join("\n");
 
   it("数量与现状一致（回归后先看这里，别静默放行）", () => {
-    assert(ids.length === 85, `index.html 声明了 ${ids.length} 个 id，预期 85（新增 teaching-mode-btn / copy-step-link-btn / ai-paint-panel / upload-panel）`);
+    assert(ids.length === 86, `index.html 声明了 ${ids.length} 个 id，预期 86（新增 export-manifest-btn）`);
   });
 
   it("没有任何 id 是孤儿（词边界命中才算）", () => {
@@ -225,7 +225,7 @@ describe("JS 取的每个 id 都有着落", () => {
   };
 
   it("数量与现状一致", () => {
-    assert(requested.length === 119, `字面量 getElementById ${requested.length} 个，预期 119（+2：授课模式开关与复制深链按钮）`);
+    assert(requested.length === 120, `字面量 getElementById ${requested.length} 个，预期 120（+1：部件清单导出按钮）`);
     assert(templates.length === 5, `模板 getElementById ${templates.length} 个，预期 5`);
   });
 

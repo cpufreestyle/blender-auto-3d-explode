@@ -16,6 +16,7 @@
  */
 
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+import { buildSplitManifest, serializeSplitManifest } from "./split-manifest.js";
 
 export function createExportPanel({
   renderer,
@@ -30,6 +31,10 @@ export function createExportPanel({
   // 步骤深链构造器（src/step-link.js）。缺省 null 时教案里不带链接、复制链接按钮
   // 明确报错，而不是硬拼一个错的地址。由 main.js 注入，测试不必管地址栏。
   buildStepUrl = null,
+  // 部件级清单构造函数（src/split-manifest.js）。仅测试注入的缝：生产中恒为
+  // buildSplitManifest。与 GLTFExporterClass 同一套路——Node 里跑不了真 three
+  // 几何，假实现让「清单内容正确性」用例不依赖浏览器。
+  buildManifest = buildSplitManifest,
 }) {
   // ===== 可变状态（原 main.js 的模块级 let，会随加载/清除自定义模型重赋值）=====
   // 不能在建厂时拷一份快照：按钮点击发生在模块求值之后，必须每次读最新值。
@@ -276,6 +281,37 @@ export function createExportPanel({
     }
   }
 
+  // ===== 部件级清单导出：autoSplitModel 的产出 -> 可交换 JSON =====
+  // 与 GLB 导出的分工：GLB 是「看得见的几何」，manifest 是「可编程的索引」——
+  // 部件名 / 三角形数 / 体积 / 表面积 / 包围盒 / 质心 / 爆炸位置。刷新页面、
+  // 换设备、交给别的工具做数据驱动 UI 或离线重放时，不必重跑拆分。
+  function exportSplitManifest() {
+    syncState();
+    try {
+      const partsInModel = hasCustomModel ? customModelParts : parts;
+      if (!partsInModel || partsInModel.length === 0) {
+        showToast("❌ 当前没有可导出的部件", "error");
+        return;
+      }
+      // camera 传入：manifest 里的 explodePos 与屏幕上看到的是同一个算法的结果
+      const manifest = buildManifest(partsInModel, { model: currentModelName, camera });
+      const blob = new Blob([serializeSplitManifest(manifest)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      triggerDownload(url, `${currentModelName}-部件清单-${fileTimestamp()}.json`);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      const skipped = manifest.summary.skipped;
+      showToast(
+        `📋 部件清单已导出（${manifest.totalParts} 个部件` +
+          (skipped > 0 ? `，跳过 ${skipped} 个异常项` : "") +
+          "）",
+        skipped > 0 ? "info" : "success",
+      );
+    } catch (err) {
+      showToast("❌ 清单导出失败：" + (err && err.message ? err.message : err), "error");
+    }
+  }
   const shotBtn = document.getElementById("shot-btn");
   if (shotBtn) shotBtn.addEventListener("click", exportScreenshot);
   const exportMdBtn = document.getElementById("export-md-btn");
@@ -284,6 +320,8 @@ export function createExportPanel({
   if (copyMdBtn) copyMdBtn.addEventListener("click", copyLessonMarkdown);
   const exportGlbBtn = document.getElementById("export-glb-btn");
   if (exportGlbBtn) exportGlbBtn.addEventListener("click", exportGLB);
+  const exportManifestBtn = document.getElementById("export-manifest-btn");
+  if (exportManifestBtn) exportManifestBtn.addEventListener("click", exportSplitManifest);
   return {
     showToast,
     getToastWrap,
@@ -296,5 +334,6 @@ export function createExportPanel({
     copyLessonMarkdown,
     copyStepLink,
     exportGLB,
+    exportSplitManifest,
   };
 }
