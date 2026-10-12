@@ -7,7 +7,8 @@
 //   2. <meta name="api-base"> 标签 —— 两个页面里真实在用的旋钮。此前只有
 //      页面内联脚本读它、模块侧读不到，改标签会让配置页与主应用指向不同
 //      后端，现在由本文件收口，改一处即整体生效；
-//   3. "http://localhost:3001" —— 默认值。
+//   3. "http://localhost:3011" —— 默认值。3001 在本机被 freellmapi 长期占用
+//      （launchd KeepAlive + RunAtLoad），桌面图标已改到 3011，三处保持同口。
 // Node 等无 document 的环境下第 2 步自动跳过（服务端 import 不会炸）。
 function readMetaApiBase() {
   if (typeof document === "undefined" || typeof document.querySelector !== "function") {
@@ -19,10 +20,10 @@ function readMetaApiBase() {
 
 /**
  * Blender/AI 后端服务地址
- * 开发环境: http://localhost:3001
+ * 开发环境: http://localhost:3011
  * 生产环境: 可通过 window.APP_CONFIG.API_BASE 覆盖
  */
 export const API_BASE =
   (typeof window !== "undefined" && window.APP_CONFIG?.API_BASE) ||
   readMetaApiBase() ||
-  "http://localhost:3001";
+  "http://localhost:3011";

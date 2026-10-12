@@ -12,6 +12,11 @@
 #   restart       重启服务并打开浏览器
 #   status        只报告端口占用者与版本，不动任何进程
 #
+# 端口默认 3011 而不是 3001：本机 freellmapi 由 launchd 托管（KeepAlive +
+# RunAtLoad）长期占着 3001，本项目若也用 3001，双击图标只会拿到「端口被其他
+# 程序占用」的告警。freellmapi 是别的项目的常驻服务，不该由本启动器去杀，
+# 所以换个双方都不冲突的端口。
+#
 # 端口归属判定：只有 GET /api/identity 回带的 app 标记等于下面的 APP_ID，才认为
 # 这个端口上是自己的服务（服务端实现见 src/routes-identity.js）。端口被别的程序
 # 占用时，本脚本不打开那个页面，而是把占用者是谁、怎么处理说清楚。老版本用
@@ -22,7 +27,7 @@ set -u
 APP_ID="blender-auto-3d-explode"
 APP_NAME="Quest 3D 拆解"
 APP_DIR="${QUEST3_APP_DIR:-$HOME/Apps/quest3-exploded}"
-PORT="${QUEST3_PORT:-3001}"
+PORT="${QUEST3_PORT:-3011}"
 # 导出来：launchd 那条路靠 plist 的 EnvironmentVariables 传端口，nohup 兜底那条
 # 路只继承环境——少了这句，自定义端口时拉起的 server.js 会退回默认 3001，
 # 就绪轮询按自定义端口永远问不到自己，最后误报「端口被别的程序占用」。

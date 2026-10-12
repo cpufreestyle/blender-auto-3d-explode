@@ -97,11 +97,11 @@ describe("API_BASE — meta 标签对模块侧生效（收口修复的核心）"
   });
   await it("meta 为空串时不当地址用，回落默认值", async() => {
     const v = await resolveApiBase({ meta: "" });
-    assert(v === "http://localhost:3001", `meta="" → ${v}`);
+    assert(v === "http://localhost:3011", `meta="" → ${v}`);
   });
   await it("没有 meta 时回落默认值", async() => {
     const v = await resolveApiBase({});
-    assert(v === "http://localhost:3001", `无 meta → ${v}`);
+    assert(v === "http://localhost:3011", `无 meta → ${v}`);
   });
 });
 
@@ -126,7 +126,7 @@ describe("API_BASE — 无 document 的服务端环境不炸", async() => {
   });
   await it("什么都没有时取默认值", async() => {
     const v = await resolveApiBase({ hasDocument: false });
-    assert(v === "http://localhost:3001", `无 document 无 APP_CONFIG → ${v}`);
+    assert(v === "http://localhost:3011", `无 document 无 APP_CONFIG → ${v}`);
   });
 });
 
@@ -156,7 +156,7 @@ describe("单一数据源 — meta 查询全仓只剩 src/config.js", async() =>
   await it("config.js 保留 export、APP_CONFIG 钩子与默认值三个要素", () => {
     assert(/export const API_BASE =/.test(CONFIG_SRC), "仍导出 API_BASE");
     assert(CONFIG_SRC.includes("window.APP_CONFIG?.API_BASE"), "window.APP_CONFIG 覆盖点未丢");
-    assert(CONFIG_SRC.includes("\"http://localhost:3001\""), "默认地址未丢");
+    assert(CONFIG_SRC.includes("\"http://localhost:3011\""), "默认地址未丢");
   });
 });
 
