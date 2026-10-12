@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>拆解方案重放</title>
+<style>
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #0f1115; color: #e6e8ee;
+    font-family: system-ui, -apple-system, "Microsoft YaHei", sans-serif;
+  }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+  .panel {
+    position: fixed; left: 16px; top: 16px; width: 260px; padding: 14px 16px;
+    border-radius: 12px; background: rgba(20, 24, 32, .82);
+    border: 1px solid rgba(255, 255, 255, .08);
+    font-size: 13px; line-height: 1.75; backdrop-filter: blur(8px);
+  }
+  .panel h1 { margin: 0 0 8px; font-size: 14px; color: #7cc4ff; }
+  .panel .row { display: flex; justify-content: space-between; gap: 8px; }
+  .panel .row span:last-child { color: #aab4c4; }
+  #progress { width: 100%; margin: 10px 0 4px; accent-color: #7cc4ff; }
+  .btns { display: flex; gap: 6px; margin-top: 8px; }
+  .btns button {
+    flex: 1; padding: 6px 0; border: 1px solid rgba(255,255,255,.14);
+    border-radius: 8px; background: rgba(255,255,255,.06); color: #e6e8ee;
+    font-size: 12px; cursor: pointer;
+  }
+  .btns button:hover { background: rgba(124,196,255,.18); }
+  .tip { margin-top: 10px; opacity: .55; font-size: 12px; }
+  .err {
+    position: fixed; inset: 0; display: none; place-items: center;
+    padding: 24px; text-align: center; color: #ff9a9a; font-size: 14px;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="panel">
+  <h1>拆解方案重放</h1>
+  <div class="row"><span>模型</span><span id="m-name">—</span></div>
+  <div class="row"><span>部件</span><span id="m-count">—</span></div>
+  <div class="row"><span>当前部件</span><span id="m-cur">—</span></div>
+  <input id="progress" type="range" min="0" max="100" value="0" />
+  <div class="btns">
+    <button id="btn-play">▶ 播放</button>
+    <button id="btn-reset">⟲ 复位</button>
+  </div>
+  <div class="tip">拖拽旋转 · 滚轮缩放 · 右键平移<br>manifest 只存几何摘要，此处以包围盒代理还原布局。</div>
+</div>
+<div class="err" id="err"></div>
+
+<script type="module">
+import * as THREE from './vendor/three/build/three.module.js';
+import { OrbitControls } from './vendor/three/examples/jsm/controls/OrbitControls.js';
+import { replayPlan, createReplayScene } from './src/manifest-replay.js';
+
+const MANIFEST_URL = new URLSearchParams(location.search).get('manifest');
+const errEl = document.getElementById('err');
+function fail(msg) {
+  errEl.style.display = 'grid';
+  errEl.textContent = msg;
+}
+if (!MANIFEST_URL) {
+  fail('缺少 manifest 参数。\n用法：replay.html?manifest=<json 地址>');
+  throw new Error('missing manifest param');
+}
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+if ('SRGBColorSpace' in THREE) renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.getElementById('app').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0f1115);
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.01, 5000);
+camera.position.set(4, 3, 6);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.2));
+const dirA = new THREE.DirectionalLight(0xffffff, 1.7); dirA.position.set(4, 6, 3); scene.add(dirA);
+const dirB = new THREE.DirectionalLight(0x88aaff, 0.5); dirB.position.set(-4, 2, -3); scene.add(dirB);
+
+const slider = document.getElementById('progress');
+const nameEl = document.getElementById('m-name');
+const countEl = document.getElementById('m-count');
+const curEl = document.getElementById('m-cur');
+const playBtn = document.getElementById('btn-play');
+let replay = null;
+let playing = false;
+
+// 指针悬浮高亮：manifest 是数据驱动的，这一步证明部件可被单独寻址
+const ray = new THREE.Raycaster();
+const ptr = new THREE.Vector2();
+addEventListener('pointermove', (e) => {
+  if (!replay) return;
+  ptr.x = (e.clientX / innerWidth) * 2 - 1;
+  ptr.y = -(e.clientY / innerHeight) * 2 + 1;
+  ray.setFromCamera(ptr, camera);
+  const hit = ray.intersectObjects(replay.partMeshes, false)[0];
+  curEl.textContent = hit ? hit.object.userData.partName : '—';
+});
+
+playBtn.addEventListener('click', () => {
+  playing = !playing;
+  playBtn.textContent = playing ? '⏸ 暂停' : '▶ 播放';
+});
+document.getElementById('btn-reset').addEventListener('click', () => {
+  slider.value = '0';
+  applyProgress(0);
+});
+slider.addEventListener('input', () => {
+  playing = false;
+  playBtn.textContent = '▶ 播放';
+  applyProgress(Number(slider.value) / 100);
+});
+
+function applyProgress(p) {
+  if (replay) replay.setProgress(p);
+}
+
+fetch(MANIFEST_URL)
+  .then((r) => {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  })
+  .then((manifest) => {
+    const plan = replayPlan(manifest);
+    if (plan.totalParts === 0) {
+      fail('manifest 里没有可重放的部件。\n' + (plan.reasons.join('\n') || '（无原因）'));
+      return;
+    }
+    replay = createReplayScene({ plan: plan, BoxGeometry: THREE.BoxGeometry });
+    scene.add(replay.group);
+
+    // 相机与目标点按整体包围盒摆放，任何方案都能完整入镜
+    const box = new THREE.Box3().setFromObject(replay.group);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    const dist = maxDim * 2.2;
+    camera.position.copy(center).add(new THREE.Vector3(dist * 0.7, dist * 0.5, dist * 0.7));
+    controls.target.copy(center);
+    controls.update();
+
+    const grid = new THREE.GridHelper(maxDim * 4, 20, 0x2a3340, 0x1a2029);
+    grid.position.y = box.min.y;
+    scene.add(grid);
+
+    nameEl.textContent = plan.model || '（未命名）';
+    countEl.textContent = plan.totalParts + ' 个';
+    applyProgress(0);
+  })
+  .catch((e) => fail('manifest 载入失败：' + (e && e.message ? e.message : e)));
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+let last = performance.now();
+(function tick(now) {
+  requestAnimationFrame(tick);
+  const dt = Math.min((now - last) / 1000, 0.1);
+  last = now;
+  if (playing && replay) {
+    const next = Math.min(1, Number(slider.value) / 100 + dt * 0.35);
+    slider.value = String(next * 100);
+    applyProgress(next);
+    if (next >= 1) {
+      playing = false;
+      playBtn.textContent = '▶ 播放';
+    }
+  }
+  controls.update();
+  renderer.render(scene, camera);
+})(performance.now());
+</script>
+</body>
+</html>
+
