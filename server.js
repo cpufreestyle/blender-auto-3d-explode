@@ -174,6 +174,7 @@ const {
   handleAIPaint,
   handleHealth,
   handleGeneratedList,
+  handleManifestSave,
   launchBlenderApp,
   handleLaunchBlender,
   handleSplit,
@@ -306,6 +307,8 @@ const server = http.createServer(
     await handleIdentity(req, res);
   } else if (req.method === "GET" && url.pathname === "/api/generated") {
     await handleGeneratedList(req, res);
+  } else if (req.method === "POST" && url.pathname === "/api/manifest") {
+    await handleManifestSave(req, res);
   } else if (req.method === "POST" && url.pathname === "/api/blender/launch") {
     await handleLaunchBlender(req, res);
   } else if (req.method === "POST" && url.pathname === "/api/split") {
@@ -384,6 +387,7 @@ server.listen(PORT, () => {
   console.log("    GET  /api/blender/export   — 从 Blender 导出对象 GLB（读回）");
   console.log("    GET  /api/assembly/sequence — 装配拆解顺序（Blender MCP）");
   console.log("    GET  /api/assembly/analysis — 装配/干涉/可制造性分析（Blender MCP）\n");
+    console.log("    POST /api/manifest — 部件清单落盘到生成库（供重放页寻址）");
 
   // 启动时检测 Blender
   execFileAsync(BLENDER_PATH, ["--version"], { timeout: 10_000 })

@@ -116,6 +116,9 @@ function installBrowser({
   manifestOutcome = "ok", //    ok | error（buildManifest 抛错）
   manifestParts = null, //      非 null 时用它覆盖 state.parts
   manifestSkipped = 0, //       假清单里造出的跳过项数
+  manifestUrl = null, //        假落盘端点返回的 url；null 时给一个默认值
+  manifestApiError = null, //   非 null 时 manifestApi 抛错
+  manifestApiOk = true, //        false 时返回 success:false
   stepUrl = null, //            步骤深链构造器；null 时教案不带链接（默认行为）
 } = {}) {
   const calls = {
@@ -132,6 +135,8 @@ function installBrowser({
     exporterBuilt: 0,
     appendedToBody: [],
     manifestBuilds: [],
+    openedUrls: [],
+    manifestApiCalls: [],
   };
 
   // ── 时间与动画回调：改为手动排空，避免测试里真等 2.2 秒的 toast 消失动画 ──
@@ -165,6 +170,7 @@ function installBrowser({
     "copy-md-btn",
     "export-glb-btn",
     "export-manifest-btn",
+    "replay-manifest-btn",
   ];
   const buttons = {};
   for (const id of BUTTON_IDS) buttons[id] = makeEl("button");
@@ -218,6 +224,13 @@ function installBrowser({
     value: { origin: "http://localhost:3000" },
     configurable: true,
   });
+
+  // 假 window.open：记录地址，不真开标签页
+  globalThis.window = globalThis.window || {};
+  globalThis.window.open = (url, target, feats) => {
+    calls.openedUrls.push({ url, target, feats });
+    return null;
+  };
 
   URL.createObjectURL = blob => {
     const url = `blob:fake/${++urlSeq}`;
@@ -289,6 +302,21 @@ function installBrowser({
     getState: () => effectiveState,
     GLTFExporterClass: FakeExporter,
     buildManifest,
+    manifestApi: async(manifest, name) => {
+      if (manifestApiError) throw new Error(manifestApiError);
+      calls.manifestApiCalls.push({ manifest, name });
+      // manifestApiOk === false 时返回「服务端明确失败」——这与抛异常是
+      // 两条不同路径（HTTP 200 + success:false vs 网络层错误），都要测。
+      if (manifestApiOk === false) {
+        return { success: false, error: "磁盘配额不足" };
+      }
+      return {
+        success: true,
+        url: manifestUrl || `/models/generated/${encodeURIComponent(name || "model")}-manifest-x.json`,
+        fileName: "x.json",
+        size: 128,
+      };
+    },
     buildStepUrl: stepUrl,
   });
 
@@ -716,6 +744,83 @@ describe("导出模块（src/export-panel.js）", async() => {
       restoreGlobals();
     }
   });
+
+
+  await it("saveManifestAndReplay：空部件直接报错，不请求服务端", async() => {
+    const w = installBrowser({ state: makeState(), manifestParts: [] });
+    try {
+      await w.panel.saveManifestAndReplay();
+      assert(w.calls.manifestApiCalls.length === 0, "没有调用落盘端点");
+      assert(w.calls.openedUrls.length === 0, "没有打开重放页");
+      assert(w.calls.downloads.length === 0, "也没有回退下载");
+      assert(w.lastToast().className === "toast toast-error", "error toast");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("saveManifestAndReplay：成功时打开 replay.html 且 manifest 参数已编码", async() => {
+    const w = installBrowser({
+      state: makeState(),
+      manifestUrl: "/models/generated/Quest 3-manifest-x.json",
+    });
+    try {
+      await w.panel.saveManifestAndReplay();
+      assert(w.calls.manifestApiCalls.length === 1, "调用了一次落盘端点");
+      assert(w.calls.manifestApiCalls[0].name === "Meta Quest 3", "模型名透传给落盘端点");
+      assert(w.calls.openedUrls.length === 1, "打开了一次重放页");
+      const opened = w.calls.openedUrls[0];
+      assert(opened.url.startsWith("replay.html?manifest="), "指向重放页（实测 " + opened.url + "）");
+      assert(opened.url.includes("%2Fmodels%2Fgenerated%2F"), "url 参数已编码");
+      assert(!opened.url.includes(" "), "打开的地址里不留裸空格");
+      assert(opened.target === "_blank", "新标签页打开");
+      assert(w.lastToast().textContent.includes("已打开重放页"), "成功文案");
+      assert(w.calls.downloads.length === 0, "成功路径不触发下载");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("saveManifestAndReplay：服务端返回 success:false 时回退下载", async() => {
+    // 让假 api 返回失败：用 manifestUrl 指向空串，代码会抛「未返回可寻址地址」
+    const w = installBrowser({ state: makeState(), manifestApiOk: false });
+    try {
+      await w.panel.saveManifestAndReplay();
+      assert(w.calls.openedUrls.length === 0, "没有打开重放页");
+      assert(w.calls.downloads.length === 1, "回退到下载");
+      assert(w.calls.downloads[0].filename.endsWith(".json"), "下载的是 JSON");
+      assert(w.lastToast().textContent.includes("已改为下载文件"), "告知用户降级了");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("saveManifestAndReplay：网络异常时回退下载，不把异常抛给调用方", async() => {
+    const w = installBrowser({ state: makeState(), manifestApiError: "connect ECONNREFUSED" });
+    try {
+      await w.panel.saveManifestAndReplay();
+      assert(w.calls.openedUrls.length === 0, "没有打开重放页");
+      assert(w.calls.downloads.length === 1, "回退到下载");
+      assert(w.lastToast().textContent.includes("已改为下载文件"), "toast 说明降级");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("saveManifestAndReplay：自定义模型走 customModelParts", async() => {
+    const w = installBrowser({
+      state: makeState({ hasCustomModel: true, customModelParts: [{ name: "自定义件" }] }),
+    });
+    try {
+      await w.panel.saveManifestAndReplay();
+      assert(w.calls.manifestApiCalls.length === 1, "调用了一次");
+      assert(w.calls.manifestBuilds.length === 1, "构建了一次清单");
+      assert(w.calls.manifestBuilds[0].parts.length === 1, "取的是 customModelParts");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
 
   await it("exportSplitManifest：buildManifest 抛错时只报错不下载", () => {
     const w = installBrowser({ state: makeState(), manifestOutcome: "error" });

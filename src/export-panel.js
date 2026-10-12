@@ -17,6 +17,7 @@
 
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { buildSplitManifest, serializeSplitManifest } from "./split-manifest.js";
+import { API_BASE } from "./config.js";
 
 export function createExportPanel({
   renderer,
@@ -34,7 +35,10 @@ export function createExportPanel({
   // 部件级清单构造函数（src/split-manifest.js）。仅测试注入的缝：生产中恒为
   // buildSplitManifest。与 GLTFExporterClass 同一套路——Node 里跑不了真 three
   // 几何，假实现让「清单内容正确性」用例不依赖浏览器。
-  buildManifest = buildSplitManifest,
+  buildManifest,
+  // 部件清单落盘 + 打开重放页。生产中走 API_BASE + window.open；
+  // 测试注入假实现即可断言 URL 拼法与失败路径，不必真起服务。
+  manifestApi = null,
 }) {
   // ===== 可变状态（原 main.js 的模块级 let，会随加载/清除自定义模型重赋值）=====
   // 不能在建厂时拷一份快照：按钮点击发生在模块求值之后，必须每次读最新值。
@@ -312,6 +316,52 @@ export function createExportPanel({
       showToast("❌ 清单导出失败：" + (err && err.message ? err.message : err), "error");
     }
   }
+  // ===== 清单落盘并打开重放页 =====
+  // exportSplitManifest 走 blob: URL，刷新即失效也没法分享；replay.html 需要
+  // 可寻址的 ?manifest=<URL>。所以这条路径先把 manifest POST 到
+  // /api/manifest 落进 models/generated/（静态服务托管），再用返回的 url
+  // 拼重放页地址。落盘失败时回退到下载，不让用户白点一次。
+  async function saveManifestAndReplay() {
+    syncState();
+    try {
+      const partsInModel = hasCustomModel ? customModelParts : parts;
+      if (!partsInModel || partsInModel.length === 0) {
+        showToast("❌ 当前没有可导出的部件", "error");
+        return;
+      }
+      const manifest = buildManifest(partsInModel, { model: currentModelName, camera });
+      const api = manifestApi || defaultManifestApi;
+      showToast("📤 正在保存部件清单...", "info");
+      const result = await api(manifest, currentModelName);
+      if (!result || !result.success || !result.url) {
+        throw new Error((result && result.error) || "服务端未返回可寻址地址");
+      }
+      // 重放页与前端同源（都在静态根下），用相对地址即可，
+      // 换端口 / 换机器部署时不需要改这里。
+      const replayUrl = `replay.html?manifest=${encodeURIComponent(result.url)}`;
+      window.open(replayUrl, "_blank", "noopener");
+      showToast(`🎬 已打开重放页（${manifest.totalParts} 个部件）`, "success");
+    } catch (err) {
+      // 落盘失败（服务没起 / 磁盘满 / 413）时回退到下载：
+      // 用户至少拿到文件，重放页可以之后手动用 ?manifest= 指向它。
+      // 注意顺序：先调用导出（它自己会弹成功 toast），再把降级说明补上。
+      // 反过来的话降级说明会被成功 toast 盖掉，用户会以为已经存进服务端。
+      exportSplitManifest();
+      showToast("⚠️ 未能保存到服务端，已改为下载文件", "info");
+    }
+  }
+
+  // 默认实现：POST 到 API_BASE。单独抽出来是为了测试能整块替换，
+  // 也为了将来换存储后端（比如对象存储）只改这一处。
+  async function defaultManifestApi(manifest, modelName) {
+    const resp = await fetch(`${API_BASE}/api/manifest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ manifest, name: modelName }),
+    });
+    return resp.json();
+  }
+
   const shotBtn = document.getElementById("shot-btn");
   if (shotBtn) shotBtn.addEventListener("click", exportScreenshot);
   const exportMdBtn = document.getElementById("export-md-btn");
@@ -322,6 +372,8 @@ export function createExportPanel({
   if (exportGlbBtn) exportGlbBtn.addEventListener("click", exportGLB);
   const exportManifestBtn = document.getElementById("export-manifest-btn");
   if (exportManifestBtn) exportManifestBtn.addEventListener("click", exportSplitManifest);
+  const replayManifestBtn = document.getElementById("replay-manifest-btn");
+  if (replayManifestBtn) replayManifestBtn.addEventListener("click", saveManifestAndReplay);
   return {
     showToast,
     getToastWrap,
@@ -335,5 +387,6 @@ export function createExportPanel({
     copyStepLink,
     exportGLB,
     exportSplitManifest,
+    saveManifestAndReplay,
   };
 }
