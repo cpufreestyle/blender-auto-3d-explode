@@ -165,6 +165,60 @@ describe("replayPlan — 结构与容错", async() => {
   });
 });
 
+
+describe("replayPlan — 版本协商", async() => {
+  await it("version 高于支持版本时拒绝，且 reasons 带可操作提示", () => {
+    const m = makeManifest([part(0, [0, 0, 0], [1, 0, 0])]);
+    m.version = 99;
+    const plan = replayPlan(m);
+    assert(plan.totalParts === 0, "不产出任何部件");
+    assert(plan.parts.length === 0, "parts 为空");
+    assert(plan.versionStatus === "unsupported", "versionStatus = unsupported");
+    assert(plan.reasons.length === 1, "只有一条原因");
+    assert(plan.reasons[0].includes("v99"), "原因点名文件版本（实测 " + plan.reasons[0] + "）");
+    assert(plan.reasons[0].includes("升级"), "且给出行动建议");
+  });
+
+  await it("version 合法时照常解析，并回带 versionStatus", () => {
+    const m = makeManifest([part(0, [0, 0, 0], [1, 0, 0])]);
+    m.version = 1;
+    const plan = replayPlan(m);
+    assert(plan.totalParts === 1, "正常解析");
+    assert(plan.versionStatus === "compatible", "versionStatus = compatible");
+    assert(plan.reasons.length === 0, "无原因");
+  });
+
+  await it("无 version 字段按 v1 兼容读取，versionStatus = missing", () => {
+    // 注意：makeManifest 自带 version: 1，所以这里必须显式删掉它，
+    // 否则测的还是 compatible 分支——第一版就踩了这个坑。
+    const m = makeManifest([part(0, [0, 0, 0], [1, 0, 0])]);
+    delete m.version;
+    const plan = replayPlan(m);
+    assert(plan.totalParts === 1, "老文件仍可重放");
+    assert(plan.versionStatus === "missing", "versionStatus = missing（实测 " + plan.versionStatus + "）");
+    assert(plan.reasons.length === 0, "missing 不产生 reasons（它不是错误）");
+  });
+
+  await it("version 类型非法（字符串 / 浮点 / 0）一律拒绝", () => {
+    for (const bad of ["1", 1.5, 0, -1, true]) {
+      const m = makeManifest([part(0, [0, 0, 0], [1, 0, 0])]);
+      m.version = bad;
+      const plan = replayPlan(m);
+      assert(plan.totalParts === 0, "version=" + JSON.stringify(bad) + " -> 0 件");
+      assert(plan.versionStatus === "unsupported", "且 unsupported");
+    }
+  });
+
+  await it("拒绝时 bounds 仍是合法对象（调用方可能直接读它）", () => {
+    const m = makeManifest([part(0, [0, 0, 0], [1, 0, 0])]);
+    m.version = 42;
+    const plan = replayPlan(m);
+    assert(!!plan.bounds && !!plan.bounds.min && !!plan.bounds.max, "bounds 结构完整");
+    assert(typeof plan.bounds.min.x === "number", "min.x 是数字");
+  });
+});
+
+
 describe("replayPartTransforms — 线性插值", async() => {
   const plan = replayPlan(makeManifest([
     part(0, [0, 0, 0], [10, 0, 0]),

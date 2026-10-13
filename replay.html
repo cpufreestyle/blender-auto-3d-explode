@@ -43,6 +43,7 @@
   <h1>拆解方案重放</h1>
   <div class="row"><span>模型</span><span id="m-name">—</span></div>
   <div class="row"><span>部件</span><span id="m-count">—</span></div>
+  <div class="row"><span>清单版本</span><span id="m-ver">—</span></div>
   <div class="row"><span>当前部件</span><span id="m-cur">—</span></div>
   <input id="progress" type="range" min="0" max="100" value="0" />
   <div class="btns">
@@ -57,6 +58,7 @@
 import * as THREE from './vendor/three/build/three.module.js';
 import { OrbitControls } from './vendor/three/examples/jsm/controls/OrbitControls.js';
 import { replayPlan, createReplayScene } from './src/manifest-replay.js';
+import { inspectManifestVersion, MANIFEST_SUPPORTED_VERSION } from './src/manifest-version.js';
 
 const MANIFEST_URL = new URLSearchParams(location.search).get('manifest');
 const errEl = document.getElementById('err');
@@ -130,6 +132,17 @@ fetch(MANIFEST_URL)
     return r.json();
   })
   .then((manifest) => {
+    // 版本协商：先确认能不能正确解读，再解析。
+    // 没有 version 字段时按 v1 兼容读取（老文件与手写文件不该被一棍子打死），
+    // 版本比本程序新时明确拒绝——我们无法知道它新增/改变了哪些字段，
+    // 硬解析出来的结果是错的，而错比重更糟。
+    const ver = inspectManifestVersion(manifest);
+    if (!ver.supported) {
+      fail(`无法读取这份拆解方案
+
+${ver.message}`);
+      return;
+    }
     const plan = replayPlan(manifest);
     if (plan.totalParts === 0) {
       fail('manifest 里没有可重放的部件。\n' + (plan.reasons.join('\n') || '（无原因）'));
@@ -152,7 +165,18 @@ fetch(MANIFEST_URL)
     grid.position.y = box.min.y;
     scene.add(grid);
 
-    nameEl.textContent = plan.model || '（未命名）';
+    nameEl.textContent = plan.model || "（未命名）";
+    // 版本状态：missing 时如实说明是按 v1 兼容读的，不让用户误以为文件带版本号
+    const verEl = document.getElementById("m-ver");
+    if (verEl) {
+      // missing 时 ver.version 是 null（没有版本号可显示），此时按支持版本
+      // 表述，并注明是兼容读取——不能让用户误以为文件本身带版本号。
+      verEl.textContent =
+        ver.status === "missing"
+          ? "未声明（按 v" + MANIFEST_SUPPORTED_VERSION + " 兼容读取）"
+          : "v" + ver.version;
+      if (ver.status === "missing") verEl.style.opacity = ".7";
+    }
     countEl.textContent = plan.totalParts + ' 个';
     applyProgress(0);
   })

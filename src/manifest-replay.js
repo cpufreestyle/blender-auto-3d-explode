@@ -14,6 +14,7 @@
 // 断言；第三个只负责把前两者的结果画出来。
 
 import { Box3, Color, Group, Mesh, MeshStandardMaterial, Vector3 } from "three";
+import { inspectManifestVersion } from "./manifest-version.js";
 
 // 进度钳制：外部传入 0..1 之外的值时按边界处理，而不是让部件飞出场景。
 export function clampProgress(p) {
@@ -69,9 +70,21 @@ export function replayPlan(manifest) {
     parts: [],
     skipped: 0,
     reasons: [],
+    versionStatus: "unsupported",
   };
   if (!manifest || typeof manifest !== "object" || !Array.isArray(manifest.parts)) {
     return Object.assign(empty, { reasons: ["manifest 不是对象或缺 parts 数组"] });
+  }
+
+  // 版本协商：不兼容时直接返回空计划，并把原因写进 reasons。
+  // 放在这里而不是只让调用方检查，是因为「按错误语义解析出来的计划」比
+  // 「没有计划」更危险——前者看起来能用，实际每个字段的含义都可能已经变了。
+  const ver = inspectManifestVersion(manifest);
+  if (!ver.supported) {
+    return Object.assign(empty, {
+      reasons: [ver.message],
+      versionStatus: ver.status,
+    });
   }
 
   const parts = [];
@@ -105,6 +118,7 @@ export function replayPlan(manifest) {
   return {
     model: typeof manifest.model === "string" ? manifest.model : "",
     totalParts: parts.length,
+    versionStatus: ver.status,
     bounds: { min, max },
     parts,
     skipped,
