@@ -95,7 +95,13 @@
 - **I9 打印导出不改现场 mesh**：STL 导出只改 `mesh.clone()` 的 transform，现场 mesh 的
   position/scale/rotation/顶点数组必须逐字节不变——它带 homePos/explodePos，爆炸动画
   仍在跑。缩放必须早于 `updateMatrixWorld(true)`，否则 `T*R*S` 顺序会把贴底部件
-  撑到构建板下方。
+  撑到构建板下方。装配定位销（CSG 加销/孔）同样只作用于导出副本：CSG 结果烘进
+  独立 geometry，现场 mesh 不被触碰；CSG 失败时退回无销导出。
+- **I10 装配定位销契约**：`findJoinPairs` 只在世界包围盒贴合（某轴重叠 <1e-3）且
+  界面两向尺寸 ≥ 2×minFaceSize 的部件对上放销；孔件与销件 CSG 后必须水密
+  （0 开放边），孔径含 0.4mm 打印间隙，销凸出量 = 孔深 = pinLength。vendor/
+  three-bvh-csg 是 three-bvh-csg 0.0.18 的闭包子集，更新 three 时需同步回归
+  `tests/print-export-test.mjs` 的水密断言。
 
 ## 6. 验证矩阵（spec ↔ harness）
 
@@ -110,7 +116,8 @@
 | I8 Python 约定 + Blender 版本行为 | CI `python` + `blender-smoke` job | `tests/*_test.py`、`scripts/ci_blender_smoke.py` |
 | 静态服务 MIME / 缓存 | `npm test` | `tests/static-server-test.mjs` |
 | 前端 UI（真机） | `npm run smoke:ui`（4 条 CDP 冒烟） | `scripts/ci_*_ui_smoke.mjs` |
-| 3D 打印通道 | `npm test`（3 套件 132 断言）+ `node scripts/ci_print_ui_smoke.mjs`（25 条真机） | `tests/print-analyze-test.mjs`、`tests/print-export-test.mjs`、`tests/print-panel-test.mjs` |
+| 3D 打印通道 | `npm test`（3 套件 132+ 断言）+ `node scripts/ci_print_ui_smoke.mjs`（25 条真机） | `tests/print-analyze-test.mjs`、`tests/print-export-test.mjs`、`tests/print-panel-test.mjs` |
+| I10 装配定位销 | `npm test`（pair 检测 / 水密 / 体积账 / 现场不变 / 开关） | `tests/print-export-test.mjs` |
 
 ## 7. 已知缺口
 

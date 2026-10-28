@@ -245,6 +245,31 @@ analyzePart」这条链路，而上面第 1、2 两个 bug 正是假 DOM 看不�
 门禁：`npm run validate` 61 套件 / 3774 断言 0 失败、`test:py` 36 项 OK、`build` 通过、
 `lint:all:check` 0 error。
 
+## 已落地优化 12：装配定位销（three-bvh-csg vendored + 真 CSG 布尔）
+
+打印预检回答「打得出来吗」之后，下一个自然问题是「装得回去吗」。拆解件打印
+出来后靠胶水/卡扣对位，教学场景里既慢又不可逆。本优化在导出 STL 时自动给
+装配位相邻部件加**定位销**：A 侧贴合面挖孔（含 0.4mm FDM 收缩间隙）、B 侧加
+半露圆柱销（凸出量 = 孔深 = 6mm），徒手压入即可对位，界面 ≥4×minFaceSize 时
+放 2 根定死朝向。
+
+CSG 选型：不引 npm 依赖，与 vendor/three 同策略把 three-bvh-csg 0.0.18 的
+闭包子集（22 文件）和 three-mesh-bvh 的闭包子集（39 文件）vendored 进
+`vendor/`（各带 MIT LICENSE），import 路径 patch 成仓库相对路径。实测三个坑，
+全部写进 `tests/print-export-test.mjs` 的水密断言：
+
+1. **Brush 的 matrix 传递不可靠**——`updateMatrixWorld` 会用本地变换重写
+   matrixWorld，手工塞 matrix 会被吞掉。统一改为把世界变换 `applyMatrix4`
+   烘进几何体，Brush 保持单位阵。
+2. **必须 `useCDTClipping = true`**——默认 LegacyTriangleSplitter 在圆环缝处
+   留 250 条假开放边，CDT 模式只剩 12 条。
+3. **浮点残差焊接容差必须 1e-6**——CSG 输出在共享圆环处有 ≤2e-8 的坐标残差，
+   1e-7 焊接后仍有 8 条假开放边；1e-6 桶哈希焊接后全部边 use=2，完全水密。
+
+装配契约钉在 spec I10：只在世界包围盒贴合（某轴重叠 <1e-3）、界面两向 ≥
+2×minFaceSize 的部件对上放销；孔件与销件 CSG 后必须水密；CSG 失败退回无销
+导出；现场 mesh 不被触碰（I9 对 CSG 同样成立）。
+
 ## 后续路线图（按价值/成本排序）
 
 1. ~~**拆分结果可交换格式**~~ ✅ 已落地（优化 7）。

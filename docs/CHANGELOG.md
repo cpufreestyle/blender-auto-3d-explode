@@ -13,6 +13,7 @@
   - **📐 导出打印STL**：逐部件导出二进制 STL。three/GLTF 是 Y-up 而构建板是 Z-up，故每个部件绕 X 转 -90° 把 +Y 落到 +Z，再 XY 居中、min.z = 0 贴底；场景单位默认 1 = 1 米，按 1000 缩放到毫米（STL 没有单位字段，切片软件不会替我们猜）。80 字节头写部件名，切片软件的库里能认人。**只改 clone 不动现场 mesh**——现场 mesh 带 homePos/explodePos，爆炸动画还在跑，改了视图会跳位。
   - 与「🔧 装配分析」的分工：那条回答「做得出来吗」（面向工程，需 Blender 后端），这条回答「打得出来吗」（面向切片软件，纯前端算，任何时候都能点）。
 - **新增一条真机冒烟门禁**：scripts/ci_print_ui_smoke.mjs（25 条）钉住面板与控件在位、点预检出结果、明细表行数等于部件数且每行有尺寸/体积/三角面、切构建体积自动重跑、每个部件真的触发一次 .stl 下载、全程 0 运行时异常。
+- **装配定位销**（src/print-export.js + vendor/three-bvh-csg + vendor/three-mesh-bvh）— 「📐 导出打印STL」默认开启：在装配位相邻部件的贴合面上自动配对加销与孔（A 侧挖含 0.4mm 打印间隙的孔、B 侧加半露定位销），打印出来可以直接对位拼装，不用胶水不用卡扣。CSG 用 three-bvh-csg 0.0.18 的闭包子集（22+39 文件，MIT），与 vendor/three 同策略 vendored，npm 零新增依赖。世界坐标几何烘进 Brush、CDT 裁剪、1e-6 焊接容差三个坑全部实测钉死；CSG 失败自动退回无销导出，`joinFeatures:false` 可整体关闭。
 
 ### 🐛 修复
 
@@ -25,7 +26,8 @@
 
 - 单测新增三套：tests/print-analyze-test.mjs（57 断言，含水密/非流形/退化/空几何/非索引/焊接阈值）、tests/print-export-test.mjs（33 断言，含朝向/缩放/贴底/文件名消毒/二进制头）、tests/print-panel-test.mjs（42 断言，含部件来源跟随当前模型、构建体积透传、HTML 转义、分批下载、异常路径按钮恢复）。
 - 数值期望以 three 官方 `BoxGeometry` 为金标准——仓库既有手搓「焊接方块」有几个 quad 是蝶式顶序，切出的两个三角形面积不相等，拿它当数值期望会把夹具缺陷误报成模块缺陷。
-- 门禁：npm test 58 → 61 套件、3275 → 3774 断言（新增 499，含本轮三套 132 + 既有套件补充），0 失败；test:py 36 项 OK；build compiled successfully；lint:all:check 0 error。
+- print-export-test 33 → 59 断言：新增 findJoinPairs（相邻检测/轴向/对称双销/小界面跳过）、applyJoinFeatures（孔件与销件水密、体积账逐 mm³ 对上、空输入返回 null）、exportModelSTL 集成（默认开启、开关关闭、现场 mesh 不变）四组。
+- 门禁：npm test 58 → 61 套件、3275 → 3774+ 断言，0 失败；test:py 36 项 OK；build compiled successfully；lint:all:check 0 error。
 
 ## [v3.3.3] - 2026-09-30
 

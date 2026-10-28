@@ -13,7 +13,16 @@
  * 用法：node tests/print-export-test.mjs
  */
 
-import { exportModelSTL, exportPartSTL, stlFilename, writeSTLHeader } from "../src/print-export.js";
+import {
+  JOIN_DEFAULTS,
+  applyJoinFeatures,
+  exportModelSTL,
+  exportPartSTL,
+  findJoinPairs,
+  stlFilename,
+  writeSTLHeader,
+} from "../src/print-export.js";
+import { analyzePart } from "../src/print-analyze.js";
 import { BoxGeometry, BufferGeometry, Float32BufferAttribute, Mesh } from "three";
 
 // ===== 测试框架（与仓库既有 .mjs 测试一致）=====
@@ -240,6 +249,136 @@ describe("容错与批量", async() => {
 
   await it("exportModelSTL 非数组返回空数组", () => {
     assert(exportModelSTL(null).length === 0, "空数组");
+  });
+});
+
+describe("装配定位销 — findJoinPairs", async() => {
+  await it("相邻盒检测出 1 对，轴向为贴合面法轴", () => {
+    const a = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+    a.position.set(-0.1, 0, 0);
+    const b = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+    b.position.set(0.1, 0, 0);
+    const pairs = findJoinPairs([{ mesh: a }, { mesh: b }]);
+    assert(pairs.length === 1, "恰好 1 对");
+    assert(pairs[0].axis === "x", "界面轴为 x");
+    assert(pairs[0].a === 0 && pairs[0].b === 1, "a=0 b=1");
+    assert(pairs[0].axisSign === 1, "a 在负方向");
+  });
+
+  await it("不接触的部件不成对", () => {
+    const a = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+    a.position.set(0, 0, 0);
+    const b = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+    b.position.set(1, 0, 0);
+    assert(findJoinPairs([{ mesh: a }, { mesh: b }]).length === 0, "相距 1m 无对");
+  });
+
+  await it("界面 200×200mm 放 2 根销，位置对称于界面中心", () => {
+    const a = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+    a.position.set(-0.1, 0, 0);
+    const b = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+    b.position.set(0.1, 0, 0);
+    const [pair] = findJoinPairs([{ mesh: a }, { mesh: b }]);
+    assert(pair.points.length === 2, "2 根销");
+    const ys = pair.points.map(p => Math.round(p.y * 1e6));
+    assert(ys[0] === -ys[1] && ys[0] !== 0, "沿 y 对称偏移");
+    assert(Math.abs(pair.points[0].x) < 1e-9, "销在界面平面上");
+  });
+
+  await it("界面小于 minFaceSize 不放销", () => {
+    // 5mm 见方的细柱贴面
+    const a = new Mesh(new BoxGeometry(0.005, 0.05, 0.005));
+    a.position.set(-0.0025, 0, 0);
+    const b = new Mesh(new BoxGeometry(0.005, 0.05, 0.005));
+    b.position.set(0.0025, 0, 0);
+    assert(findJoinPairs([{ mesh: a }, { mesh: b }]).length === 0, "细柱不放销");
+  });
+});
+
+describe("装配定位销 — applyJoinFeatures", async() => {
+  const a = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+  a.position.set(-0.1, 0, 0);
+  const b = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+  b.position.set(0.1, 0, 0);
+  const [pair] = findJoinPairs([{ mesh: a }, { mesh: b }]);
+  const cuts = pair.points.map(pt => ({ pt: pt.clone(), axis: pair.axis }));
+  const pins = pair.points.map(pt => ({ pt: pt.clone(), axis: pair.axis }));
+  const geoA = applyJoinFeatures(a, cuts, []);
+  const geoB = applyJoinFeatures(b, [], pins);
+
+  await it("孔件水密（0 开放边 / 0 非流形边）", () => {
+    const r = analyzePart({ mesh: new Mesh(geoA) }, { scaleToMm: 1000 });
+    assert(r.watertight, "水密");
+    assert(r.openEdges === 0, "0 开放边");
+    assert(r.nonManifoldEdges === 0, "0 非流形边");
+  });
+
+  await it("销件水密", () => {
+    const r = analyzePart({ mesh: new Mesh(geoB) }, { scaleToMm: 1000 });
+    assert(r.watertight, "水密");
+    assert(r.openEdges === 0, "0 开放边");
+  });
+
+  await it("孔减去的体积 = 2 × (含间隙孔径 × 孔深)", () => {
+    const plain = analyzePart({ mesh: a }, { scaleToMm: 1000 }).volumeMm3;
+    const holed = analyzePart({ mesh: new Mesh(geoA) }, { scaleToMm: 1000 }).volumeMm3;
+    const holeR = (JOIN_DEFAULTS.pinDiameter / 2 + JOIN_DEFAULTS.clearance) / 1000;
+    const expected = 2 * Math.PI * holeR * holeR * JOIN_DEFAULTS.pinLength * 1e6;
+    assert(Math.abs(plain - holed - expected) < 30, `体积差 ${ (plain - holed).toFixed(0) } ≈ ${ expected.toFixed(0) }`);
+  });
+
+  await it("销增加的体积 = 2 × 半根销（嵌入段被壳体吸收）", () => {
+    const plain = analyzePart({ mesh: b }, { scaleToMm: 1000 }).volumeMm3;
+    const pinned = analyzePart({ mesh: new Mesh(geoB) }, { scaleToMm: 1000 }).volumeMm3;
+    const pinR = (JOIN_DEFAULTS.pinDiameter / 2) / 1000;
+    const expected = 2 * Math.PI * pinR * pinR * JOIN_DEFAULTS.pinLength * 1e6;
+    assert(Math.abs(pinned - plain - expected) < 30, `体积差 ${ (pinned - plain).toFixed(0) } ≈ ${ expected.toFixed(0) }`);
+  });
+
+  await it("无销无孔时返回 null 且不动原几何", () => {
+    const before = a.geometry.attributes.position.count;
+    assert(applyJoinFeatures(a, [], []) === null, "返回 null");
+    assert(a.geometry.attributes.position.count === before, "原几何未变");
+  });
+});
+
+describe("装配定位销 — exportModelSTL 集成", async() => {
+  await it("默认开启：相邻件导出三角数显著增加，无关件保持 12", () => {
+    const a = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+    a.position.set(-0.1, 0, 0);
+    const b = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+    b.position.set(0.1, 0, 0);
+    const lone = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+    lone.position.set(5, 0, 0);
+    const results = exportModelSTL([
+      { mesh: a, name: "左壳" },
+      { mesh: b, name: "右壳" },
+      { mesh: lone, name: "独立件" },
+    ]);
+    assert(results.length === 3, "3 个 STL");
+    assert(results[0].triangles > 100, `孔件三角数 ${ results[0].triangles } > 100`);
+    assert(results[1].triangles > 100, `销件三角数 ${ results[1].triangles } > 100`);
+    assert(results[2].triangles === 12, "无关件仍是 12 三角");
+  });
+
+  await it("joinFeatures:false 完全关闭，输出与纯盒一致", () => {
+    const a = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+    a.position.set(-0.1, 0, 0);
+    const b = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+    b.position.set(0.1, 0, 0);
+    const results = exportModelSTL([{ mesh: a }, { mesh: b }], { joinFeatures: false });
+    assert(results.every(r => r.triangles === 12), "全部 12 三角");
+  });
+
+  await it("现场 mesh 不被修改（CSG 只作用于导出副本）", () => {
+    const a = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+    a.position.set(-0.1, 0, 0);
+    const b = new Mesh(new BoxGeometry(0.2, 0.2, 0.2));
+    b.position.set(0.1, 0, 0);
+    exportModelSTL([{ mesh: a, name: "左壳" }, { mesh: b, name: "右壳" }]);
+    assert(a.geometry.attributes.position.count === 24, "几何顶点数不变");
+    assert(a.position.x === -0.1, "位置不变");
+    assert(b.geometry.attributes.position.count === 24, "B 几何不变");
   });
 });
 
