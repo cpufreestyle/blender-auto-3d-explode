@@ -127,7 +127,7 @@ describe("index.html 的 id 都有消费者", () => {
   ].join("\n");
 
   it("数量与现状一致（回归后先看这里，别静默放行）", () => {
-    assert(ids.length === 87, `index.html 声明了 ${ids.length} 个 id，预期 87（新增 replay-manifest-btn）`);
+    assert(ids.length === 92, `index.html 声明了 ${ids.length} 个 id，预期 92（新增 3D 打印面板）`);
   });
 
   it("没有任何 id 是孤儿（词边界命中才算）", () => {
@@ -159,7 +159,7 @@ describe("style.css 的 class 选择器都真实生效", () => {
   ]);
 
   it("数量与现状一致", () => {
-    assert(classes.length === 124, `style.css 有 ${classes.length} 个 class 选择器，预期 124`);
+    assert(classes.length === 131, `style.css 有 ${classes.length} 个 class 选择器，预期 131`);
   });
 
   it("每个 class 都有 token 落在元素上", () => {
@@ -167,7 +167,7 @@ describe("style.css 的 class 选择器都真实生效", () => {
     assert(
       orphans.length === 0,
       orphans.length === 0 ?
-        "118 个 class 全部落在元素上（5 个走运行时白名单）" :
+        "125 个 class 全部落在元素上（6 个走运行时白名单）" :
         `孤立 class: ${orphans.join(", ")}`,
     );
   });

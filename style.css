@@ -314,6 +314,32 @@ html, body {
 .asm-rec-title { font-weight: 600; margin: 6px 0 4px; }
 .asm-rec { margin: 0 0 4px; padding-left: 18px; font-size: var(--font-sm); line-height: 1.6; }
 
+/* ===== 3D 打印预检 =====
+   与 .asm-* 同一套视觉语言（徽章 + 明细表 + 建议列表）：两个面板回答的是
+   相邻的问题（做得出来吗 / 打得出来吗），不该长得像两个产品。 */
+.print-controls { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.print-volume-label { font-size: var(--font-sm); opacity: 0.8; white-space: nowrap; }
+.print-controls .gen-select { flex: 1 1 auto; min-width: 0; }
+
+.print-summary { display: flex; align-items: center; gap: 12px; margin: 4px 0 10px; }
+
+.print-badge {
+  flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%;
+  border: 3px solid #888; display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 700; background: rgb(255 255 255 / 4%);
+}
+.print-summary-meta { font-size: var(--font-sm); line-height: 1.4; }
+
+/* 打印表格比 asm-table 宽一列，且问题列是列表不是短文本，行高要放开 */
+.print-table th, .print-table td { vertical-align: top; }
+.print-table td:nth-child(2), .print-table td:nth-child(3) { white-space: nowrap; }
+.print-issues { margin: 0; padding-left: 16px; }
+.print-issues li { line-height: 1.5; }
+
+.ui-overlay.light-theme .print-table th,
+.ui-overlay.light-theme .print-table td { border: 1px solid rgb(0 0 0 / 15%); }
+.ui-overlay.light-theme .print-table th { background: rgb(0 0 0 / 4%); }
+
 /* ===== 画廊 ===== */
 .gallery-row { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-1); }
 .gallery-row:empty { display: none; }

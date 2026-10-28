@@ -1,7 +1,7 @@
 # Blender Auto 3D Explode — 验证面与评审台账 (harness.md)
 
 > 配套 `spec.md`：`spec.md` 定义「应当具备的契约」，本文件记录「如何验证 + 最近一次核验结论」。
-> 最近核验：**2026-10-07**
+> 最近核验：**2026-10-28**（HEAD `31096ee`，v3.3.3 + 3D 打印功能未提交）
 
 ## 1. 一键验证命令
 
@@ -15,7 +15,7 @@ npm run build           # webpack 生产构建（CI 也跑）
 
 # 需要真机 / 真 Blender 的（不进 npm test 链）：
 npm run test:e2e        # 需先 npm run server + Blender
-npm run smoke:ui        # 4 条 CDP 冒烟：parts / sidebar / narrow / teaching
+npm run smoke:ui        # 5 条 CDP 冒烟：parts / sidebar / narrow / teaching / print
 BLENDER_PATH=/Applications/Blender.app/Contents/MacOS/Blender npm run test:blender
 ```
 
@@ -24,7 +24,7 @@ BLENDER_PATH=/Applications/Blender.app/Contents/MacOS/Blender npm run test:blend
 | 层 | 文件 | 规模 | 测试覆盖 |
 |----|------|------|----------|
 | 前端外壳 | `main.js` | 681 行 | 无直接单测（靠模块级单测 + 真机冒烟） |
-| 前端模块 | `src/` | 60 个 .js | 大部分有对应 `tests/*-test.mjs` |
+| 前端模块 | `src/` | 63 个 .js（含 print-analyze / print-export / print-panel） | 大部分有对应 `tests/*-test.mjs` |
 | 后端引导 | `server.js` | 408 行 | 无直接单测（逻辑已抽到 `src/routes-*.js` 等工厂，注入 deps 后可测） |
 | 后端模块 | `src/routes-generate.js`、`src/routes-blender.js`、`src/static-server.js` 等 | — | 有对应单测 |
 | Blender 脚本 | `blender_*.py`、`scripts/*.py` | — | 纯逻辑走 stub 单测；真实版本行为走 `blender-smoke` |
@@ -43,10 +43,28 @@ curl -s -o /dev/null -w '%{http_code}\n' $BASE/api/nope                # 404
 真机冒烟（需 Chrome）：
 
 ```bash
-npm run smoke:ui     # parts / sidebar / narrow / teaching 四条
+npm run smoke:ui     # parts / sidebar / narrow / teaching / print 五条
 ```
 
-## 4. 最近验证结论（2026-10-07，HEAD `e8fb32e`，v3.3.3）
+## 4. 最近验证结论（2026-10-28，HEAD `31096ee` + 3D 打印功能未提交）
+
+| 项 | 命令 | 结论 |
+|----|------|------|
+| 工作区 | `git status` | 仅本轮新增/修改（print-* 三模块 + 三套测试 + UI 接线 + 文档），无旧遗留（print-* 三模块 + 三套测试 + UI 接线 + 文档），无旧遗留 |
+| JS 单元测试 | `npm test` | **61 套件 / 3774 断言 / 0 失败**（含新增 print 三套件 132 断言） |
+| Python 单测 | `npm run test:py` | **36 项 OK** |
+| JS lint | `npm run lint:check` | **0 errors / 1 warning**（main.js 既有 no-console 基线，新文件 0 warning） |
+| CSS lint | `npm run lint:css:check` | 0 errors |
+| 生产构建 | `npm run build` | compiled successfully |
+| 测试文件盘点 | `ls tests/*.mjs` | 63 个，其中 62 个在 `npm test` 链内，`e2e-test.mjs` 有意排除 |
+| 静态守卫 | `tests/dead-markup-test.mjs` / `tests/vendor-three-test.mjs` | 绿（id 数量 92、class 131、版本键一致、vendor 镜像 10 个文件逐字节一致） |
+| 3D 打印真机冒烟 | `node scripts/ci_print_ui_smoke.mjs` | **25 条全绿**（15 部件 / 972 三角形 / 11 个因切口开放边报需处理；导出真触发 15 次 .stl 下载） |
+| 其余四条冒烟 | `npm run smoke:ui` | parts 18 / sidebar 21 / narrow 24 / teaching 26，均绿 |
+
+本轮修掉的四个真 bug（详见 `docs/OSS_LEARNING.md` 优化 11）：`setIndex` 传裸
+`Uint32Array`（r186 下开放边恒为 0，预检永远报水密）、非索引几何顶点索引漏偏移（四处）、
+STL 缩放与对位顺序（部件被撑到板下）、vendor 同步脚本在 symlink worktree 下剥离了
+`three.core.js`。
 
 | 项 | 命令 | 结论 |
 |----|------|------|

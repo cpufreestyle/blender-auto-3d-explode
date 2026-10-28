@@ -92,6 +92,10 @@
 - **I7 单飞 Blender**：后台 Blender 任务串行执行，任意时刻至多一个；GUI 开窗前先结束本服务拉起的上一个窗口。
 - **I8 Python 脚本约定**：`blender --background --python x.py -- args`；参数在 `--` 后手动解析（不用 argparse）；
   日志 `print(..., flush=True)`；除 `bpy/bmesh/mathutils` 外零 pip 假设；兼容 Blender 4.x/5.x。
+- **I9 打印导出不改现场 mesh**：STL 导出只改 `mesh.clone()` 的 transform，现场 mesh 的
+  position/scale/rotation/顶点数组必须逐字节不变——它带 homePos/explodePos，爆炸动画
+  仍在跑。缩放必须早于 `updateMatrixWorld(true)`，否则 `T*R*S` 顺序会把贴底部件
+  撑到构建板下方。
 
 ## 6. 验证矩阵（spec ↔ harness）
 
@@ -99,13 +103,14 @@
 |---------------|----------|----------|
 | I3 身份端点 | `npm test`（桌面启动器 28 条断言） | `tests/desktop-launcher-test.mjs` |
 | I4 vendor 镜像 | `npm test` | `tests/vendor-three-test.mjs` |
-| I5 版本键一致 + I6 死标记 | `npm test`（id 数量 85 与版本键一致性均被钉住） | `tests/dead-markup-test.mjs` |
+| I5 版本键一致 + I6 死标记 | `npm test`（id 数量 92 与版本键一致性均被钉住） | `tests/dead-markup-test.mjs` |
 | I2 拆解产物 | `npm test` + 真机 Blender 冒烟 | `tests/blender-runner-test.mjs`、`scripts/ci_blender_smoke.py` |
 | I7 单飞队列 | `npm test` | `tests/blender-runner-test.mjs` |
 | 路由分发 | `npm test` | `tests/routes-generate-test.mjs`、`tests/routes-blender-test.mjs` |
 | I8 Python 约定 + Blender 版本行为 | CI `python` + `blender-smoke` job | `tests/*_test.py`、`scripts/ci_blender_smoke.py` |
 | 静态服务 MIME / 缓存 | `npm test` | `tests/static-server-test.mjs` |
 | 前端 UI（真机） | `npm run smoke:ui`（4 条 CDP 冒烟） | `scripts/ci_*_ui_smoke.mjs` |
+| 3D 打印通道 | `npm test`（3 套件 132 断言）+ `node scripts/ci_print_ui_smoke.mjs`（25 条真机） | `tests/print-analyze-test.mjs`、`tests/print-export-test.mjs`、`tests/print-panel-test.mjs` |
 
 ## 7. 已知缺口
 

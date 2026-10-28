@@ -152,6 +152,8 @@
       <button id="export-glb-btn" class="btn" title="导出当前拆解状态为 GLB 3D 模型（可在 Blender / 其它查看器打开）">💾 导出GLB</button>
       <button id="export-manifest-btn" class="btn" title="导出部件级 JSON 清单（名称/三角形数/体积/表面积/包围盒/质心/爆炸位置），供数据驱动 UI 或离线重放使用">🧾 导清单</button>
       <button id="replay-manifest-btn" class="btn" title="把当前部件清单保存到服务端并打开重放页，可分享给他人（需后端在运行）">🎬 存并重放</button>
+      <button id="print-check-btn" class="btn" title="检查每个部件能否直接送进切片软件：水密性、退化面、构建体积三条硬指标">🖨️ 打印预检</button>
+      <button id="print-stl-btn" class="btn" title="逐部件导出二进制 STL（毫米单位、Z 朝上贴底），可直接拖进 Bambu Studio / PrusaSlicer / Cura">📐 导出打印STL</button>
       <button id="ar-btn" class="btn btn-ar" style="display:none">📱 AR 预览</button>
     </div>
 
@@ -327,6 +329,29 @@
       <div class="panel-body">
         <button id="assembly-analyze-btn" class="btn btn-secondary">🔍 运行装配分析</button>
         <div id="assembly-result" class="status-box hidden"></div>
+      </div>
+    </details>
+
+    <!-- ===== 3D 打印（可打印性预检 + 逐部件 STL 导出）=====
+         装配分析回答「做得出来吗」（面向工程），本面板回答「打得出来吗」
+         （面向切片软件）：水密性、退化面、构建体积三条硬指标 + 逐部件 STL。
+         与装配分析的分工：那条要 Blender 后端，这条纯前端算，任何时候都能点。 -->
+    <details class="panel collapsible" id="print-panel" open>
+      <summary class="panel-header">
+        <span>🖨️ 3D 打印</span>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="panel-body">
+        <div class="print-controls">
+          <label class="print-volume-label" for="print-build-volume">目标打印机</label>
+          <select id="print-build-volume" class="gen-select">
+            <option value="bambu_x1c" selected>Bambu Lab X1C / P1 (256³)</option>
+            <option value="bambu_a1">Bambu Lab A1 / A1 mini (256³)</option>
+            <option value="prusa_mk4">Prusa MK4 / CORE One (250×210×220)</option>
+            <option value="ender3">Creality Ender-3 / K1 (220×220×250)</option>
+          </select>
+        </div>
+        <div id="print-result" class="status-box hidden"></div>
       </div>
     </details>
 

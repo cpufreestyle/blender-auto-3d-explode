@@ -72,6 +72,10 @@ npm run format
 
 云端 3D 生成适配层。封装 Meshy、Tripo(Triple 3D)、Hyper3D(Rodin) 的 REST API 调用，输入图片 base64 返回 `{ glbBuffer, manifest }`。`provider-models.js` 维护各提供商的默认模型列表。
 
+### 6. 3D 打印通道 — `src/print-analyze.js` + `src/print-export.js` + `src/print-panel.js`
+
+可打印性预检与逐部件 STL 导出，纯前端计算。`print-analyze.js` 统计边邻接（水密判定）、退化三角形、尺寸/体积/表面积（含单位换算），并对比四台主流打印机构建体积；`print-export.js` 用 three 官方 `STLExporter` 把每个部件转成 Z-up 贴底的二进制 STL（缩放到毫米、只改 clone 不动现场 mesh）；`print-panel.js` 负责 UI 接线与结果渲染。与装配分析的分工：那条要 Blender 后端，这条任何时候都能点。
+
 ## Coding Conventions
 
 - **模块系统**: ES Modules（`import`/`export`），`"type": "module"` in package.json

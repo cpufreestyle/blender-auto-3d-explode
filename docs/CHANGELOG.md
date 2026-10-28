@@ -2,6 +2,31 @@
 
 所有项目的显著变更都将记录在此文件中。
 
+## [Unreleased] - 2026-10-28
+
+> 结合 3D 打印做功能：把「看得见的几何」变成切片软件能吃的文件。
+
+### ✨ 新增
+
+- **3D 打印通道**（src/print-analyze.js + src/print-export.js + src/print-panel.js）— 侧栏「🖨️ 3D 打印」面板两个入口：
+  - **🖨️ 打印预检**：逐部件报告能否直接送进切片软件——水密性（每条边必须恰好被两个三角形共享，否则切片器求不出闭合轮廓）、非流形边、退化三角形、构建体积（内置 Bambu X1C/P1、A1 mini、Prusa MK4、Ender-3 四台，可切换）。汇总徽章给「可直接切片」或「N 个部件有问题」，明细表列尺寸（mm）/ 体积 / 三角面数 / 逐条问题。预检只报告不修复——补面与重网格化是 Blender 3D-Print Toolbox 的职责，前端负责在导出前把问题讲清楚。
+  - **📐 导出打印STL**：逐部件导出二进制 STL。three/GLTF 是 Y-up 而构建板是 Z-up，故每个部件绕 X 转 -90° 把 +Y 落到 +Z，再 XY 居中、min.z = 0 贴底；场景单位默认 1 = 1 米，按 1000 缩放到毫米（STL 没有单位字段，切片软件不会替我们猜）。80 字节头写部件名，切片软件的库里能认人。**只改 clone 不动现场 mesh**——现场 mesh 带 homePos/explodePos，爆炸动画还在跑，改了视图会跳位。
+  - 与「🔧 装配分析」的分工：那条回答「做得出来吗」（面向工程，需 Blender 后端），这条回答「打得出来吗」（面向切片软件，纯前端算，任何时候都能点）。
+- **新增一条真机冒烟门禁**：scripts/ci_print_ui_smoke.mjs（25 条）钉住面板与控件在位、点预检出结果、明细表行数等于部件数且每行有尺寸/体积/三角面、切构建体积自动重跑、每个部件真的触发一次 .stl 下载、全程 0 运行时异常。
+
+### 🐛 修复
+
+- **可打印性预检曾会永远报「水密」**（src/print-analyze.js）— three r186 起 `setIndex` 不再自动把裸 `Uint32Array` 包成 `BufferAttribute`，传裸数组存进去后 `index.count` 是 `undefined`，边邻接统计静默循环 0 次、开放边恒为 0。改为显式 `new Uint32BufferAttribute(next, 1)`（仓库既有正确写法见 src/geometry-split.js:239）。
+- **非索引几何的顶点索引漏了偏移**（src/print-analyze.js 四处）— `index ? index.getX(i+1) : i` 在非索引分支退化成 `i`，把同一个顶点读三遍，面积极值判退化、边统计全错。所有 STL 风格几何与所有 `toNonIndexed()` 夹具都踩这条。
+- **STL 导出先把部件贴底再缩放，部件被撑到板下**（src/print-export.js）— 克隆矩阵是 `T*R*S`，`scale.setScalar(1000)` 放在对位之后会把贴底部件撑到构建板下方（实测首顶点 z = -49.95 而非 0）。缩放移到 `updateMatrixWorld(true)` 之前。
+- **vendor 同步脚本在 worktree 里把跨文件 import 全剪掉**（scripts/vendor_three_sync.py）— `node_modules` 是指向主仓库的 symlink 时，`resolve()` 产出主仓库路径，`SRC in target.parents` 永远为假，BFS 闭包只剩入口文件自身。r186 的 `three.module.js` 正是靠 `./three.core.js` 活的，剪掉后 dev 模式 importmap 直接 404。修法是 `SRC` 自身也 `resolve()`。
+
+### 🧪 测试与工程
+
+- 单测新增三套：tests/print-analyze-test.mjs（57 断言，含水密/非流形/退化/空几何/非索引/焊接阈值）、tests/print-export-test.mjs（33 断言，含朝向/缩放/贴底/文件名消毒/二进制头）、tests/print-panel-test.mjs（42 断言，含部件来源跟随当前模型、构建体积透传、HTML 转义、分批下载、异常路径按钮恢复）。
+- 数值期望以 three 官方 `BoxGeometry` 为金标准——仓库既有手搓「焊接方块」有几个 quad 是蝶式顶序，切出的两个三角形面积不相等，拿它当数值期望会把夹具缺陷误报成模块缺陷。
+- 门禁：npm test 58 → 61 套件、3275 → 3774 断言（新增 499，含本轮三套 132 + 既有套件补充），0 失败；test:py 36 项 OK；build compiled successfully；lint:all:check 0 error。
+
 ## [v3.3.3] - 2026-09-30
 
 > 「意义」专项第三轮：直面「Tripo AI 已经能拆 3D」的冲击。生成与重建这一层确实被商品化了，本轮不追，转而加固它给不了的三件事——确定性的拆分、可复现的步骤、可分发的那条链接。

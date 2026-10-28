@@ -52,12 +52,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MIRROR = path.join(ROOT, "vendor", "three");
 const NM = path.join(ROOT, "node_modules", "three");
 
-// 同步脚本闭包的产物清单（入口 = core 构建产物 + 源码实际 import 的 5 个 examples）
+// 同步脚本闭包的产物清单（入口 = core 构建产物 + 源码实际 import 的 examples）
 const EXPECTED = [
   "build/three.core.js",
   "build/three.module.js",
   "examples/jsm/controls/OrbitControls.js",
   "examples/jsm/exporters/GLTFExporter.js",
+  "examples/jsm/exporters/STLExporter.js",
   "examples/jsm/geometries/RoundedBoxGeometry.js",
   "examples/jsm/loaders/GLTFLoader.js",
   "examples/jsm/loaders/STLLoader.js",

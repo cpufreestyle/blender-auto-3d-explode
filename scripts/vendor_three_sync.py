@@ -22,7 +22,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT / "node_modules" / "three"
+# resolve() 不是洁癖：worktree 的 node_modules 常是指向主仓库的 symlink，不解析
+# 的话 resolve() 出来的 import 目标落在主仓库树下，SRC in target.parents 永远为假，
+# 整个 BFS 会把跨文件 import 全部剪掉——r186 的 three.module.js 就是靠
+# './three.core.js' 活的，剪掉后 dev 模式 importmap 直接 404。
+SRC = (ROOT / "node_modules" / "three").resolve()
 DEST = ROOT / "vendor" / "three"
 
 # 源码实际 import 的 examples 入口（main.js + src/ 全量扫描见守卫测试）
@@ -33,6 +37,7 @@ ENTRIES = [
     "examples/jsm/geometries/RoundedBoxGeometry.js",
     "examples/jsm/loaders/GLTFLoader.js",
     "examples/jsm/loaders/STLLoader.js",
+    "examples/jsm/exporters/STLExporter.js",
 ]
 
 REL_IMPORT = re.compile(r"""from\s+['"](\.{1,2}/[^'"]+)['"]""")
@@ -53,7 +58,7 @@ def closure() -> set:
         seen.add(rel)
         text = f.read_text(encoding="utf-8")
         for spec in REL_IMPORT.findall(text):
-            target = resolve(spec, f)
+            target = (f.parent / spec).resolve()
             if target.exists() and SRC in target.parents:
                 queue.append(target)
     return seen

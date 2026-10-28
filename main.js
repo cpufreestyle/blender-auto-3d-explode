@@ -23,6 +23,7 @@ import { assignPartStepIndices, defaultStepGroups } from "./src/quest3-steps.js"
 import { isQuest3Model, yieldToMain } from "./src/utils.js";
 import { createARPreview } from "./src/ar-preview.js";
 import { createExportPanel } from "./src/export-panel.js";
+import { createPrintPanel } from "./src/print-panel.js";
 import { calculateExplodePos } from "./src/explode-geometry.js";
 import { autoSplitModel, generatePartName } from "./src/geometry-split.js";
 import { createQuest3Model } from "./src/quest3-model.js";
@@ -528,6 +529,15 @@ const copyStepLinkBtn = document.getElementById("copy-step-link-btn");
 if (copyStepLinkBtn) {
   copyStepLinkBtn.addEventListener("click", () => exportPanel.copyStepLink(displayedStep));
 }
+
+// ===== 3D 打印面板（可打印性预检 + 逐部件 STL 导出）=====
+// 部件来源与导出面板完全同源（hasCustomModel ? customModelParts : parts），
+// 同样经 getState() 惰性读——切换模型后点预检，分析的是新模型而不是旧数组。
+// 与装配分析的分工：那条要 Blender 后端，这条纯前端算，任何时候都能点。
+createPrintPanel({
+  getState: () => ({ hasCustomModel, customModelParts, parts }),
+  showToast: exportPanel.showToast,
+});
 
 // ===== 侧栏折叠 =====
 // 实现自成一体：src/sidebar-toggle.js 按 id 自取面板与两个按钮，
