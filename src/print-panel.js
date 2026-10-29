@@ -172,7 +172,7 @@ export function createPrintPanel({
     const btn = getEl("print-stl-btn");
     if (btn) btn.disabled = true;
     try {
-      const results = exportModel(parts);
+      const results = exportModel(parts, { buildVolume: buildVolumeKey() });
       if (!results.length) {
         if (btn) btn.disabled = false;
         toast("❌ 没有可导出的部件（几何体为空？）", "error");
@@ -182,7 +182,13 @@ export function createPrintPanel({
       const step = () => {
         if (i >= results.length) {
           if (btn) btn.disabled = false;
-          toast(`🖨️ 已导出 ${results.length} 个 STL 文件`, "success");
+          const plates = results.plateCount;
+          toast(
+            plates > 1
+              ? `🖨️ 已导出 ${results.length} 个 STL（自动拼成 ${plates} 块板，文件名 Bxx 开头按板分组）`
+              : `🖨️ 已导出 ${results.length} 个 STL 文件`,
+            "success",
+          );
           return;
         }
         const r = results[i++];

@@ -102,6 +102,10 @@
   （0 开放边），孔径含 0.4mm 打印间隙，销凸出量 = 孔深 = pinLength。vendor/
   three-bvh-csg 是 three-bvh-csg 0.0.18 的闭包子集，更新 three 时需同步回归
   `tests/print-export-test.mjs` 的水密断言。
+- **I11 自动拼板契约**：`exportModelSTL` 默认按目标打印机板面尺寸排版（跟随
+  `options.buildVolume`），同板件名前缀 `B01-`，件间恒留 5mm 掰件间距，放不进
+  任何朝向的部件跳过；排版结果按输入顺序回排、按下标对齐（部件名可重复）；
+  `autoPlate:false` 关闭，单件导出不排版，排版失败退回无板号导出。
 
 ## 6. 验证矩阵（spec ↔ harness）
 
@@ -118,6 +122,7 @@
 | 前端 UI（真机） | `npm run smoke:ui`（4 条 CDP 冒烟） | `scripts/ci_*_ui_smoke.mjs` |
 | 3D 打印通道 | `npm test`（3 套件 132+ 断言）+ `node scripts/ci_print_ui_smoke.mjs`（25 条真机） | `tests/print-analyze-test.mjs`、`tests/print-export-test.mjs`、`tests/print-panel-test.mjs` |
 | I10 装配定位销 | `npm test`（pair 检测 / 水密 / 体积账 / 现场不变 / 开关） | `tests/print-export-test.mjs` |
+| I11 自动拼板 | `npm test`（顺序回排 / 间距分板 / 无重叠无出界 / 巨件过滤 / 开关） | `tests/print-export-test.mjs` |
 
 ## 7. 已知缺口
 

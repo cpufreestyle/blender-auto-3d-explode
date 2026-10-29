@@ -1,7 +1,7 @@
 # Blender Auto 3D Explode — 验证面与评审台账 (harness.md)
 
 > 配套 `spec.md`：`spec.md` 定义「应当具备的契约」，本文件记录「如何验证 + 最近一次核验结论」。
-> 最近核验：**2026-10-29**（HEAD `18d7449`，v3.3.3 + 装配定位销已推送 origin/main）
+> 最近核验：**2026-10-29**（v3.3.3，装配定位销 + 自动拼板）
 
 ## 1. 一键验证命令
 
@@ -51,7 +51,7 @@ npm run smoke:ui     # parts / sidebar / narrow / teaching / print 五条
 | 项 | 命令 | 结论 |
 |----|------|------|
 | 工作区 | `git status` | 干净（commit `18d7449` 已推送 origin/main，含 vendor/ 两个新目录） |
-| JS 单元测试 | `npm test` | **62 套件 / 3828 断言 / 0 失败**（print-export-test 33 → 59，新增销/孔四组断言） |
+| JS 单元测试 | `npm test` | **62 套件 / 3946 断言 / 0 失败**（print-export-test 59 → 71，新增拼板两组断言） |
 | Python 单测 | `npm run test:py` | **36 项 OK** |
 | JS lint | `npm run lint:all:check` | **0 errors / 53 warnings**（既有 no-console 基线） |
 | CSS lint | `npm run lint:css:check` | 0 errors |

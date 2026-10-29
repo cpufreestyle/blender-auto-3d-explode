@@ -308,6 +308,105 @@ export function exportPartSTL(part, options = {}) {
   };
 }
 
+// 拼板：逐部件导出时，小件不会自己排满一块板——切片软件里手动摆 15 个件
+// 很痛苦。这里用 Skyline Bottom-Left 启发式把所有件自动排进若干块「板」，
+// 文件名带板号（B01-…），切片软件按名字排序时同板相邻。板间距 5mm 是
+// FDM 下人工掰件的安全距离。
+const PLATE_GAP_MM = 5;
+
+/**
+ * 计算拼板布局。
+ *
+ * @param {Array<{name:string, sizeMm:number[]}>} parts 已导出的部件（sizeMm XY 用得上）
+ * @param {number[]} plateSize [宽, 深] 毫米
+ * @returns {Array<{name:string, plate:number, xMm:number, yMm:number,
+ *            wMm:number, dMm:number, rotated:boolean}>}
+ *   xMm/yMm 是部件中心在板上的位置（毫米），plate 从 1 起。
+ */
+export function planPlateLayout(parts, plateSize) {
+  const [pw, pd] = plateSize;
+  const items = (parts || [])
+    .map((p, index) => ({
+      index,
+      name: p.name,
+      // 旋转后 Y-up → Z-up：sizeMm = [宽, 深, 高]，板面占位是前两个
+      // 长边横向先摆，减少 skyline 碎片；只有放不进才转 90°
+      w: p.sizeMm[0],
+      d: p.sizeMm[1],
+      rotated: false,
+      // 进深加板间距：件与件之间永远留 PLATE_GAP_MM，紧贴后墙的那一面不用留
+      //（首排 top=0），用「先加后减」的方式在最前排抵消。
+      effD: p.sizeMm[1] + PLATE_GAP_MM,
+    }))
+    .filter(it => it.w <= pw && it.d <= pd || it.d <= pw && it.w <= pd)
+    .map(it => {
+      // 原始朝向放不进时转 90°
+      if (it.w > pw || it.effD > pd) {
+        const w = it.w; it.w = it.d; it.d = w; it.effD = it.d + PLATE_GAP_MM; it.rotated = true;
+      }
+      return it;
+    })
+    .sort((a, b) => b.effD - a.effD); // 高件先放（FFDH），skyline 更平
+
+  const segments = [{ x: 0, width: pw, height: 0 }];
+  const placed = [];
+  let currentPlate = 1;
+
+  for (const it of items) {
+    let best = null; // {plate, x, top, y}
+    const tryPlate = (startSeg) => {
+      // 在 skyline 上找能放下 it.w 宽、高度 >= it.d 的最低位置
+      for (let i = startSeg; i < segments.length; i++) {
+        // 收缩窗口：从 seg i 起，宽度达到 it.w 的连续段，取最大高度
+        let width = 0, maxH = 0, j = i;
+        while (j < segments.length && width < it.w) {
+          maxH = Math.max(maxH, segments[j].height);
+          width += segments[j].width;
+          j++;
+        }
+        if (width < it.w) break; // 后面不够宽
+        const x = segments[i].x;
+        if (best === null || maxH < best.top || (maxH === best.top && x < best.x)) {
+          best = { seg: i, x, top: maxH };
+        }
+      }
+    };
+    tryPlate(0);
+    if (best === null || best.top + it.effD > pd) {
+      // 当前板放不下 → 换新板
+      currentPlate++;
+      segments.length = 0;
+      segments.push({ x: 0, width: pw, height: 0 });
+      best = { seg: 0, x: 0, top: 0 };
+    }
+    const x = best.x;
+    const y = best.top;
+    // 更新 skyline：把 [x, x+it.w] 这段抬高到 y + it.d
+    let remaining = it.w, si = best.seg;
+    const newSegs = [];
+    // 拆分被覆盖的段
+    while (remaining > 0 && si < segments.length) {
+      const s = segments[si];
+      const take = Math.min(s.width, remaining);
+      if (s.x < x) {
+        newSegs.push({ x: s.x, width: x - s.x, height: s.height });
+      }
+      newSegs.push({ x: Math.max(s.x, x), width: take, height: y + it.effD });
+      remaining -= take;
+      si++;
+    }
+    // 后面未覆盖的段保持
+    for (; si < segments.length; si++) newSegs.push(segments[si]);
+    segments.length = 0;
+    segments.push(...newSegs);
+    // 首排贴墙（y=0）不留间距：占位高度里预加了 gap，中心位置减回来
+    const yCenter = y === 0 ? it.d / 2 : y + it.effD / 2 - PLATE_GAP_MM / 2;
+    placed.push({ index: it.index, name: it.name, plate: currentPlate, xMm: x + it.w / 2, yMm: yCenter, wMm: it.w, dMm: it.d, rotated: it.rotated });
+  }
+  // 回排到输入顺序：调用方按下标对齐（部件名可能重复，名字对齐不可靠）
+  return placed.sort((a, b) => a.index - b.index);
+}
+
 /**
  * 整模型导出：逐部件 STL。
  *
@@ -360,9 +459,48 @@ export function exportModelSTL(parts, options = {}) {
       decorated = parts;
     }
   }
-  return decorated
+  const results = decorated
     .map(p => exportPartSTL(p, options))
     .filter(Boolean);
+
+  // 拼板排版：多件模型按目标打印机尺寸分板，文件名带板号（B01-…），
+  // 切片软件里按名字排序即同板相邻；同板件的左下角位置写进 sizeMm 旁的
+  // platePosMm，供想要「整板一次导完」的用户参考。
+  if (options.autoPlate !== false && results.length > 1) {
+    try {
+      const buildKey = options.buildVolume || "bambu_x1c";
+      // planPlateLayout 输入顺序与 results 一一对应（名字可能重复，按下标回填）
+      const plan = planPlateLayout(
+        results.map(r => ({ name: r.name, sizeMm: r.sizeMm })),
+        PLATE_SIZE_MM[buildKey] || PLATE_SIZE_MM.bambu_x1c,
+      );
+      const plates = new Set(plan.map(pl => pl.plate));
+      results.forEach((r, i) => {
+        const pl = plan[i];
+        if (!pl) return;
+        r.plate = pl.plate;
+        r.platePosMm = [Math.round(pl.xMm * 100) / 100, Math.round(pl.yMm * 100) / 100];
+        r.filename = plFilename(r.name, pl.plate, i);
+      });
+      results.plateCount = plates.size;
+    } catch {
+      // 排版失败不影响导出本身
+    }
+  }
+  return results;
+}
+
+// 拼板板面尺寸（毫米 XY），与 print-analyze.js 的 BUILD_VOLUMES 键一致
+const PLATE_SIZE_MM = {
+  bambu_x1c: [256, 256],
+  bambu_a1: [256, 256],
+  prusa_mk4: [250, 210],
+  ender3: [220, 220],
+};
+
+// 带板号的文件名：B01-主机身-01.stl。同板件在切片软件的文件列表里相邻。
+function plFilename(name, plate, index) {
+  return "B" + String(plate).padStart(2, "0") + "-" + stlFilename(name, index);
 }
 
 /**

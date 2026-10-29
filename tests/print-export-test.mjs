@@ -16,6 +16,7 @@
 import {
   JOIN_DEFAULTS,
   applyJoinFeatures,
+  planPlateLayout,
   exportModelSTL,
   exportPartSTL,
   findJoinPairs,
@@ -379,6 +380,87 @@ describe("装配定位销 — exportModelSTL 集成", async() => {
     assert(a.geometry.attributes.position.count === 24, "几何顶点数不变");
     assert(a.position.x === -0.1, "位置不变");
     assert(b.geometry.attributes.position.count === 24, "B 几何不变");
+  });
+});
+
+describe("自动拼板 — planPlateLayout", async() => {
+  await it("小件排在前面也不影响对齐：输出按输入顺序回排", () => {
+    const plan = planPlateLayout([
+      { name: "小件", sizeMm: [40, 30, 15] },
+      { name: "大件", sizeMm: [200, 100, 25] },
+    ], [256, 256]);
+    assert(plan[0].name === "小件" && plan[1].name === "大件", "按输入顺序返回");
+  });
+
+  await it("两件 128×128 在 256 板上因 5mm 间距分到两块板", () => {
+    const plan = planPlateLayout([
+      { name: "A", sizeMm: [128, 128, 10] },
+      { name: "B", sizeMm: [128, 128, 10] },
+    ], [256, 256]);
+    assert(plan[0].plate !== plan[1].plate, "分板：128+5+128 > 256");
+  });
+
+  await it("同板件不重叠不出界", () => {
+    const plan = planPlateLayout([
+      { name: "A", sizeMm: [80, 60, 30] },
+      { name: "B", sizeMm: [70, 50, 20] },
+      { name: "C", sizeMm: [60, 40, 15] },
+      { name: "D", sizeMm: [200, 100, 25] },
+    ], [256, 256]);
+    let ok = true;
+    for (let i = 0; i < plan.length; i++) {
+      const a = plan[i];
+      if (a.xMm + a.wMm / 2 > 256 + 1e-9 || a.yMm + a.dMm / 2 > 256 + 1e-9) ok = false;
+      for (let j = i + 1; j < plan.length; j++) {
+        const b = plan[j];
+        if (a.plate !== b.plate) continue;
+        if (Math.abs(a.xMm - b.xMm) < (a.wMm + b.wMm) / 2 && Math.abs(a.yMm - b.yMm) < (a.dMm + b.dMm) / 2) ok = false;
+      }
+    }
+    assert(ok, "无重叠无出界");
+  });
+
+  await it("放不进任何朝向的件被跳过", () => {
+    const plan = planPlateLayout([
+      { name: "巨件", sizeMm: [300, 300, 10] },
+      { name: "正常", sizeMm: [50, 50, 10] },
+    ], [256, 256]);
+    assert(plan.length === 1 && plan[0].name === "正常", "巨件被过滤");
+  });
+});
+
+describe("自动拼板 — exportModelSTL 集成", async() => {
+  await it("文件名带板号且按输入件对应（B01-小件 / B02-中件）", () => {
+    const mk = (x, y, z, name) => ({
+      mesh: new Mesh(new BoxGeometry(x / 1000, y / 1000, z / 1000)),
+      name,
+    });
+    const results = exportModelSTL([
+      mk(40, 30, 15, "小件"),
+      mk(200, 100, 25, "大件"),
+      mk(80, 60, 15, "中件"),
+    ], { joinFeatures: false });
+    const byName = new Map(results.map(r => [r.name, r]));
+    assert(byName.get("小件").filename.startsWith("B01-"), "小件 B01");
+    assert(byName.get("中件").filename.startsWith("B02-"),
+      "中件 B02：第一板放不下 80 深排第三行");
+    assert(new Set(results.map(r => r.filename)).size === results.length, "文件名唯一");
+    for (const r of results) {
+      assert(Array.isArray(r.platePosMm) && r.platePosMm.length === 2, "platePosMm 在位");
+    }
+  });
+
+  await it("autoPlate:false 保留旧文件名（无板号）", () => {
+    const mk = name => ({ mesh: new Mesh(new BoxGeometry(0.05, 0.05, 0.05)), name });
+    const results = exportModelSTL([mk("甲件"), mk("乙件")], { joinFeatures: false, autoPlate: false });
+    assert(results.every(r => !/^B\d\d-/.test(r.filename)), "无板号前缀");
+  });
+
+  await it("单件不启用拼板", () => {
+    const results = exportModelSTL([{
+      mesh: new Mesh(new BoxGeometry(0.05, 0.05, 0.05)), name: "唯一",
+    }], { joinFeatures: false });
+    assert(!/^B\d\d-/.test(results[0].filename), "单件无板号");
   });
 });
 
