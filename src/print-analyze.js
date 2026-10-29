@@ -13,8 +13,7 @@
 //      毫米——2 米的 Quest 3 头显送进切片软件会被当成巨型件。
 //
 // 设计取舍：
-//   · 只做静态几何分析，不尝试修复。修复（补面 / 重网格化）是 Blender 3D-Print
-//     Toolbox 的职责，本模块负责在导出前把问题讲清楚，让用户决定要不要去修；
+//   · 只做静态几何分析，不尝试修复；导出层（print-export.js）在此基础上对平面切口做自动封盖——复用本模块导出的焊接与边统计（WELD_TOLERANCE / countEdges / weldPositions），保证「预检看到的开放边」和「封盖修的开放边」是同一套拓扑。其余问题（非流形边等）仍是 Blender 3D-Print Toolbox 的职责
 //   · 边邻接统计用排序顶点对做键，避免哈希浮点坐标；
 //   · 焊接容差与 geometry-split.js 的 weldVertices 默认值一致（1e-4），
 //     但**不**复用那个函数——它同时搬运 normal/uv/groups，而这里只需要顶点
@@ -36,11 +35,11 @@ export const DEFAULT_BUILD_VOLUME = "bambu_x1c";
 
 // 顶点焊接容差。与 geometry-split.js 的 weldVertices 默认值对齐：
 // 接缝处重复顶点的间距通常远大于此，而真实几何细节通常远小于此。
-const WELD_TOLERANCE = 1e-4;
+export const WELD_TOLERANCE = 1e-4;
 
 // 退化三角形判定阈值（面积平方）。三个共线/重复点构成的三角形面积为 0，
 // 但浮点累加会给出极小非零值，所以用平方量纲避免开方。
-const DEGENERATE_AREA_SQ = 1e-12;
+export const DEGENERATE_AREA_SQ = 1e-12;
 
 /**
  * 边邻接统计。
@@ -56,7 +55,7 @@ const DEGENERATE_AREA_SQ = 1e-12;
  * @returns {{edgeCount:number, openEdges:number, nonManifoldEdges:number,
  *            boundaryVertices:Set<number>, edgeUse:Map<string,number>}}
  */
-function countEdges(geometry) {
+export function countEdges(geometry) {
   const pos = geometry.attributes.position;
   const index = geometry.index;
   const count = index ? index.count : pos.count;
@@ -110,7 +109,7 @@ function countEdges(geometry) {
  * @param {number} tolerance
  * @returns {BufferGeometry}
  */
-function weldPositions(geometry, tolerance = WELD_TOLERANCE) {
+export function weldPositions(geometry, tolerance = WELD_TOLERANCE) {
   const pos = geometry && geometry.attributes ? geometry.attributes.position : null;
   if (!pos || pos.count === 0) return new BufferGeometry();
   if (!(tolerance > 0)) return geometry.clone();

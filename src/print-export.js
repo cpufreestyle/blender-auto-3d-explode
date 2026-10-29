@@ -13,9 +13,10 @@
 //   · 只改 clone，绝不动现场 mesh：现场 mesh 带 homePos/explodePos，
 //     爆炸动画还在跑，改了会让视图跳位。
 
-import { Box3, BufferGeometry, CylinderGeometry, Float32BufferAttribute, Mesh, Uint32BufferAttribute, Vector3 } from "three";
+import { Box3, BufferGeometry, CylinderGeometry, Float32BufferAttribute, Mesh, ShapeUtils, Uint32BufferAttribute, Vector2, Vector3 } from "three";
 import { Brush, Evaluator, ADDITION, SUBTRACTION } from "../vendor/three-bvh-csg/index.js";
 import { STLExporter } from "three/examples/jsm/exporters/STLExporter.js";
+import { DEGENERATE_AREA_SQ, WELD_TOLERANCE, countEdges, weldPositions } from "./print-analyze.js";
 
 // 场景单位 -> 毫米。与 print-analyze.js 的默认值保持一致：Blender/GLTF
 // 默认 1 单位 = 1 米，而打印要毫米。STLExporter 按场景单位输出，所以
@@ -235,6 +236,270 @@ export function applyJoinFeatures(mesh, cuts, pins, opts = {}) {
   return brush.geometry;
 }
 
+// ── 切口封盖（可打印性自动修复）─────────────────────────────
+// 预检（print-analyze.js）只报告不修复；但拆解切口这一类开放边可以零风险自动修掉：
+// 切口剖面是平面，沿边界环补一圈封面三角形就是水密实体，不需要重网格化。非平面环、
+// 非流形边、三角化/朝向自检失败一律退回原几何——宁可让用户手动修，也不悄悄导出坏几何。
+
+// 平面度容差：环上顶点到「质心 + Newell 法线」平面的最大距离（场景单位）。拆解切口
+// 实测残差在 1e-9 量级，1e-3（≈1mm @ scale 1000）只拦截真正扭曲的环。
+const CAP_PLANAR_TOLERANCE = 1e-3;
+
+const edgeKey = (p, q) => (p < q ? p + "_" + q : q + "_" + p);
+
+/**
+ * 给开放边界补封面（boundary capping）。
+ *
+ * 流程：焊接（与预检同容差）→ 边统计找 use===1 的边界边 → 串成边界环 → 平面度检查
+ * → earcut 补封面 → 按「封面走每条边界边的方向必须与面侧相反」传播定向 → 自检
+ * （水密 + 每条边两个方向各一次）。任何一步不满足都返回 null，调用方退回原几何。
+ *
+ * @param {THREE.BufferGeometry} geometry 任意几何（内部克隆，不改原几何）
+ * @param {{weldTolerance?: number, planarTolerance?: number}} [opts]
+ * @returns {THREE.BufferGeometry|null} 封盖后的索引几何；无需/无法封盖时 null
+ */
+export function capOpenEdges(geometry, opts = {}) {
+  if (!geometry || !geometry.attributes || !geometry.attributes.position) return null;
+  const weldTol = opts.weldTolerance || WELD_TOLERANCE;
+  const planarTol = opts.planarTolerance || CAP_PLANAR_TOLERANCE;
+  try {
+    const welded = weldPositions(geometry, weldTol);
+    const edges = countEdges(welded);
+    if (edges.openEdges === 0 || edges.nonManifoldEdges > 0) return null;
+
+    const pos = welded.attributes.position;
+    const index = welded.index;
+    // 面侧走向：边界边被表面三角形遍历的方向（use===1 的边只被这一个面使用）
+    const faceDir = new Map();
+    for (let i = 0; i + 2 < index.count; i += 3) {
+      const t = [index.getX(i), index.getX(i + 1), index.getX(i + 2)];
+      for (let e = 0; e < 3; e++) {
+        const p = t[e], q = t[(e + 1) % 3];
+        const key = edgeKey(p, q);
+        if (edges.edgeUse.get(key) === 1 && !faceDir.has(key)) faceDir.set(key, [p, q]);
+      }
+    }
+
+    // 边界环提取：每条边界边恰好属于一个环；分叉/断头/不闭合直接放弃
+    const remaining = new Set([...edges.edgeUse].filter(([, n]) => n === 1).map(([k]) => k));
+    const adj = new Map();
+    for (const key of remaining) {
+      const [p, q] = key.split("_").map(Number);
+      if (!adj.has(p)) adj.set(p, new Set());
+      if (!adj.has(q)) adj.set(q, new Set());
+      adj.get(p).add(q);
+      adj.get(q).add(p);
+    }
+    const loops = [];
+    while (remaining.size > 0) {
+      const first = remaining.values().next().value;
+      const [p0, q0] = first.split("_").map(Number);
+      remaining.delete(first);
+      const loop = [p0, q0];
+      const guard = edges.boundaryVertices.size + 2;
+      for (let step = 0; loop[loop.length - 1] !== p0; step++) {
+        if (step > guard) return null;
+        const cur = loop[loop.length - 1];
+        let next = null;
+        for (const nb of adj.get(cur)) {
+          if (!remaining.has(edgeKey(cur, nb))) continue;
+          if (next !== null) return null; // 分叉：同一顶点挂着 3+ 条边界边
+          next = nb;
+        }
+        if (next === null) return null; // 断头
+        remaining.delete(edgeKey(cur, next));
+        loop.push(next);
+      }
+      loop.pop(); // 去掉闭合重复的起点
+      if (loop.length < 3) return null;
+      loops.push(loop);
+    }
+
+    // 平面度 + Newell 法线
+    const loopData = loops.map(loop => {
+      const n = new Vector3();
+      const c = new Vector3();
+      for (let i = 0; i < loop.length; i++) {
+        const vi = loop[i];
+        const vj = loop[(i + 1) % loop.length];
+        const px = pos.getX(vi), py = pos.getY(vi), pz = pos.getZ(vi);
+        const qx = pos.getX(vj), qy = pos.getY(vj), qz = pos.getZ(vj);
+        n.x += (py - qy) * (pz + qz);
+        n.y += (pz - qz) * (px + qx);
+        n.z += (px - qx) * (py + qy);
+        c.x += px; c.y += py; c.z += pz;
+      }
+      if (n.lengthSq() < 1e-20) return null;
+      n.normalize();
+      c.multiplyScalar(1 / loop.length);
+      for (const vi of loop) {
+        const d = Math.abs(
+          n.x * (pos.getX(vi) - c.x) + n.y * (pos.getY(vi) - c.y) + n.z * (pos.getZ(vi) - c.z),
+        );
+        if (d > planarTol) return null;
+      }
+      return { loop, normal: n, center: c };
+    });
+    if (loopData.some(d => !d)) return null;
+
+    // 共面分组：嵌套环（空心管的环垫剖面）必须合成一张带洞封面，否则会封成两张
+    // 重叠的圆盘。同组 = 法线平行且环质心落在同一平面内。
+    const groups = [];
+    for (const d of loopData) {
+      const g = groups.find(g =>
+        Math.abs(g.normal.dot(d.normal)) > 0.999 &&
+        Math.abs(g.normal.dot(new Vector3().subVectors(d.center, g.center))) <= planarTol);
+      if (g) g.loops.push(d);
+      else groups.push({ normal: d.normal.clone(), center: d.center.clone(), loops: [d] });
+    }
+
+    const capTris = [];
+    for (const g of groups) {
+      // 投影基：避开法线最陡分量对应的轴，防止小分量投影退化
+      const ref = Math.abs(g.normal.y) < 0.9 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0);
+      const tu = new Vector3().crossVectors(ref, g.normal).normalize();
+      const tv = new Vector3().crossVectors(g.normal, tu).normalize();
+      const polys = g.loops.map(d => d.loop.map(vi => {
+        const x = pos.getX(vi), y = pos.getY(vi), z = pos.getZ(vi);
+        return new Vector2(x * tu.x + y * tu.y + z * tu.z, x * tv.x + y * tv.y + z * tv.z);
+      }));
+      const areas = polys.map(poly => Math.abs(ShapeUtils.area(poly)));
+      // 父环 = 包含我且面积最小的环（射线法点包含判定）
+      const parent = polys.map(() => -1);
+      for (let i = 0; i < polys.length; i++) {
+        for (let j = 0; j < polys.length; j++) {
+          if (i === j || areas[j] <= areas[i]) continue;
+          if (!pointInPoly(polys[i][0], polys[j])) continue;
+          if (parent[i] === -1 || areas[j] < areas[parent[i]]) parent[i] = j;
+        }
+      }
+      const children = polys.map(() => []);
+      polys.forEach((_, i) => { if (parent[i] !== -1) children[parent[i]].push(i); });
+      // 偶数深度 = 外轮廓（直接子环当洞），洞里再有环则递归成新封面
+      const buildCap = (ci, holes) => {
+        const flatIds = [];
+        for (const ring of [g.loops[ci].loop, ...holes.map(h => g.loops[h].loop)]) {
+          flatIds.push(...ring);
+        }
+        const faces = ShapeUtils.triangulateShape(polys[ci], holes.map(h => polys[h]));
+        for (const f of faces) {
+          capTris.push([flatIds[f[0]], flatIds[f[1]], flatIds[f[2]]]);
+        }
+        for (const h of holes) if (children[h].length) buildCap(h, children[h]);
+      };
+      polys.forEach((_, i) => { if (parent[i] === -1) buildCap(i, children[i]); });
+    }
+
+    // 退化封面过滤：零面积耳尖会让切片器抖动；漏补的边会被最后的水密自检拦下
+    const solidTris = capTris.filter(t => {
+      const ax = pos.getX(t[0]), ay = pos.getY(t[0]), az = pos.getZ(t[0]);
+      const bx = pos.getX(t[1]), by = pos.getY(t[1]), bz = pos.getZ(t[1]);
+      const cx = pos.getX(t[2]), cy = pos.getY(t[2]), cz = pos.getZ(t[2]);
+      const ux = bx - ax, uy = by - ay, uz = bz - az;
+      const vx = cx - ax, vy = cy - ay, vz = cz - az;
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      return nx * nx + ny * ny + nz * nz >= DEGENERATE_AREA_SQ;
+    });
+    if (solidTris.length === 0) return null;
+
+    // 封面定向：耳切输出不保证与实体朝向一致。以「封面走每条边界边的方向必须与
+    // 面侧相反」为种子约束（水密表面每条边两个方向各一次），沿封面共享边传播。
+    const capEdgeTris = new Map();
+    solidTris.forEach((t, ti) => {
+      for (let e = 0; e < 3; e++) {
+        const key = edgeKey(t[e], t[(e + 1) % 3]);
+        if (!capEdgeTris.has(key)) capEdgeTris.set(key, []);
+        capEdgeTris.get(key).push(ti);
+      }
+    });
+    const flipped = new Uint8Array(solidTris.length);
+    const decided = new Uint8Array(solidTris.length);
+    for (let seed = 0; seed < solidTris.length; seed++) {
+      if (decided[seed]) continue;
+      const t = solidTris[seed];
+      let flip = 0;
+      for (let e = 0; e < 3 && !flip; e++) {
+        const key = edgeKey(t[e], t[(e + 1) % 3]);
+        const fd = faceDir.get(key);
+        // 面侧与封面同向 → 违反「相反」约束 → 翻转
+        if (fd && fd[0] === t[e] && fd[1] === t[(e + 1) % 3]) flip = 1;
+      }
+      decided[seed] = 1;
+      flipped[seed] = flip;
+      const queue = [seed];
+      while (queue.length > 0) {
+        const ti = queue.pop();
+        const tri = solidTris[ti];
+        const ordered = flipped[ti] ? [tri[0], tri[2], tri[1]] : tri;
+        for (let e = 0; e < 3; e++) {
+          const p = ordered[e], q = ordered[(e + 1) % 3];
+          const key = edgeKey(p, q);
+          if (faceDir.has(key)) {
+            const fd = faceDir.get(key);
+            if (fd[0] === p && fd[1] === q) return null; // 边界约束不满足
+            continue;
+          }
+          for (const nj of capEdgeTris.get(key)) {
+            if (nj === ti || decided[nj]) continue;
+            const nt = solidTris[nj];
+            const same = (nt[0] === p && nt[1] === q) || (nt[1] === p && nt[2] === q)
+              || (nt[2] === p && nt[0] === q);
+            decided[nj] = 1;
+            flipped[nj] = same ? 1 : 0; // 邻居与我同向走共享边 → 翻转
+            queue.push(nj);
+          }
+        }
+      }
+    }
+
+    // 组装：原焊接表面 + 定向后的封面
+    const indices = Array.from(index.array);
+    for (let ti = 0; ti < solidTris.length; ti++) {
+      const tri = solidTris[ti];
+      if (flipped[ti]) indices.push(tri[0], tri[2], tri[1]);
+      else indices.push(tri[0], tri[1], tri[2]);
+    }
+    const out = new BufferGeometry();
+    out.setAttribute("position", new Float32BufferAttribute(Array.from(pos.array), 3));
+    out.setIndex(new Uint32BufferAttribute(indices, 1));
+
+    // 自检：封盖后的网格必须水密且每条边两个方向各一次。这一步同时兜底耳切退化、
+    // 嵌套环判定失误等一切意外——不满足就整体退回原几何。
+    const check = countEdges(out);
+    if (check.openEdges > 0 || check.nonManifoldEdges > 0) return null;
+    const dirUse = new Map();
+    for (let i = 0; i + 2 < indices.length; i += 3) {
+      for (let e = 0; e < 3; e++) {
+        const p = indices[i + e], q = indices[i + ((e + 1) % 3)];
+        const key = edgeKey(p, q);
+        const rec = dirUse.get(key);
+        if (!rec) dirUse.set(key, { n: 1, p });
+        else if (rec.p === p) return null; // 同向两次：整体朝向不一致
+        else rec.n++;
+      }
+    }
+    for (const rec of dirUse.values()) {
+      if (rec.n !== 2) return null;
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+// 射线法点包含判定（封盖嵌套环用）
+function pointInPoly(pt, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y;
+    const xj = poly[j].x, yj = poly[j].y;
+    if ((yi > pt.y) !== (yj > pt.y) && pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 /**
  * 把单个部件导出成二进制 STL。
  *
@@ -243,6 +508,7 @@ export function applyJoinFeatures(mesh, cuts, pins, opts = {}) {
  * @param {Function} [options.STLExporterClass] 测试缝：默认 three 的 STLExporter
  * @param {number} [options.scaleToMm] 场景单位 -> 毫米（默认 1000）
  * @param {boolean} [options.rotateToZUp] 是否旋转到构建板朝向（默认 true）
+ * @param {boolean} [options.capHoles] 是否自动封盖开放边（默认 true；封盖失败退回原几何）
  * @returns {Object} { name, filename, buffer, triangles, sizeMm }
  */
 export function exportPartSTL(part, options = {}) {
@@ -258,13 +524,26 @@ export function exportPartSTL(part, options = {}) {
 
   // clone 共享 geometry，只覆盖 transform——现场 mesh 的 homePos/explodePos
   // 与正在跑的爆炸动画都不受影响。
-  const clone = mesh.clone();
+  let clone = mesh.clone();
   clone.name = name;
 
   if (rotate) {
     // three/GLTF Y-up -> 打印 Z-up：绕 X 转 -90°，+Y 落到 +Z。
     // 用 rotation 而不是 matrix 逐项改写，clone 的 matrixAutoUpdate 保持默认。
     clone.rotation.x = -Math.PI / 2;
+  }
+  clone.updateMatrixWorld(true);
+  // 切口封盖：拆解切口的开放边在这一步补封面（默认开启，capHoles:false 关闭）。
+  // 必须在缩放前做——焊接容差/平面度阈值按场景单位定义，缩放后数值含义会变。
+  // 世界变换烘进几何体后换成单位变换的 mesh，后续对位逻辑不用改。
+  if (options.capHoles !== false) {
+    const capped = capOpenEdges(clone.geometry.clone().applyMatrix4(clone.matrixWorld));
+    if (capped) {
+      const flat = new Mesh(capped);
+      flat.name = clone.name;
+      flat.updateMatrixWorld(true);
+      clone = flat;
+    }
   }
   // 缩放必须先于对位：clone 的矩阵是 T * R * S，position 在父空间生效，
   // 若等对完位再放大，原本贴底的部件会被撑到板子上下两侧（实测首顶点
@@ -417,6 +696,7 @@ export function planPlateLayout(parts, plateSize) {
  * @param {Array<Object>} parts [{ mesh, name, index }]
  * @param {Object} [options] 同 exportPartSTL，另加：
  * @param {boolean|Object} [options.joinFeatures] false 关闭；对象则覆盖 JOIN_DEFAULTS
+ * @param {boolean} [options.capHoles] false 关闭切口封盖（默认开启，逐部件透传 exportPartSTL）
  * @returns {Array<Object>} 导出结果数组（无效部件被跳过）
  */
 export function exportModelSTL(parts, options = {}) {

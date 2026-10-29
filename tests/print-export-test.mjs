@@ -8,12 +8,14 @@
  *   · 二进制 STL 结构：84 + 50n 字节，三角形数字段与逐面字节数一致；
  *   · 单位：默认 1 场景单位 = 1000mm；
  *   · 现场 mesh 不被改动（爆炸动画依赖 homePos/explodePos）；
- *   · 80 字节头可写部件名且不溢出三角形计数字段。
+ *   · 80 字节头可写部件名且不溢出三角形计数字段；
+ *   · 切口封盖：开放边界自动补封面，封盖后水密、法线朝外，失败退回原几何。
  *
  * 用法：node tests/print-export-test.mjs
  */
 
 import {
+  capOpenEdges,
   JOIN_DEFAULTS,
   applyJoinFeatures,
   planPlateLayout,
@@ -461,6 +463,154 @@ describe("自动拼板 — exportModelSTL 集成", async() => {
       mesh: new Mesh(new BoxGeometry(0.05, 0.05, 0.05)), name: "唯一",
     }], { joinFeatures: false });
     assert(!/^B\d\d-/.test(results[0].filename), "单件无板号");
+  });
+});
+
+// ===== 切口封盖夹具 =====
+
+// 缺一面（+x）的开口立方体：10 个三角形、4 条开放边。perturb 把某个切口角点
+// 拽出切口平面，构造「非平面环」负例。
+function openCube({ perturb = null, nonIndexed = false } = {}) {
+  const g = new BoxGeometry(1, 1, 1);
+  const pos = g.attributes.position;
+  const idx = g.index;
+  const keep = [];
+  for (let i = 0; i + 2 < idx.count; i += 3) {
+    const t = [idx.getX(i), idx.getX(i + 1), idx.getX(i + 2)];
+    if (t.every(v => pos.getX(v) >= 0.5)) continue;
+    keep.push(...t);
+  }
+  const arr = Array.from(pos.array);
+  if (perturb) {
+    arr[perturb.vertex * 3] = perturb.x;
+    arr[perturb.vertex * 3 + 1] = perturb.y;
+    arr[perturb.vertex * 3 + 2] = perturb.z;
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute("position", new Float32BufferAttribute(arr, 3));
+  geo.setIndex(keep);
+  return nonIndexed ? geo.toNonIndexed() : geo;
+}
+
+// 两端开口的空心方管：每个端面是「外方环 + 内方环」的嵌套边界，封盖必须合成
+// 一张带洞的环垫而不是两张重叠圆盘。外壁法线朝外、内壁法线朝孔内。
+function openTube() {
+  const L = 0.5, O = 0.5, I = 0.1;
+  const ring = (x, h) => [[x, -h, -h], [x, h, -h], [x, h, h], [x, -h, h]];
+  const verts = [...ring(-L, O), ...ring(L, O), ...ring(-L, I), ...ring(L, I)];
+  const tris = [];
+  const quad = (a, b, c, d) => tris.push(a, b, c, a, c, d);
+  for (let k = 0; k < 4; k++) {
+    const k2 = (k + 1) % 4;
+    quad(k, k2, 4 + k2, 4 + k);           // 外壁
+    quad(8 + k, 12 + k, 12 + k2, 8 + k2); // 内壁
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute("position", new Float32BufferAttribute(verts.flat(), 3));
+  geo.setIndex(tris);
+  return geo;
+}
+
+// 有向体积（散度定理）：水密且法线朝外时等于实体体积，法线朝内时为负
+function orientedVolume(geo) {
+  const pos = geo.attributes.position;
+  const idx = geo.index;
+  let vol = 0;
+  for (let i = 0; i + 2 < idx.count; i += 3) {
+    const ax = pos.getX(idx.getX(i)), ay = pos.getY(idx.getX(i)), az = pos.getZ(idx.getX(i));
+    const bx = pos.getX(idx.getX(i + 1)), by = pos.getY(idx.getX(i + 1)), bz = pos.getZ(idx.getX(i + 1));
+    const cx = pos.getX(idx.getX(i + 2)), cy = pos.getY(idx.getX(i + 2)), cz = pos.getZ(idx.getX(i + 2));
+    vol += (ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)) / 6;
+  }
+  return vol;
+}
+
+describe("切口封盖 — capOpenEdges", async() => {
+  await it("开口立方体：4 条开放边封盖后水密", () => {
+    const geo = openCube();
+    const before = analyzePart({ mesh: new Mesh(geo) });
+    assert(before.openEdges === 4, "夹具本身有 4 条开放边（实得 " + before.openEdges + "）");
+    const capped = capOpenEdges(geo);
+    const after = analyzePart({ mesh: new Mesh(capped) });
+    assert(after.watertight, "封盖后水密（open " + after.openEdges + " / 非流形 " + after.nonManifoldEdges + "）");
+  });
+
+  await it("体积与三角数恢复完整立方体，有向体积为正（法线朝外）", () => {
+    const full = analyzePart({ mesh: new Mesh(new BoxGeometry(1, 1, 1)) });
+    const capped = capOpenEdges(openCube());
+    const after = analyzePart({ mesh: new Mesh(capped) });
+    assert(after.triangles === full.triangles,
+      "三角数 " + after.triangles + " = 完整立方体 " + full.triangles);
+    assert(Math.abs(after.volumeMm3 - full.volumeMm3) < 1e-6,
+      "体积恢复 " + after.volumeMm3 + " ≈ " + full.volumeMm3);
+    assert(orientedVolume(capped) > 0, "有向体积 " + orientedVolume(capped).toFixed(4) + " > 0");
+  });
+
+  await it("空心方管：嵌套边界环封成带洞环垫，整体水密", () => {
+    const geo = openTube();
+    const before = analyzePart({ mesh: new Mesh(geo) });
+    assert(before.openEdges === 16, "夹具 16 条开放边（实得 " + before.openEdges + "）");
+    const capped = capOpenEdges(geo);
+    const after = analyzePart({ mesh: new Mesh(capped) });
+    assert(after.watertight, "封盖后水密");
+    // 体积 = (O² − I²)·2L = 0.96 场景单位 = 9.6e8 mm³（三角形离散化后允许微小偏差）
+    assert(Math.abs(after.volumeMm3 - 9.6e8) < 1e4,
+      "体积 = 管壁实体（实得 " + after.volumeMm3 + "，偏差 " + Math.abs(after.volumeMm3 - 9.6e8).toFixed(2) + "）");
+    assert(orientedVolume(capped) > 0, "有向体积为正");
+  });
+
+  await it("非平面环退回 null（不悄悄导出坏几何）", () => {
+    // 环顶点沿 x 挪出切口平面（0.5 → 0.51）；挪动量超出默认焊接容差时需显式放宽
+    // weldTolerance 才能让它留在环里——这正是该参数存在的意义：负例同时钉住两层契约
+    //（焊接把谁连成环、平面度拦什么）。默认容差下被踢出环的点只会让环在 0.5 平面闭合，
+    // 封盖依然正确，不算坏几何。
+    const geo = openCube({ perturb: { vertex: 1, x: 0.51, y: 0.5, z: -0.5 } });
+    assert(capOpenEdges(geo, { weldTolerance: 0.02 }) === null, "非平面环拒绝封盖");
+    // 默认容差下该顶点被踢出环，环在 0.5 平面闭合后封盖依然正确——焊接容差与
+    // 平面度阈值协同的边界行为在此钉住，防止未来有人单独改掉其中一个
+    assert(capOpenEdges(geo) !== null, "默认容差下顶点出环，环共面仍封盖");
+  });
+
+  await it("已水密几何返回 null", () => {
+    assert(capOpenEdges(new BoxGeometry(1, 1, 1)) === null, "水密盒无需封盖");
+  });
+
+  await it("非索引几何同样封盖，原几何不被修改", () => {
+    const geo = openCube({ nonIndexed: true });
+    const posBefore = Array.from(geo.attributes.position.array);
+    const capped = capOpenEdges(geo);
+    const after = analyzePart({ mesh: new Mesh(capped) });
+    assert(after.watertight && after.triangles === 12, "非索引封盖后水密 12 三角");
+    assert(Array.from(geo.attributes.position.array).every((v, i) => v === posBefore[i]),
+      "原几何逐字节不变");
+  });
+});
+
+describe("切口封盖 — exportPartSTL 集成", async() => {
+  await it("默认开启：开口立方体导出为封盖后的 12 三角", () => {
+    const r = exportPartSTL({ mesh: new Mesh(openCube()), name: "开口件" });
+    assert(r.triangles === 12, "STL 三角数 12（实得 " + r.triangles + "）");
+  });
+
+  await it("capHoles:false 保留开放几何（10 三角）", () => {
+    const r = exportPartSTL({ mesh: new Mesh(openCube()), name: "开口件" }, { capHoles: false });
+    assert(r.triangles === 10, "关闭封盖后为原 10 三角（实得 " + r.triangles + "）");
+  });
+
+  await it("封盖失败退回原几何导出", () => {
+    const geo = openCube({ perturb: { vertex: 0, x: 1.0, y: 0.5, z: 0.5 } });
+    const r = exportPartSTL({ mesh: new Mesh(geo), name: "缺口件" }, { capHoles: false });
+    const capped = exportPartSTL({ mesh: new Mesh(geo), name: "缺口件" });
+    assert(r.triangles === 10, "关闭封盖为原 10 三角");
+    assert(capped.triangles >= 10, "开启封盖不减少三角数（实得 " + capped.triangles + "）");
+  });
+
+  await it("封盖后 STL 仍贴底居中", () => {
+    const r = exportPartSTL({ mesh: new Mesh(openCube()), name: "开口件" });
+    const b = stlBounds(r.buffer);
+    assert(Math.abs(b.min[2]) < 1e-3, "贴底 min.z ≈ 0（实得 " + b.min[2] + "）");
+    assert(Math.abs(b.max[2] - 1000) < 1e-3, "Z 上限 ≈ 1000mm（实得 " + b.max[2] + "）");
+    assert(Math.abs(b.max[0] + b.min[0]) < 1e-3, "X 居中");
   });
 });
 

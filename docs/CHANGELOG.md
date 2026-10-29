@@ -18,6 +18,7 @@
 
 ### 🐛 修复
 
+- **切口封盖**（src/print-export.js + src/print-analyze.js）— 「📐 导出打印STL」默认开启：导出前自动检测拆解切口的开放边界环，平面切口沿环补封面三角形把部件补成水密实体（切片器求不出闭合轮廓的「⚠️ N 条开放边」从此在导出时自动修掉）。封面朝向由边界约束传播保证（法线朝外），嵌套环（空心管端面）合成带洞环垫，非平面环 / 非流形边 / 任何自检失败一律退回原几何，绝不悄悄导出坏文件；`capHoles:false` 可关。焊接拓扑（1e-4）与打印预检同源（countEdges/weldPositions 从 print-analyze.js 导出复用），预检口径与修复口径一致。
 - **可打印性预检曾会永远报「水密」**（src/print-analyze.js）— three r186 起 `setIndex` 不再自动把裸 `Uint32Array` 包成 `BufferAttribute`，传裸数组存进去后 `index.count` 是 `undefined`，边邻接统计静默循环 0 次、开放边恒为 0。改为显式 `new Uint32BufferAttribute(next, 1)`（仓库既有正确写法见 src/geometry-split.js:239）。
 - **非索引几何的顶点索引漏了偏移**（src/print-analyze.js 四处）— `index ? index.getX(i+1) : i` 在非索引分支退化成 `i`，把同一个顶点读三遍，面积极值判退化、边统计全错。所有 STL 风格几何与所有 `toNonIndexed()` 夹具都踩这条。
 - **STL 导出先把部件贴底再缩放，部件被撑到板下**（src/print-export.js）— 克隆矩阵是 `T*R*S`，`scale.setScalar(1000)` 放在对位之后会把贴底部件撑到构建板下方（实测首顶点 z = -49.95 而非 0）。缩放移到 `updateMatrixWorld(true)` 之前。

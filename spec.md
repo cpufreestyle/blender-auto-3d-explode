@@ -106,6 +106,14 @@
   `options.buildVolume`），同板件名前缀 `B01-`，件间恒留 5mm 掰件间距，放不进
   任何朝向的部件跳过；排版结果按输入顺序回排、按下标对齐（部件名可重复）；
   `autoPlate:false` 关闭，单件导出不排版，排版失败退回无板号导出。
+- **I12 切口封盖契约**：`capOpenEdges`（print-export.js，复用 print-analyze.js 导出的
+  `WELD_TOLERANCE`/`weldPositions`/`countEdges`）在 `exportPartSTL` 中默认开启
+  （`capHoles:false` 关闭）：焊接后按 use===1 的边界边串环，非流形、分叉、断头、
+  非平面环（Newell 法线平面偏差 > 1e-3）一律拒绝；嵌套环合成带洞封面（earcut）；
+  封面朝向由「边界边两侧走向相反」约束传播保证，最终自检水密且每条边两个方向
+  各一次，不满足退回原几何。封盖在缩放前做（阈值按场景单位定义），封盖必须在
+  缩放/贴底之前、世界变换烘进几何之后。预检面板的口径是「只报告」，封盖是导出
+  层的自动修复，两者共用同一套焊接拓扑（1e-4）。
 
 ## 6. 验证矩阵（spec ↔ harness）
 
@@ -123,6 +131,7 @@
 | 3D 打印通道 | `npm test`（3 套件 132+ 断言）+ `node scripts/ci_print_ui_smoke.mjs`（25 条真机） | `tests/print-analyze-test.mjs`、`tests/print-export-test.mjs`、`tests/print-panel-test.mjs` |
 | I10 装配定位销 | `npm test`（pair 检测 / 水密 / 体积账 / 现场不变 / 开关） | `tests/print-export-test.mjs` |
 | I11 自动拼板 | `npm test`（顺序回排 / 间距分板 / 无重叠无出界 / 巨件过滤 / 开关） | `tests/print-export-test.mjs` |
+| I12 切口封盖 | `npm test`（开口立方体水密恢复 / 嵌套环垫 / 非平面拒绝 / 非索引 / 现场不变 / 开关） | `tests/print-export-test.mjs` |
 
 ## 7. 已知缺口
 

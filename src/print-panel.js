@@ -128,7 +128,7 @@ export function createPrintPanel({
       <div class="asm-rec-title">说明</div>
       <ul class="asm-rec">
         <li>体积按散度定理估算，非水密部件仅供参考；用料以切片软件为准。</li>
-        <li>预检只报告不修复：开放边 / 非流形边请用 Blender 3D-Print Toolbox 修补。</li>
+        <li>预检只报告不修复；导出 STL 时会自动给平面切口的开放边补封面（水密），非平面开口与非流形边仍请用 Blender 3D-Print Toolbox 修补。</li>
       </ul>
     `;
   }

@@ -1,7 +1,7 @@
 # Blender Auto 3D Explode — 验证面与评审台账 (harness.md)
 
 > 配套 `spec.md`：`spec.md` 定义「应当具备的契约」，本文件记录「如何验证 + 最近一次核验结论」。
-> 最近核验：**2026-10-29**（v3.3.3，装配定位销 + 自动拼板）
+> 最近核验：**2026-10-30**（v3.3.3，切口封盖）
 
 ## 1. 一键验证命令
 
@@ -46,17 +46,17 @@ curl -s -o /dev/null -w '%{http_code}\n' $BASE/api/nope                # 404
 npm run smoke:ui     # parts / sidebar / narrow / teaching / print 五条
 ```
 
-## 4. 最近验证结论（2026-10-29，HEAD `18d7449` — 装配定位销）
+## 4. 最近验证结论（2026-10-30，HEAD 待提交 — 切口封盖）
 
 | 项 | 命令 | 结论 |
 |----|------|------|
 | 工作区 | `git status` | 干净（commit `18d7449` 已推送 origin/main，含 vendor/ 两个新目录） |
-| JS 单元测试 | `npm test` | **62 套件 / 3946 断言 / 0 失败**（print-export-test 59 → 71，新增拼板两组断言） |
+| JS 单元测试 | `npm test` | **62 套件 / 3967 断言 / 0 失败**（print-export-test 71 → 92，新增封盖两组 21 断言） |
 | Python 单测 | `npm run test:py` | **36 项 OK** |
 | JS lint | `npm run lint:all:check` | **0 errors / 53 warnings**（既有 no-console 基线） |
 | CSS lint | `npm run lint:css:check` | 0 errors |
 | 生产构建 | `npm run build` | compiled successfully |
-| 3D 打印真机冒烟 | `node scripts/ci_print_ui_smoke.mjs` | **25 条全绿**（15 部件 STL 真下载，CSG 默认开启未破坏导出路径） |
+| 3D 打印真机冒烟 | `node scripts/ci_print_ui_smoke.mjs` | **25 条全绿**（15 部件 STL 真下载，CSG + 封盖默认开启未破坏导出路径；预检 11 个需处理件中头带的 24 条开放边在导出时自动封盖为水密） |
 | 桌面运行时 | launcher restart 后 curl | `/api/identity` 3.3.3 / `/api/health` Blender 5.1.2 OK / `vendor/three-bvh-csg/index.js` 200 |
 
 本轮修掉的三个 CSG 真 bug（详见 `docs/OSS_LEARNING.md` 优化 12）：Brush 的
