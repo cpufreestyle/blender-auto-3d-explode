@@ -3234,6 +3234,14 @@ class BLENDERMCP_PT_Panel(bpy.types.Panel):
         adv_box.label(text="analyze_assembly · 装配/干涉/可制造性")
         adv_box.label(text="get_assembly_sequence · 拆解顺序")
 
+        # 安全开关：execute_code 门禁状态 + 一键开启（关闭态才显示按钮）
+        layout.separator()
+        if prefs and prefs.allow_remote_code_exec:
+            layout.label(text="远程代码执行：已开启", icon='CHECKMARK')
+        else:
+            layout.label(text="远程代码执行：已关闭（execute_code 不可用）", icon='ERROR')
+            layout.operator("blendermcp.enable_remote_code_exec", text="一键开启远程代码执行", icon='PLAY')
+
         if not scene.blendermcp_server_running:
             layout.operator("blendermcp.start_server", text="Connect to MCP server")
         else:
@@ -3241,6 +3249,23 @@ class BLENDERMCP_PT_Panel(bpy.types.Panel):
             layout.label(text=f"Running on port {scene.blendermcp_port}")
 
 # Operator to set Hyper3D API Key
+class BLENDERMCP_OT_EnableRemoteCodeExec(bpy.types.Operator):
+    """一键开启 execute_code 门禁（安全敏感：仅在信任 MCP 客户端时开启）"""
+
+    bl_idname = "blendermcp.enable_remote_code_exec"
+    bl_label = "Enable Remote Code Exec"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        prefs = get_blendermcp_addon_preferences(context)
+        if prefs:
+            prefs.allow_remote_code_exec = True
+            self.report({'INFO'}, "已开启远程代码执行（execute_code 可用）")
+        else:
+            self.report({'WARNING'}, "未找到插件偏好，请在 Edit > Preferences > Add-ons > Blender MCP 里手动开启")
+        return {'FINISHED'}
+
+
 class BLENDERMCP_OT_SetFreeTrialHyper3DAPIKey(bpy.types.Operator):
     bl_idname = "blendermcp.set_hyper3d_free_trial_api_key"
     bl_label = "Set Free Trial API Key"
@@ -3451,6 +3476,7 @@ def register():
     bpy.utils.register_class(BLENDERMCP_OT_StartServer)
     bpy.utils.register_class(BLENDERMCP_OT_StopServer)
     bpy.utils.register_class(BLENDERMCP_OT_OpenTerms)
+    bpy.utils.register_class(BLENDERMCP_OT_EnableRemoteCodeExec)
 
     # Auto-start the server so the MCP client can connect without manual UI interaction
     scene = getattr(bpy.context, 'scene', None)
@@ -3483,6 +3509,7 @@ def unregister():
     bpy.utils.unregister_class(BLENDERMCP_OT_StartServer)
     bpy.utils.unregister_class(BLENDERMCP_OT_StopServer)
     bpy.utils.unregister_class(BLENDERMCP_OT_OpenTerms)
+    bpy.utils.unregister_class(BLENDERMCP_OT_EnableRemoteCodeExec)
     bpy.utils.unregister_class(BLENDERMCP_AddonPreferences)
 
     del bpy.types.Scene.blendermcp_port
