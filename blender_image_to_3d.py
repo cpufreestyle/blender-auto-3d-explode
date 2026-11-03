@@ -38,6 +38,16 @@ DEPTH_SOURCE_LUMA_QUANTIZED = "luminance-quantized"
 CUE_WEIGHTS = {"haze": 0.15, "vertical": 0.25, "centre": 0.30, "detail": 0.30}
 
 
+def _safe_path(p):
+    """路径清洗：拒绝含父目录穿越段的写法，返回规范化绝对路径。"""
+    import os
+    from pathlib import PurePath
+    s = str(p)
+    if ".." in PurePath(s).parts:
+        raise ValueError(f"路径不允许包含父目录穿越段：{s}")
+    return os.path.realpath(os.path.abspath(os.path.expanduser(s)))
+
+
 def parse_args():
     argv = sys.argv
     if "--" in argv:

@@ -15,6 +15,33 @@ import traceback
 from mathutils import Vector
 
 # 确保输出立即刷新（Blender 后台模式有时会缓冲）
+def _open_url(req, timeout=None):
+    """打开出站 URL：同函数内完成协议/凭证/保留地址校验后再请求。"""
+    import ipaddress
+    from urllib.parse import urlparse
+    _u = urlparse(str(req.full_url))
+    _h = (_u.hostname or "").lower()
+    if (_u.scheme or "").lower() not in ("http", "https") or not _h or _u.username or _u.password:
+        raise ValueError(f"出站 URL 协议/凭证段不合规：{req.full_url}")
+    try:
+        _ip = ipaddress.ip_address(_h)
+    except ValueError:
+        _ip = None
+    if _ip is not None and (_ip.is_link_local or _ip.is_reserved or _ip.is_multicast):
+        raise ValueError(f"链路本地/保留地址拒绝：{req.full_url}")
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+def _safe_path(p):
+    """路径清洗：拒绝含父目录穿越段的写法，返回规范化绝对路径。"""
+    import os
+    from pathlib import PurePath
+    s = str(p)
+    if ".." in PurePath(s).parts:
+        raise ValueError(f"路径不允许包含父目录穿越段：{s}")
+    return os.path.realpath(os.path.abspath(os.path.expanduser(s)))
+
+
 def log(msg):
     print(msg, flush=True)
     sys.stdout.flush()
@@ -868,7 +895,7 @@ def call_vlm_vision_multi(provider, key, model, png_paths, part_labels):
     try:
         # 多图请求（一次发送全部部件图）推理较慢，超时给足 180s；
         # 服务端 runBlenderSplit 整体有 600s 余量，不会因此被掐断。
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with _open_url(req, timeout=180) as resp:
             data = json.loads(resp.read().decode())
     except Exception as e:
         raise RuntimeError(f"VLM 请求失败: {e}")
@@ -1209,6 +1236,13 @@ def main():
 
         # 9. 导出清单
         log(f"\n9️⃣ 导出清单: {manifest_path}")
+        from pathlib import PurePath
+        _mp3 = os.path.realpath(os.path.abspath(os.path.expanduser(str(manifest_path))))
+        if ".." in PurePath(str(manifest_path)).parts:
+            raise ValueError("路径不允许包含父目录穿越段")
+        _sbase = os.path.realpath(os.path.abspath(os.getcwd()))
+        if _mp3 != _sbase and not _mp3.startswith(_sbase + os.sep):
+            raise ValueError("manifest 落盘路径必须在工作目录内")
         with open(manifest_path, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
         log("  清单导出成功")

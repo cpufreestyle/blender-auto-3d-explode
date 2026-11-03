@@ -95,10 +95,10 @@ def main():
     with open(probe_path, "w", encoding="utf-8") as fh:
         fh.write(
             "import os\n"
+            "import runpy\n"
             "import bpy\n"
             "target = os.environ['SMOKE_TARGET_SCRIPT']\n"
-            "ns = {'bpy': bpy, '__name__': '__main__'}\n"
-            "exec(compile(open(target, encoding='utf-8').read(), target, 'exec'), ns)\n"
+            "runpy.run_path(target, run_name='__main__')\n"
             "# 15 个部件里「头带」是 CURVE，其余为 MESH；相机/灯/枢轴不计入\n"
             "model_objs = [o for o in bpy.data.objects if o.type in ('MESH', 'CURVE')]\n"
             "mats = list(bpy.data.materials)\n"

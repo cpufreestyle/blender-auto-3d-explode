@@ -42,6 +42,16 @@ import subprocess
 FENCE_RE = re.compile(r"^(\s*)(`{3,}|~{3,})\s*([^\s`]*)\s*$")
 
 
+def _safe_path(p):
+    """路径清洗：拒绝含父目录穿越段的写法，返回规范化绝对路径。"""
+    import os
+    from pathlib import PurePath
+    s = str(p)
+    if ".." in PurePath(s).parts:
+        raise ValueError(f"路径不允许包含父目录穿越段：{s}")
+    return os.path.realpath(os.path.abspath(os.path.expanduser(s)))
+
+
 def guess_language(block: str) -> str:
     s = block.strip()
     if not s:
@@ -230,7 +240,7 @@ def main() -> int:
     print("Step 2/2: Python fix (MD040 fence languages, MD034 bare URLs)...")
     changed = 0
     for p in paths:
-        with open(p, "r", encoding="utf-8") as f:
+        with open(_safe_path(p), "r", encoding="utf-8") as f:
             original = f.read()
         fixed = fix_md040(fix_md034(original))
         if fixed != original:

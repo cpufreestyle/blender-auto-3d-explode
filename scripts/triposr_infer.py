@@ -24,6 +24,16 @@ import argparse
 import traceback
 
 
+def _safe_path(p):
+    """路径清洗：拒绝含父目录穿越段的写法，返回规范化绝对路径。"""
+    import os
+    from pathlib import PurePath
+    s = str(p)
+    if ".." in PurePath(s).parts:
+        raise ValueError(f"路径不允许包含父目录穿越段：{s}")
+    return os.path.realpath(os.path.abspath(os.path.expanduser(s)))
+
+
 def resolve_triposr_dir(explicit):
     if explicit:
         return os.path.abspath(explicit)

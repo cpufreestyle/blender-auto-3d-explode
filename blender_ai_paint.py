@@ -1391,6 +1391,53 @@ def call_ai_for_structure(prompt):
         raise
 
 
+def _safe_url(url, allow_private=False):
+    """出站 URL 边界校验：仅 http(s)、无凭证段、IP 字面量边界（非全局 IP 需豁免）。"""
+    import ipaddress
+    from urllib.parse import urlparse
+    u = urlparse(str(url))
+    scheme = (u.scheme or "").lower()
+    host = (u.hostname or "").lower()
+    if scheme not in ("http", "https") or not host:
+        raise ValueError(f"出站 URL 协议/主机不合规：{url}")
+    if u.username or u.password:
+        raise ValueError(f"出站 URL 含凭证段：{url}")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None and not ip.is_global and not allow_private:
+        raise ValueError(f"非全局 IP（私网/环回/元数据）默认拒绝：{url}")
+    return url
+
+
+def _safe_path(p):
+    """路径清洗：拒绝含父目录穿越段的写法，返回规范化绝对路径。"""
+    import os
+    from pathlib import PurePath
+    s = str(p)
+    if ".." in PurePath(s).parts:
+        raise ValueError(f"路径不允许包含父目录穿越段：{s}")
+    return os.path.realpath(os.path.abspath(os.path.expanduser(s)))
+
+
+def _open_url(req, timeout=None):
+    """打开出站 URL：同函数内完成协议/凭证/保留地址校验后再请求。"""
+    import ipaddress
+    from urllib.parse import urlparse
+    _u = urlparse(str(req.full_url))
+    _h = (_u.hostname or "").lower()
+    if (_u.scheme or "").lower() not in ("http", "https") or not _h or _u.username or _u.password:
+        raise ValueError(f"出站 URL 协议/凭证段不合规：{req.full_url}")
+    try:
+        _ip = ipaddress.ip_address(_h)
+    except ValueError:
+        _ip = None
+    if _ip is not None and (_ip.is_link_local or _ip.is_reserved or _ip.is_multicast):
+        raise ValueError(f"链路本地/保留地址拒绝：{req.full_url}")
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
 def call_openai_api(config, system_prompt, user_prompt):
     """调用 OpenAI API"""
     import urllib.request
@@ -1420,7 +1467,7 @@ def call_openai_api(config, system_prompt, user_prompt):
         }
     )
     
-    with urllib.request.urlopen(req, timeout=60) as response:
+    with _open_url(req, timeout=60) as response:
         result = json.loads(response.read().decode('utf-8'))
         content = result['choices'][0]['message']['content']
         return parse_ai_response(content)
@@ -1462,7 +1509,7 @@ def call_stepfun_api(config, system_prompt, user_prompt):
         }
     )
     
-    with urllib.request.urlopen(req, timeout=120) as response:
+    with _open_url(req, timeout=120) as response:
         result = json.loads(response.read().decode('utf-8'))
         content = result['choices'][0]['message']['content']
         return parse_ai_response(content)
@@ -1496,7 +1543,7 @@ def call_anthropic_api(config, system_prompt, user_prompt):
         }
     )
     
-    with urllib.request.urlopen(req, timeout=60) as response:
+    with _open_url(req, timeout=60) as response:
         result = json.loads(response.read().decode('utf-8'))
         content = result['content'][0]['text']
         return parse_ai_response(content)
@@ -1533,7 +1580,7 @@ def call_nvidia_api(config, system_prompt, user_prompt):
         }
     )
     
-    with urllib.request.urlopen(req, timeout=120) as response:
+    with _open_url(req, timeout=120) as response:
         result = json.loads(response.read().decode('utf-8'))
         content = result['choices'][0]['message']['content']
         return parse_ai_response(content)
@@ -1559,7 +1606,7 @@ def call_ollama_api(config, system_prompt, user_prompt):
         headers={'Content-Type': 'application/json'}
     )
     
-    with urllib.request.urlopen(req, timeout=120) as response:
+    with _open_url(req, timeout=120) as response:
         result = json.loads(response.read().decode('utf-8'))
         return parse_ai_response(result['response'])
 
@@ -1589,7 +1636,7 @@ def call_lmstudio_api(config, system_prompt, user_prompt):
         headers={'Content-Type': 'application/json'}
     )
     
-    with urllib.request.urlopen(req, timeout=120) as response:
+    with _open_url(req, timeout=120) as response:
         result = json.loads(response.read().decode('utf-8'))
         content = result['choices'][0]['message']['content']
         return parse_ai_response(content)
@@ -3233,6 +3280,13 @@ def main():
 
         # 4. 计算 manifest
         manifest = compute_manifest()
+        from pathlib import PurePath
+        _mp2 = os.path.realpath(os.path.abspath(os.path.expanduser(str(manifest_path))))
+        _mbase = os.path.realpath(os.path.abspath(os.getcwd()))
+        if ".." in PurePath(str(manifest_path)).parts:
+            raise ValueError("路径不允许包含父目录穿越段")
+        if _mp2 != _mbase and not _mp2.startswith(_mbase + os.sep):
+            raise ValueError("manifest 落盘路径必须在工作目录内")
         with open(manifest_path, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
         log(f"  ✅ Manifest 已保存: {manifest_path} ({manifest['total_parts']} 个部件)")

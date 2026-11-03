@@ -140,7 +140,7 @@ def call_vlm(provider, base_url, key, model, img_path, fix_msg=None):
                 "Content-Type": "application/json",
             },
         )
-        with urllib.request.urlopen(req, timeout=240) as r:
+        with _open_url(req, timeout=240) as r:
             data = json.loads(r.read().decode())
         text_parts = [
             b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"
@@ -168,6 +168,33 @@ def call_vlm(provider, base_url, key, model, img_path, fix_msg=None):
     with urllib.request.urlopen(req, timeout=240) as r:
         data = json.loads(r.read().decode())
     return data["choices"][0]["message"]["content"]
+
+
+def _open_url(req, timeout=None):
+    """打开出站 URL：同函数内完成协议/凭证/保留地址校验后再请求。"""
+    import ipaddress
+    from urllib.parse import urlparse
+    _u = urlparse(str(req.full_url))
+    _h = (_u.hostname or "").lower()
+    if (_u.scheme or "").lower() not in ("http", "https") or not _h or _u.username or _u.password:
+        raise ValueError(f"出站 URL 协议/凭证段不合规：{req.full_url}")
+    try:
+        _ip = ipaddress.ip_address(_h)
+    except ValueError:
+        _ip = None
+    if _ip is not None and (_ip.is_link_local or _ip.is_reserved or _ip.is_multicast):
+        raise ValueError(f"链路本地/保留地址拒绝：{req.full_url}")
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+def _safe_path(p):
+    """路径清洗：拒绝含父目录穿越段的写法，返回规范化绝对路径。"""
+    import os
+    from pathlib import PurePath
+    s = str(p)
+    if ".." in PurePath(s).parts:
+        raise ValueError(f"路径不允许包含父目录穿越段：{s}")
+    return os.path.realpath(os.path.abspath(os.path.expanduser(s)))
 
 
 def extract_code(text):

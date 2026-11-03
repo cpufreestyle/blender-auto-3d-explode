@@ -19,6 +19,16 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 
+def _safe_path(p):
+    """路径清洗：拒绝含父目录穿越段的写法，返回规范化绝对路径。"""
+    import os
+    from pathlib import PurePath
+    s = str(p)
+    if ".." in PurePath(s).parts:
+        raise ValueError(f"路径不允许包含父目录穿越段：{s}")
+    return os.path.realpath(os.path.abspath(os.path.expanduser(s)))
+
+
 class BlenderScriptHandler(FileSystemEventHandler):
     """监听 Python 脚本文件变化"""
 

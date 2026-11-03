@@ -38,6 +38,124 @@ RODIN_FREE_TRIAL_KEY = "vibecoding"
 REQ_HEADERS = requests.utils.default_headers()
 REQ_HEADERS.update({"User-Agent": "blender-mcp"})
 
+# ===== SECURITY HELPERS BEGIN =====
+import ipaddress
+from urllib.parse import urlparse
+
+# 出站资产/API 主机后缀白名单（后缀匹配须带点边界）
+ALLOWED_DOWNLOAD_HOST_SUFFIXES = (
+    "polyhaven.com",
+    "polyhaven.org",
+    "sketchfab.com",
+    "digitaloceanspaces.com",  # Sketchfab 资产 CDN（DO Spaces）
+    "hyper3d.ai",
+    "fal.run",
+    "meshy.ai",
+    "tripo3d.ai",
+    "amazonaws.com",           # Rodin/Sketchfab 资产（S3/CloudFront）
+    "myqcloud.com",
+    "aliyuncs.com",
+)
+
+
+def is_allowed_url(url, extra_suffixes=(), allow_private=False):
+    """出站 URL 边界校验：仅 http(s)、无凭证段、主机匹配后缀白名单。
+
+    allow_private=True 时放行 localhost / 私网 / 环回 IP 字面量（本地推理服务）；
+    链路本地（169.254.x）与保留/组播段任何模式下都拒绝。
+    """
+    try:
+        u = urlparse(str(url))
+    except Exception:
+        return False
+    if (u.scheme or "").lower() not in ("http", "https"):
+        return False
+    if u.username or u.password:
+        return False
+    host = (u.hostname or "").lower()
+    if not host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None:
+        if not allow_private:
+            return False
+        if ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            return False
+        return ip.is_private or ip.is_loopback
+    if host == "localhost":
+        return allow_private
+    for suffix in tuple(extra_suffixes) + ALLOWED_DOWNLOAD_HOST_SUFFIXES:
+        if host == suffix or host.endswith("." + suffix):
+            return True
+    return False
+
+def validate_asset_id(asset_id):
+    """外部资产 ID 进 URL 前的字符白名单（防 URL 注入/路径穿越）。"""
+    if not asset_id or not re.match(r"^[A-Za-z0-9._-]+$", str(asset_id)):
+        raise ValueError(f"非法资产 ID：{asset_id!r}")
+    return asset_id
+
+
+def safe_join(base, *parts):
+    """base + parts 的包含性拼接：解析后必须仍位于 base 内，否则 ValueError。"""
+    base_abs = os.path.realpath(os.path.abspath(base))
+    joins = os.path.join(base, *parts)
+    joined = os.path.realpath(os.path.abspath(joins))
+    if joined != base_abs and not joined.startswith(base_abs + os.sep):
+        raise ValueError(f"路径越界：{parts!r} 逃逸出 {base_abs}")
+    return joins
+
+
+def safe_get(url, allow_private=False, allow_public=False, extra_suffixes=(), **kw):
+    """出站请求统一入口：同函数内完成协议/凭证/主机/IP 边界校验，失败即抛错。
+
+    allow_public=True 用于"用户显式给出的任意公网 URL"类功能（协议+IP 边界）；
+    allow_private=True 用于本机推理服务（环回/私网；链路本地/保留段仍拒绝）。
+    """
+    u = urlparse(str(url))
+    scheme = (u.scheme or "").lower()
+    host = (u.hostname or "").lower()
+    if scheme not in ("http", "https") or not host or u.username or u.password:
+        raise ValueError(f"出站 URL 协议/凭证段不合规：{url}")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None:
+        if ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            raise ValueError(f"出站 URL 指向保留/链路本地地址：{url}")
+        if not (allow_private and (ip.is_private or ip.is_loopback)):
+            raise ValueError(f"出站 URL 指向非白名单 IP：{url}")
+    elif not (
+        allow_public
+        or any(
+            host == s or host.endswith("." + s)
+            for s in tuple(extra_suffixes) + ALLOWED_DOWNLOAD_HOST_SUFFIXES
+        )
+    ):
+        raise ValueError(f"出站 URL 主机不在白名单：{url}")
+    return requests.get(url, **kw)
+
+
+def extract_member_safe(zip_ref, dest_dir):
+    """zip 逐成员包含性校验后解包，防 zip-slip。返回实际落盘路径列表。"""
+    extracted = []
+    for info in zip_ref.infolist():
+        if info.is_dir():
+            os.makedirs(safe_join(dest_dir, info.filename), exist_ok=True)
+            continue
+        info.filename = os.path.relpath(
+            safe_join(dest_dir, info.filename),
+            dest_dir,
+        )
+        zip_ref.extract(info, dest_dir)
+        extracted.append(os.path.join(dest_dir, info.filename))
+    return extracted
+
+
 def get_blendermcp_addon_preferences(context=None):
     """Get add-on preferences object if available."""
     if context is None:
@@ -501,8 +619,14 @@ class BlenderMCPServer:
             return {"error": str(e)}
 
     def execute_code(self, code):
-        """Execute arbitrary Blender Python code"""
-        # This is powerful but potentially dangerous - use with caution
+        """Execute arbitrary Blender Python code
+
+        安全门禁：默认关闭。需在插件偏好里显式开启 allow_remote_code_exec，
+        避免 MCP 客户端被滥用时任意代码直接在 Blender 内执行。
+        """
+        prefs = get_blendermcp_addon_preferences()
+        if not bool(getattr(prefs, "allow_remote_code_exec", False)):
+            return {"error": "远程代码执行未开启：请在插件偏好里勾选 allow_remote_code_exec"}
         try:
             # Create a local namespace for execution
             namespace = {"bpy": bpy}
@@ -1016,7 +1140,7 @@ class BlenderMCPServer:
             if asset_type not in ["hdris", "textures", "models", "all"]:
                 return {"error": f"Invalid asset type: {asset_type}. Must be one of: hdris, textures, models, all"}
 
-            response = requests.get(f"https://api.polyhaven.com/categories/{asset_type}", headers=REQ_HEADERS)
+            response = safe_get(f"https://api.polyhaven.com/categories/{asset_type}", headers=REQ_HEADERS)
             if response.status_code == 200:
                 return {"categories": response.json()}
             else:
@@ -1038,7 +1162,7 @@ class BlenderMCPServer:
             if categories:
                 params["categories"] = categories
 
-            response = requests.get(url, params=params, headers=REQ_HEADERS)
+            response = safe_get(url, params=params, headers=REQ_HEADERS)
             if response.status_code == 200:
                 # Limit the response size to avoid overwhelming Blender
                 assets = response.json()
@@ -1058,7 +1182,7 @@ class BlenderMCPServer:
     def download_polyhaven_asset(self, asset_id, asset_type, resolution="1k", file_format=None):
         try:
             # First get the files information
-            files_response = requests.get(f"https://api.polyhaven.com/files/{asset_id}", headers=REQ_HEADERS)
+            files_response = safe_get(f"https://api.polyhaven.com/files/{asset_id}", headers=REQ_HEADERS)
             if files_response.status_code != 200:
                 return {"error": f"Failed to get asset files: {files_response.status_code}"}
 
@@ -1078,7 +1202,7 @@ class BlenderMCPServer:
                     # since Blender can't properly load HDR data directly from memory
                     with tempfile.NamedTemporaryFile(suffix=f".{file_format}", delete=False) as tmp_file:
                         # Download the file
-                        response = requests.get(file_url, headers=REQ_HEADERS)
+                        response = safe_get(file_url, headers=REQ_HEADERS)
                         if response.status_code != 200:
                             return {"error": f"Failed to download HDRI: {response.status_code}"}
 
@@ -1173,7 +1297,7 @@ class BlenderMCPServer:
                                 # Use NamedTemporaryFile like we do for HDRIs
                                 with tempfile.NamedTemporaryFile(suffix=f".{file_format}", delete=False) as tmp_file:
                                     # Download the file
-                                    response = requests.get(file_url, headers=REQ_HEADERS)
+                                    response = safe_get(file_url, headers=REQ_HEADERS)
                                     if response.status_code == 200:
                                         tmp_file.write(response.content)
                                         tmp_path = tmp_file.name
@@ -1306,13 +1430,17 @@ class BlenderMCPServer:
 
                     try:
                         # Download the main model file
-                        main_file_name = file_url.split("/")[-1]
-                        main_file_path = os.path.join(temp_dir, main_file_name)
+                        main_file_name = osp.basename(file_url.split("?")[0].split("/")[-1]) or "model.bin"
+                        main_file_path = safe_join(temp_dir, main_file_name)
 
-                        response = requests.get(file_url, headers=REQ_HEADERS)
+                        response = safe_get(file_url, headers=REQ_HEADERS)
                         if response.status_code != 200:
                             return {"error": f"Failed to download model: {response.status_code}"}
 
+                        _main_real = os.path.realpath(os.path.abspath(main_file_path))
+                        _base_real = os.path.realpath(os.path.abspath(temp_dir))
+                        if _main_real != _base_real and not _main_real.startswith(_base_real + os.sep):
+                            raise ValueError("模型落盘路径越界")
                         with open(main_file_path, "wb") as f:
                             f.write(response.content)
 
@@ -1323,12 +1451,16 @@ class BlenderMCPServer:
                                 include_url = include_info["url"]
 
                                 # Create the directory structure for the included file
-                                include_file_path = os.path.join(temp_dir, include_path)
+                                include_file_path = safe_join(temp_dir, include_path)
                                 os.makedirs(os.path.dirname(include_file_path), exist_ok=True)
 
                                 # Download the included file
-                                include_response = requests.get(include_url, headers=REQ_HEADERS)
+                                include_response = safe_get(include_url, headers=REQ_HEADERS)
                                 if include_response.status_code == 200:
+                                    _inc_real = os.path.realpath(os.path.abspath(include_file_path))
+                                    _base_real2 = os.path.realpath(os.path.abspath(temp_dir))
+                                    if _inc_real != _base_real2 and not _inc_real.startswith(_base_real2 + os.sep):
+                                        raise ValueError("部件文件落盘路径越界")
                                     with open(include_file_path, "wb") as f:
                                         f.write(include_response.content)
                                 else:
@@ -1848,7 +1980,7 @@ class BlenderMCPServer:
         api_key = self._get_hyper3d_api_key()
         if not api_key:
             return {"error": "Hyper3D API key is not given"}
-        response = requests.get(
+        response = safe_get(
             f"https://queue.fal.run/fal-ai/hyper3d/requests/{request_id}/status",
             headers={
                 "Authorization": f"KEY {api_key}",
@@ -2021,7 +2153,7 @@ class BlenderMCPServer:
 
                 try:
                     # Download the content
-                    response = requests.get(i["url"], stream=True)
+                    response = safe_get(i["url"], stream=True)
                     response.raise_for_status()  # Raise an exception for HTTP errors
 
                     # Write the content to the temporary file
@@ -2069,7 +2201,7 @@ class BlenderMCPServer:
         api_key = self._get_hyper3d_api_key()
         if not api_key:
             return {"succeed": False, "error": "Hyper3D API key is not given"}
-        response = requests.get(
+        response = safe_get(
             f"https://queue.fal.run/fal-ai/hyper3d/requests/{request_id}",
             headers={
                 "Authorization": f"Key {api_key}",
@@ -2078,6 +2210,7 @@ class BlenderMCPServer:
         data_ = response.json()
         temp_file = None
 
+        validate_asset_id(request_id)  # prefix 落盘前字符白名单（防 ../ 注入临时文件名）
         temp_file = tempfile.NamedTemporaryFile(
             delete=False,
             prefix=request_id,
@@ -2086,7 +2219,7 @@ class BlenderMCPServer:
 
         try:
             # Download the content
-            response = requests.get(data_["model_mesh"]["url"], stream=True)
+            response = safe_get(data_["model_mesh"]["url"], stream=True)
             response.raise_for_status()  # Raise an exception for HTTP errors
 
             # Write the content to the temporary file
@@ -2139,7 +2272,7 @@ class BlenderMCPServer:
                     "Authorization": f"Token {api_key}"
                 }
 
-                response = requests.get(
+                response = safe_get(
                     "https://api.sketchfab.com/v3/me",
                     headers=headers,
                     timeout=30  # Add timeout of 30 seconds
@@ -2216,7 +2349,7 @@ class BlenderMCPServer:
 
 
             # Use the search endpoint as specified in the API documentation
-            response = requests.get(
+            response = safe_get(
                 "https://api.sketchfab.com/v3/search",
                 headers=headers,
                 params=params,
@@ -2263,7 +2396,7 @@ class BlenderMCPServer:
             headers = {"Authorization": f"Token {api_key}"}
             
             # Get model info which includes thumbnails
-            response = requests.get(
+            response = safe_get(
                 f"https://api.sketchfab.com/v3/models/{uid}",
                 headers=headers,
                 timeout=30
@@ -2301,7 +2434,7 @@ class BlenderMCPServer:
                 return {"error": "Thumbnail URL not found"}
             
             # Download the thumbnail image
-            img_response = requests.get(thumbnail_url, timeout=30)
+            img_response = safe_get(thumbnail_url, timeout=30)
             if img_response.status_code != 200:
                 return {"error": f"Failed to download thumbnail: {img_response.status_code}"}
             
@@ -2358,7 +2491,7 @@ class BlenderMCPServer:
             # Request download URL using the exact endpoint from the documentation
             download_endpoint = f"https://api.sketchfab.com/v3/models/{uid}/download"
 
-            response = requests.get(
+            response = safe_get(
                 download_endpoint,
                 headers=headers,
                 timeout=30  # Add timeout of 30 seconds
@@ -2386,47 +2519,32 @@ class BlenderMCPServer:
                 return {"error": "No download URL available for this model. Make sure the model is downloadable and you have access."}
 
             # Download the model (already has timeout)
-            model_response = requests.get(download_url, timeout=60)  # 60 second timeout
+            model_response = safe_get(download_url, timeout=60)  # 60 second timeout
 
             if model_response.status_code != 200:
                 return {"error": f"Model download failed with status code {model_response.status_code}"}
 
             # Save to temporary file
             temp_dir = tempfile.mkdtemp()
-            zip_file_path = os.path.join(temp_dir, f"{uid}.zip")
+            validate_asset_id(uid)  # uid 进文件名前的字符白名单
+            zip_file_path = safe_join(temp_dir, f"{uid}.zip")
 
+            _zip_real = os.path.realpath(os.path.abspath(zip_file_path))
+            _base_real3 = os.path.realpath(os.path.abspath(temp_dir))
+            if _zip_real != _base_real3 and not _zip_real.startswith(_base_real3 + os.sep):
+                raise ValueError("zip 落盘路径越界")
             with open(zip_file_path, "wb") as f:
                 f.write(model_response.content)
 
             # Extract the zip file with enhanced security
             with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-                # More secure zip slip prevention
-                for file_info in zip_ref.infolist():
-                    # Get the path of the file
-                    file_path = file_info.filename
-
-                    # Convert directory separators to the current OS style
-                    # This handles both / and \ in zip entries
-                    target_path = os.path.join(temp_dir, os.path.normpath(file_path))
-
-                    # Get absolute paths for comparison
-                    abs_temp_dir = os.path.abspath(temp_dir)
-                    abs_target_path = os.path.abspath(target_path)
-
-                    # Ensure the normalized path doesn't escape the target directory
-                    if not abs_target_path.startswith(abs_temp_dir):
-                        with suppress(Exception):
-                            shutil.rmtree(temp_dir)
-                        return {"error": "Security issue: Zip contains files with path traversal attempt"}
-
-                    # Additional explicit check for directory traversal
-                    if ".." in file_path:
-                        with suppress(Exception):
-                            shutil.rmtree(temp_dir)
-                        return {"error": "Security issue: Zip contains files with directory traversal sequence"}
-
-                # If all files passed security checks, extract them
-                zip_ref.extractall(temp_dir)
+                # zip-slip 防护：逐成员包含性校验后解包；异常时清理临时目录
+                try:
+                    extract_member_safe(zip_ref, temp_dir)
+                except ValueError:
+                    with suppress(Exception):
+                        shutil.rmtree(temp_dir)
+                    return {"error": "Security issue: Zip contains path traversal entries"}
 
             # Find the main glTF file
             gltf_files = [f for f in os.listdir(temp_dir) if f.endswith('.gltf') or f.endswith('.glb')]
@@ -2804,7 +2922,7 @@ class BlenderMCPServer:
             if image:
                 if re.match(r'^https?://', image, re.IGNORECASE) is not None:
                     try:
-                        resImg = requests.get(image)
+                        resImg = safe_get(image)
                         resImg.raise_for_status()
                         image_base64 = base64.b64encode(resImg.content).decode("ascii")
                         data["image"] = image_base64
@@ -2915,16 +3033,20 @@ class BlenderMCPServer:
         obj_file_path = osp.join(temp_dir, "model.obj")
 
         try:
-            # Download ZIP file
-            zip_response = requests.get(zip_file_url, stream=True)
+            # Download ZIP file（用户显式给出的 URL：协议+IP 边界校验，不限主机）
+            zip_response = safe_get(zip_file_url, allow_public=True, stream=True)
             zip_response.raise_for_status()
+            _tz_real = os.path.realpath(os.path.abspath(zip_file_path))
+            _tbase = os.path.realpath(os.path.abspath(temp_dir))
+            if _tz_real != _tbase and not _tz_real.startswith(_tbase + os.sep):
+                raise ValueError("zip 落盘路径越界")
             with open(zip_file_path, "wb") as f:
-                for chunk in zip_response.iter_content(chunk_size=8192):
+                for chunk in zip_response.iter_content(chunk_size=8162):
                     f.write(chunk)
 
-            # Unzip the ZIP
+            # Unzip the ZIP（zip-slip 防护：逐成员校验后解包）
             with zipfile.ZipFile(zip_file_path, "r") as zip_ref:
-                zip_ref.extractall(temp_dir)
+                extract_member_safe(zip_ref, temp_dir)
 
             # Find the .obj file (there may be multiple, assuming the main file is model.obj)
             for file in os.listdir(temp_dir):
@@ -2982,6 +3104,11 @@ class BLENDERMCP_AddonPreferences(bpy.types.AddonPreferences):
         name="Allow Telemetry",
         description="Allow collection of prompts, code snippets, and screenshots to help improve Blender MCP",
         default=True
+    )
+    allow_remote_code_exec: BoolProperty(
+        name="Allow Remote Code Exec",
+        description="开启后 MCP 的 execute_code 才会真正执行；默认关闭",
+        default=False,
     )
     hyper3d_api_key: bpy.props.StringProperty(
         name="Hyper3D API Key",

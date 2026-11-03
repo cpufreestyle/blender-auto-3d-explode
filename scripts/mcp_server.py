@@ -60,6 +60,33 @@ TIMEOUT = float(os.environ.get("BLENDERMCP_TIMEOUT", "300"))
 # Blender addon client (TCP, newline-delimited JSON request/response)
 # --------------------------------------------------------------------------
 
+def _open_url(req, timeout=None):
+    """打开出站 URL：同函数内完成协议/凭证/保留地址校验后再请求。"""
+    import ipaddress
+    from urllib.parse import urlparse
+    _u = urlparse(str(req.full_url))
+    _h = (_u.hostname or "").lower()
+    if (_u.scheme or "").lower() not in ("http", "https") or not _h or _u.username or _u.password:
+        raise ValueError(f"出站 URL 协议/凭证段不合规：{req.full_url}")
+    try:
+        _ip = ipaddress.ip_address(_h)
+    except ValueError:
+        _ip = None
+    if _ip is not None and (_ip.is_link_local or _ip.is_reserved or _ip.is_multicast):
+        raise ValueError(f"链路本地/保留地址拒绝：{req.full_url}")
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+def _safe_path(p):
+    """路径清洗：拒绝含父目录穿越段的写法，返回规范化绝对路径。"""
+    import os
+    from pathlib import PurePath
+    s = str(p)
+    if ".." in PurePath(s).parts:
+        raise ValueError(f"路径不允许包含父目录穿越段：{s}")
+    return os.path.realpath(os.path.abspath(os.path.expanduser(s)))
+
+
 def call_addon(command_type, params=None, timeout=TIMEOUT):
     """Send a single command to the Blender addon and return the parsed JSON
     response. The addon sends exactly one JSON response per command."""
@@ -116,7 +143,7 @@ def _api_call(method, url, *, headers=None, json_body=None, timeout=600):
     for k, v in (headers or {}).items():
         req.add_header(k, v)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _open_url(req, timeout=timeout) as resp:
             raw = resp.read()
             return resp.status, (json.loads(raw.decode("utf-8")) if raw else {})
     except urllib.error.HTTPError as e:
@@ -128,7 +155,14 @@ def _api_call(method, url, *, headers=None, json_body=None, timeout=600):
 
 def _download(url, dest, timeout=600):
     req = urllib.request.Request(url, headers={"User-Agent": "blender-mcp"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp, open(dest, "wb") as f:
+    from pathlib import PurePath
+    _dp = os.path.realpath(os.path.abspath(os.path.expanduser(str(dest))))
+    if ".." in PurePath(str(dest)).parts:
+        raise ValueError("路径不允许包含父目录穿越段")
+    _dbase = os.path.realpath(os.path.abspath(os.getcwd()))
+    if _dp != _dbase and not _dp.startswith(_dbase + os.sep):
+        raise ValueError("下载落盘路径必须在工作目录内")
+    with _open_url(req, timeout=timeout) as resp, open(_dp, "wb") as f:
         while True:
             chunk = resp.read(1 << 20)
             if not chunk:
