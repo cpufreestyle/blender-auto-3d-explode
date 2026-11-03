@@ -8,7 +8,7 @@ webpack 构建产物走 node_modules，不经过这里）。镜像与 node_modul
 版本（镜像停在 r160，package.json 早已 0.186），GLTFExporter 的 utils 相对路径
 在平铺布局下也是断的。
 
-做法：以一组入口文件（core 构建产物 + 源码实际 import 的 5 个 examples）做
+做法：以一组入口文件（core 构建产物 + 源码实际 import 的 6 个 examples）做
 BFS，沿相对导入（from './x' / from '../x'）求闭包，同构拷贝进 vendor/three/，
 并清掉镜像里不在闭包内的残留文件。入口清单与 tests/vendor-three-test.mjs 的
 期望清单、守卫断言三者对齐；升级 three 后跑 `npm run vendor:sync` 一次即可。
@@ -30,6 +30,7 @@ ENTRIES = [
     "build/three.module.js",
     "examples/jsm/controls/OrbitControls.js",
     "examples/jsm/exporters/GLTFExporter.js",
+    "examples/jsm/exporters/STLExporter.js",
     "examples/jsm/geometries/RoundedBoxGeometry.js",
     "examples/jsm/loaders/GLTFLoader.js",
     "examples/jsm/loaders/STLLoader.js",

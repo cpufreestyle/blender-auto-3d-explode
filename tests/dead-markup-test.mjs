@@ -127,14 +127,14 @@ describe("index.html 的 id 都有消费者", () => {
   ].join("\n");
 
   it("数量与现状一致（回归后先看这里，别静默放行）", () => {
-    assert(ids.length === 81, `index.html 声明了 ${ids.length} 个 id，预期 81`);
+    assert(ids.length === 83, `index.html 声明了 ${ids.length} 个 id，预期 83`);
   });
 
   it("没有任何 id 是孤儿（词边界命中才算）", () => {
     const orphans = ids.filter((id) => !wordHit(consumers, id));
     assert(
       orphans.length === 0,
-      orphans.length === 0 ? "77 个 id 全部有消费者" : `孤儿 id: ${orphans.join(", ")}`,
+      orphans.length === 0 ? "83 个 id 全部有消费者" : `孤儿 id: ${orphans.join(", ")}`,
     );
   });
 });
@@ -225,7 +225,7 @@ describe("JS 取的每个 id 都有着落", () => {
   };
 
   it("数量与现状一致", () => {
-    assert(requested.length === 117, `字面量 getElementById ${requested.length} 个，预期 117`);
+    assert(requested.length === 119, `字面量 getElementById ${requested.length} 个，预期 119`);
     assert(templates.length === 5, `模板 getElementById ${templates.length} 个，预期 5`);
   });
 
@@ -234,7 +234,7 @@ describe("JS 取的每个 id 都有着落", () => {
     assert(
       missing.length === 0,
       missing.length === 0 ?
-        "113 个 getElementById 目标全部有着落（HTML 声明 + JS 自建）" :
+        "119 个 getElementById 目标全部有着落（HTML 声明 + JS 自建）" :
         `取不到的 id: ${missing.join(", ")}`,
     );
   });

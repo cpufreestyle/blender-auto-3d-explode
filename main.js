@@ -498,10 +498,11 @@ setupGeneratedLibrary({
 });
 
 
-// ===== 导出与轻提示（截图 / 教案 / GLB）=====
+// ===== 导出与轻提示（截图 / 教案 / GLB / STL）=====
 // 依赖注入：renderer/scene/camera/questGroup/customModelGroup 是 const 稳定引用；
 // currentModelName/totalSteps/displayedStep/hasCustomModel/customModelParts/stepGroups/parts
-// 都是会重赋值的 let / 会被替换的数组，经 getState() 现取，避免闭包钉住旧值。
+// 都是会重赋值的 let / 会被替换的数组，经 getState() 现取，避免闭包钉住旧值；
+// selectedPartName 取自部件清单交互（partInteractions 在下方才赋值，getState 现取刚好）。
 const exportPanel = createExportPanel({
   renderer,
   scene,
@@ -516,6 +517,7 @@ const exportPanel = createExportPanel({
     customModelParts,
     stepGroups,
     parts,
+    selectedPartName: partInteractions?.getSelected?.() ?? null,
   }),
 });
 

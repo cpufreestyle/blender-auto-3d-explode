@@ -1,8 +1,9 @@
 /**
- * 导出与轻提示（截图 / 教案 Markdown / GLB）——从 main.js 抽取，行为不变。
+ * 导出与轻提示（截图 / 教案 Markdown / GLB / STL 3D 打印）——从 main.js 抽取，行为不变。
  *
  * 原 main.js 1826-2023 行的导出块：toast 提示、时间戳、下载入口、截图导出、教案导出
- * （Markdown 文件 + 剪贴板）、GLB 导出六个职能，外加四个按钮绑定。
+ * （Markdown 文件 + 剪贴板）、GLB 导出六个职能，外加四个按钮绑定；后续新增 STL
+ * 3D 打印导出（整体 + 当前选中部件，二进制 STL）。
  *
  * 对主模块的依赖分两类，注入方式 deliberately 不同：
  *   - 稳定引用（const，不会重赋值）：renderer / scene / camera / questGroup /
@@ -16,6 +17,7 @@
  */
 
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+import { STLExporter } from "three/examples/jsm/exporters/STLExporter.js";
 
 export function createExportPanel({
   renderer,
@@ -27,6 +29,8 @@ export function createExportPanel({
   // 仅测试注入的缝：生产中恒为 three 的 GLTFExporter。GLTFExporter.parse 在 Node 里
   // 会卡在 FileReader/纹理路径上，假实现让 GLB 的成功/失败回调用例不依赖浏览器。
   GLTFExporterClass = GLTFExporter,
+  // STL 同样走注入缝：STLExporter.parse 是同步调用，假实现驱动成功/抛错两条路径。
+  STLExporterClass = STLExporter,
 }) {
   // ===== 可变状态（原 main.js 的模块级 let，会随加载/清除自定义模型重赋值）=====
   // 不能在建厂时拷一份快照：按钮点击发生在模块求值之后，必须每次读最新值。
@@ -37,6 +41,7 @@ export function createExportPanel({
   let customModelParts;
   let stepGroups;
   let parts;
+  let selectedPartName;
 
   function syncState() {
     const s = getState();
@@ -47,6 +52,7 @@ export function createExportPanel({
     customModelParts = s.customModelParts;
     stepGroups = s.stepGroups;
     parts = s.parts;
+    selectedPartName = s.selectedPartName || null;
   }
 
   function getToastWrap() {
@@ -243,6 +249,76 @@ export function createExportPanel({
     }
   }
 
+  // ===== STL 导出（3D 打印）：二进制 STL =====
+  // 导出的是当前显示状态：整体打印建议先把拆解滑块调回 0（合体）再导出；
+  // AI 生成/照片转 3D 的网格常不水密，切片器需自行修复。
+  function exportSTLWhole() {
+    syncState();
+    try {
+      const target = hasCustomModel ? customModelGroup : questGroup;
+      if (!target || target.children.length === 0) {
+        showToast("❌ 当前没有可导出的模型", "error");
+        return;
+      }
+      const exporter = new STLExporterClass();
+      const data = exporter.parse(target, { binary: true });
+      const blob = new Blob([data], { type: "model/stl" });
+      const url = URL.createObjectURL(blob);
+      triggerDownload(url, `${currentModelName}-拆解步骤${displayedStep}-${fileTimestamp()}.stl`);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      showToast("🖨️ STL 已导出（当前拆解状态）", "success");
+    } catch (err) {
+      showToast("❌ STL 导出失败：" + err.message, "error");
+    }
+  }
+
+  // 深度优先在组里按名字找部件网格：先精确匹配，找不到再退到包含匹配（部件清单的
+  // 名字可能只是网格名的子串）。找到后把该对象直接交给 STLExporter.parse。
+  function findPartMesh(root, name) {
+    if (!root || !Array.isArray(root.children)) return null;
+    let exact = null;
+    let loose = null;
+    const walk = (node) => {
+      if (exact) return;
+      for (const child of node.children) {
+        if (child.name === name) {
+          exact = child;
+          return;
+        }
+        if (!loose && child.name && String(child.name).includes(name)) loose = child;
+        if (child.children) walk(child);
+      }
+    };
+    walk(root);
+    return exact || loose;
+  }
+
+  // 导出当前选中/单独显示的部件（部件清单点击或 isolate 的那个）为二进制 STL
+  function exportSTLPart() {
+    syncState();
+    try {
+      if (!selectedPartName) {
+        showToast("❌ 请先在部件清单中选中部件", "error");
+        return;
+      }
+      const target = hasCustomModel ? customModelGroup : questGroup;
+      const mesh = findPartMesh(target, selectedPartName);
+      if (!mesh) {
+        showToast(`❌ 未找到部件“${selectedPartName}”`, "error");
+        return;
+      }
+      const exporter = new STLExporterClass();
+      const data = exporter.parse(mesh, { binary: true });
+      const blob = new Blob([data], { type: "model/stl" });
+      const url = URL.createObjectURL(blob);
+      triggerDownload(url, `${currentModelName}-部件${selectedPartName}-${fileTimestamp()}.stl`);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      showToast(`🖨️ 部件 STL 已导出：${selectedPartName}`, "success");
+    } catch (err) {
+      showToast("❌ 部件 STL 导出失败：" + err.message, "error");
+    }
+  }
+
   const shotBtn = document.getElementById("shot-btn");
   if (shotBtn) shotBtn.addEventListener("click", exportScreenshot);
   const exportMdBtn = document.getElementById("export-md-btn");
@@ -251,6 +327,10 @@ export function createExportPanel({
   if (copyMdBtn) copyMdBtn.addEventListener("click", copyLessonMarkdown);
   const exportGlbBtn = document.getElementById("export-glb-btn");
   if (exportGlbBtn) exportGlbBtn.addEventListener("click", exportGLB);
+  const exportStlBtn = document.getElementById("export-stl-btn");
+  if (exportStlBtn) exportStlBtn.addEventListener("click", exportSTLWhole);
+  const exportStlPartBtn = document.getElementById("export-stl-part-btn");
+  if (exportStlPartBtn) exportStlPartBtn.addEventListener("click", exportSTLPart);
   return {
     showToast,
     getToastWrap,
@@ -262,5 +342,7 @@ export function createExportPanel({
     exportLessonMarkdown,
     copyLessonMarkdown,
     exportGLB,
+    exportSTLWhole,
+    exportSTLPart,
   };
 }

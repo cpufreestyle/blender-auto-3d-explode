@@ -9,11 +9,14 @@
  *   - buildLessonMarkdown：教案内容契约（标题/步骤/部件/工具去重汇总/页脚来源）
  *   - exportScreenshot / exportLessonMarkdown / copyLessonMarkdown / exportGLB：
  *     成功与失败两条路径的下载文件名、Blob MIME、URL 回收时机、toast 文案
+ *   - exportSTLWhole / exportSTLPart（3D 打印 STL）：空组 / 未选部件 / 找不到部件
+ *     三条失败路径与三条成功路径的文件名 / Blob MIME / toast 文案，同假 exporter 注入模式
  *   - 建厂后状态变更仍生效：原 main.js 里这些值是模块级 let，抽取后经 getState()
  *     现取，这是本次重构最容易踩的坑，专门用一条用例钉住。
  *
  * GLTFExporter.parse 在 Node 里会卡在 FileReader/纹理路径上，因此成功/失败回调
- * 路径用注入的假 exporter 驱动，其余全部走真实模块代码。
+ * 路径用注入的假 exporter 驱动；STLExporter.parse 虽是同步调用，也复用同一注入缝
+ * 模式（stlOutcome 控制抛错），其余全部走真实模块代码。
  *
  * 用法：node tests/export-panel-test.mjs
  */
@@ -110,6 +113,7 @@ function installBrowser({
   lightTheme = false,
   clipboardMode = "resolve", // resolve | reject | none
   glbOutcome = "ok", //         ok | error
+  stlOutcome = "ok", //         ok | error
 } = {}) {
   const calls = {
     toasts: [],
@@ -123,6 +127,8 @@ function installBrowser({
     textareasCreated: 0,
     parseCalls: [],
     exporterBuilt: 0,
+    stlParseCalls: [],
+    stlExporterBuilt: 0,
     appendedToBody: [],
   };
 
@@ -151,7 +157,14 @@ function installBrowser({
 
   const overlay = makeEl("div");
   overlay.className = lightTheme ? "ui-overlay light-theme" : "ui-overlay";
-  const BUTTON_IDS = ["shot-btn", "export-md-btn", "copy-md-btn", "export-glb-btn"];
+  const BUTTON_IDS = [
+    "shot-btn",
+    "export-md-btn",
+    "copy-md-btn",
+    "export-glb-btn",
+    "export-stl-btn",
+    "export-stl-part-btn",
+  ];
   const buttons = {};
   for (const id of BUTTON_IDS) buttons[id] = makeEl("button");
 
@@ -242,6 +255,18 @@ function installBrowser({
     }
   };
 
+  // STLExporter.parse 是同步的：成功返回 DataView（binary: true），失败直接抛错
+  const FakeSTLExporter = class {
+    constructor() {
+      calls.stlExporterBuilt++;
+    }
+    parse(target, options) {
+      calls.stlParseCalls.push({ target, options });
+      if (stlOutcome === "error") throw new Error("STL 炸了");
+      return new DataView(new ArrayBuffer(64));
+    }
+  };
+
   const panel = createExportPanel({
     renderer,
     scene,
@@ -250,6 +275,7 @@ function installBrowser({
     customModelGroup,
     getState: () => state,
     GLTFExporterClass: FakeExporter,
+    STLExporterClass: FakeSTLExporter,
   });
 
   const world = {
@@ -313,6 +339,7 @@ function makeState(overrides = {}) {
       hasCustomModel: false,
       customModelParts: [],
       parts: [{ name: "后盖" }, { name: "电池" }, { name: "主板" }],
+      selectedPartName: null,
       stepGroups: [
         {
           name: "第一步：<b>拆后盖</b>",
@@ -629,13 +656,164 @@ describe("导出模块（src/export-panel.js）", async() => {
     }
   });
 
-  await it("建厂时绑定四个导出按钮（缺失的按钮静默跳过）", () => {
+  // ===== STL 导出（3D 打印）=====
+
+  await it("exportSTLWhole：空组直接报错，不构造 exporter", () => {
+    const w = installBrowser({ state: makeState() });
+    try {
+      if (typeof w.panel.exportSTLWhole !== "function") {
+        assert(false, "exportSTLWhole 尚未实现");
+        return;
+      }
+      w.panel.exportSTLWhole();
+      assert(w.calls.stlExporterBuilt === 0, "空组不构造 exporter");
+      assert(w.calls.stlParseCalls.length === 0, "没有调用 parse");
+      assert(w.calls.downloads.length === 0, "没有下载");
+      assert(w.lastToast().className === "toast toast-error", "error toast");
+      assert(w.lastToast().textContent.includes("当前没有可导出的模型"), "文案说明原因");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("exportSTLWhole：默认模型走 questGroup，二进制文件名含步骤号", () => {
+    const w = installBrowser({ state: makeState() });
+    try {
+      if (typeof w.panel.exportSTLWhole !== "function") {
+        assert(false, "exportSTLWhole/尚未实现");
+        return;
+      }
+      w.questGroup.children.push(makeEl("mesh"));
+      w.panel.exportSTLWhole();
+      assert(w.calls.stlParseCalls.length === 1, "调用了一次 parse");
+      assert(w.calls.stlParseCalls[0].target === w.questGroup, "默认导出 questGroup");
+      assert(w.calls.stlParseCalls[0].options.binary === true, "二进制 STL");
+      assert(w.calls.downloads.length === 1, "触发下载");
+      assert(
+        /^Meta Quest 3-拆解步骤1-\d{8}-\d{6}\.stl$/.test(w.calls.downloads[0].filename),
+        `文件名含模型名与步骤号（${w.calls.downloads[0].filename}）`,
+      );
+      assert(w.calls.objectUrls[0].blob.type === "model/stl", "Blob MIME 用 model/stl");
+      assert(w.lastToast().textContent.includes("STL 已导出"), "成功文案");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("exportSTLWhole：自定义模型走 customModelGroup", () => {
+    const w = installBrowser({ state: makeState({ hasCustomModel: true, currentModelName: "机械臂", displayedStep: 2 }) });
+    try {
+      if (typeof w.panel.exportSTLWhole !== "function") {
+        assert(false, "exportSTLWhole 尚未实现");
+        return;
+      }
+      w.customModelGroup.children.push(makeEl("mesh"));
+      w.panel.exportSTLWhole();
+      assert(w.calls.stlParseCalls[0].target === w.customModelGroup, "自定义模型走 customModelGroup");
+      assert(
+        w.calls.downloads[0].filename.startsWith("机械臂-拆解步骤2-"),
+        `文件名用自定义模型名与步骤（${w.calls.downloads[0].filename}）`,
+      );
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("exportSTLPart：未选部件报错，不构造 exporter", () => {
+    const w = installBrowser({ state: makeState() });
+    try {
+      if (typeof w.panel.exportSTLPart !== "function") {
+        assert(false, "exportSTLPart 尚未实现");
+        return;
+      }
+      w.questGroup.children.push(makeEl("mesh"));
+      w.panel.exportSTLPart();
+      assert(w.calls.stlExporterBuilt === 0, "未选部件不构造 exporter");
+      assert(w.calls.downloads.length === 0, "没有下载");
+      assert(w.lastToast().className === "toast toast-error", "error toast");
+      assert(w.lastToast().textContent.includes("请先在部件清单中选中部件"), "文案说明原因");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("exportSTLPart：选中部件在组里找不到时报错", () => {
+    const w = installBrowser({ state: makeState({ selectedPartName: "不存在部件" }) });
+    try {
+      if (typeof w.panel.exportSTLPart !== "function") {
+        assert(false, "exportSTLPart 尚未实现");
+        return;
+      }
+      const backCover = makeEl("mesh");
+      backCover.name = "后盖";
+      w.questGroup.children.push(backCover);
+      w.panel.exportSTLPart();
+      assert(w.calls.stlExporterBuilt === 0, "找不到部件不构造 exporter");
+      assert(w.calls.downloads.length === 0, "没有下载");
+      assert(w.lastToast().className === "toast toast-error", "error toast");
+      assert(w.lastToast().textContent.includes("未找到部件"), "文案说明找不到");
+      assert(w.lastToast().textContent.includes("不存在部件"), "透传部件名");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("exportSTLPart：成功导出选中部件的网格", () => {
+    const w = installBrowser({ state: makeState({ selectedPartName: "后盖" }) });
+    try {
+      if (typeof w.panel.exportSTLPart !== "function") {
+        assert(false, "exportSTLPart 尚未实现");
+        return;
+      }
+      const backCover = makeEl("mesh");
+      backCover.name = "后盖";
+      w.questGroup.children.push(backCover);
+      w.panel.exportSTLPart();
+      assert(w.calls.stlParseCalls.length === 1, "调用了一次 parse");
+      assert(w.calls.stlParseCalls[0].target === backCover, "parse 的目标就是选中部件的网格");
+      assert(w.calls.stlParseCalls[0].options.binary === true, "二进制 STL");
+      assert(w.calls.downloads.length === 1, "触发下载");
+      assert(
+        /^Meta Quest 3-部件后盖-\d{8}-\d{6}\.stl$/.test(w.calls.downloads[0].filename),
+        `文件名含模型名与部件名（${w.calls.downloads[0].filename}）`,
+      );
+      assert(w.calls.objectUrls[0].blob.type === "model/stl", "Blob MIME 用 model/stl");
+      assert(w.lastToast().textContent.includes("部件 STL 已导出"), "成功文案含部件导出");
+      assert(w.lastToast().textContent.includes("后盖"), "成功文案透传部件名");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("exportSTLPart：parse 抛错时只报错不下载", () => {
+    const w = installBrowser({ state: makeState({ selectedPartName: "后盖" }), stlOutcome: "error" });
+    try {
+      if (typeof w.panel.exportSTLPart !== "function") {
+        assert(false, "exportSTLPart 尚未实现");
+        return;
+      }
+      const backCover = makeEl("mesh");
+      backCover.name = "后盖";
+      w.questGroup.children.push(backCover);
+      w.panel.exportSTLPart();
+      assert(w.calls.downloads.length === 0, "失败不下载");
+      assert(w.lastToast().className === "toast toast-error", "error toast");
+      assert(w.lastToast().textContent.includes("部件 STL 导出失败"), "文案含失败");
+      assert(w.lastToast().textContent.includes("STL 炸了"), "透传 exporter 的错误信息");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("建厂时绑定六个导出按钮（缺失的按钮静默跳过）", () => {
     const w = installBrowser({ state: makeState() });
     try {
       assert(typeof w.buttons["shot-btn"].listeners.click === "function", "截图按钮已绑定");
       assert(typeof w.buttons["export-md-btn"].listeners.click === "function", "导出教案按钮已绑定");
       assert(typeof w.buttons["copy-md-btn"].listeners.click === "function", "复制教案按钮已绑定");
       assert(typeof w.buttons["export-glb-btn"].listeners.click === "function", "导出 GLB 按钮已绑定");
+      assert(typeof w.buttons["export-stl-btn"].listeners.click === "function", "导出 STL 按钮已绑定");
+      assert(typeof w.buttons["export-stl-part-btn"].listeners.click === "function", "部件 STL 按钮已绑定");
     } finally {
       restoreGlobals();
     }
