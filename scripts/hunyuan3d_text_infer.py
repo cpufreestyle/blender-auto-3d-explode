@@ -26,14 +26,14 @@ import argparse
 import traceback
 
 
-def _safe_path(p):
-    """路径清洗：拒绝含父目录穿越段的写法，返回规范化绝对路径。返回 realpath。"""
-    import os
-    from pathlib import PurePath
-    s = str(p)
-    if ".." in PurePath(s).parts:
-        raise ValueError(f"路径不允许包含父目录穿越段：{s}")
-    return os.path.realpath(os.path.abspath(os.path.expanduser(s)))
+# --- 路径安全校验（共享模块 blender_net_safe.py；按 __file__ 定位导入）---
+import importlib.util as _ilu
+import os as _osp
+_bns_path = _osp.path.join(_osp.path.dirname(_osp.path.abspath(__file__)), "blender_net_safe.py")
+_bns_spec = _ilu.spec_from_file_location("blender_net_safe", _bns_path)
+_bns = _ilu.module_from_spec(_bns_spec)
+_bns_spec.loader.exec_module(_bns)
+_safe_path = _bns._safe_path
 
 
 def resolve_hunyuan_dir(explicit):

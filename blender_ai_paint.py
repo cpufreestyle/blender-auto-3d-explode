@@ -1391,51 +1391,14 @@ def call_ai_for_structure(prompt):
         raise
 
 
-def _safe_url(url, allow_private=False):
-    """出站 URL 边界校验：仅 http(s)、无凭证段、IP 字面量边界（非全局 IP 需豁免）。"""
-    import ipaddress
-    from urllib.parse import urlparse
-    u = urlparse(str(url))
-    scheme = (u.scheme or "").lower()
-    host = (u.hostname or "").lower()
-    if scheme not in ("http", "https") or not host:
-        raise ValueError(f"出站 URL 协议/主机不合规：{url}")
-    if u.username or u.password:
-        raise ValueError(f"出站 URL 含凭证段：{url}")
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        ip = None
-    if ip is not None and not ip.is_global and not allow_private:
-        raise ValueError(f"非全局 IP（私网/环回/元数据）默认拒绝：{url}")
-    return url
-
-
-def _safe_path(p):
-    """路径清洗：拒绝含父目录穿越段的写法，返回规范化绝对路径。"""
-    import os
-    from pathlib import PurePath
-    s = str(p)
-    if ".." in PurePath(s).parts:
-        raise ValueError(f"路径不允许包含父目录穿越段：{s}")
-    return os.path.realpath(os.path.abspath(os.path.expanduser(s)))
-
-
-def _open_url(req, timeout=None):
-    """打开出站 URL：同函数内完成协议/凭证/保留地址校验后再请求。"""
-    import ipaddress
-    from urllib.parse import urlparse
-    _u = urlparse(str(req.full_url))
-    _h = (_u.hostname or "").lower()
-    if (_u.scheme or "").lower() not in ("http", "https") or not _h or _u.username or _u.password:
-        raise ValueError(f"出站 URL 协议/凭证段不合规：{req.full_url}")
-    try:
-        _ip = ipaddress.ip_address(_h)
-    except ValueError:
-        _ip = None
-    if _ip is not None and (_ip.is_link_local or _ip.is_reserved or _ip.is_multicast):
-        raise ValueError(f"链路本地/保留地址拒绝：{req.full_url}")
-    return urllib.request.urlopen(req, timeout=timeout)
+# --- 出站请求/路径安全校验（共享模块 scripts/blender_net_safe.py；Blender --python 不加 sys.path，按 __file__ 定位）---
+import importlib.util as _ilu
+import os as _osp
+_bns_path = _osp.path.join(_osp.path.dirname(_osp.path.abspath(__file__)), "scripts", "blender_net_safe.py")
+_bns_spec = _ilu.spec_from_file_location("blender_net_safe", _bns_path)
+_bns = _ilu.module_from_spec(_bns_spec)
+_bns_spec.loader.exec_module(_bns)
+_open_url, _safe_path, _safe_url = _bns._open_url, _bns._safe_path, _bns._safe_url
 
 
 def call_openai_api(config, system_prompt, user_prompt):
