@@ -16,6 +16,21 @@ import net from "net";
 export const BLENDER_MCP_HOST = process.env.BLENDERMCP_HOST || "localhost";
 export const BLENDER_MCP_PORT = Number(process.env.BLENDERMCP_PORT || 9876);
 
+/**
+ * 识别 addon 的远程执行门禁报错并附加可行动指引（服务端透传后前端 toast 直接可读）。
+ * 其余报错原样透传，不做任何改写。
+ */
+export function annotateRemoteExecError(message) {
+  if (typeof message === "string" && message.includes("远程代码执行未开启")) {
+    return (
+      "Blender 插件已默认关闭远程代码执行（安全门禁）。" +
+      "请在 Blender 的 N 面板 → BlenderMCP → 点「一键开启远程代码执行」后重试。" +
+      "原始报错：" + message
+    );
+  }
+  return message;
+}
+
 // ── Blender MCP addon 客户端（TCP，行分隔 JSON）────────
 
 /**
@@ -58,7 +73,7 @@ export function createBlenderMcpClient({ host = BLENDER_MCP_HOST, port = BLENDER
         try {
           const parsed = JSON.parse(buf);
           if (parsed && parsed.status === "error") {
-            finish(reject, new Error(parsed.message || "addon error"));
+            finish(reject, new Error(annotateRemoteExecError(parsed.message || "addon error")));
           } else {
             finish(resolve, parsed && "result" in parsed ? parsed.result : parsed);
           }
