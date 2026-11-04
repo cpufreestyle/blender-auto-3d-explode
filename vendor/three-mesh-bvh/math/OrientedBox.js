@@ -1,46 +1,21 @@
-/** @import { Box3, Triangle } from 'three' */
 import { Vector3, Matrix4, Line3 } from 'three';
 import { SeparatingAxisBounds } from './SeparatingAxisBounds.js';
 import { ExtendedTriangle } from './ExtendedTriangle.js';
 import { closestPointsSegmentToSegment } from './MathUtilities.js';
 
-/**
- * An oriented version of three.js' Box3 class. A variety of derivative values are cached on the
- * object to accelerate the intersection functions. `.needsUpdate` must be set to true when
- * modifying the box parameters.
- *
- * @param {Vector3} [min]
- * @param {Vector3} [max]
- * @param {Matrix4} [matrix]
- */
 export class OrientedBox {
 
 	constructor( min, max, matrix ) {
 
 		this.isOrientedBox = true;
-
-		/** @type {Vector3} */
 		this.min = new Vector3();
-
-		/** @type {Vector3} */
 		this.max = new Vector3();
-
-		/**
-		 * Matrix transformation applied to the box.
-		 * @type {Matrix4}
-		 */
 		this.matrix = new Matrix4();
 		this.invMatrix = new Matrix4();
 		this.points = new Array( 8 ).fill().map( () => new Vector3() );
 		this.satAxes = new Array( 3 ).fill().map( () => new Vector3() );
 		this.satBounds = new Array( 3 ).fill().map( () => new SeparatingAxisBounds() );
 		this.alignedSatBounds = new Array( 3 ).fill().map( () => new SeparatingAxisBounds() );
-		/**
-		 * Indicates that the bounding box fields have changed so cached variables to accelerate
-		 * other function execution can be updated. Must be set to true after modifying the
-		 * oriented box `min`, `max`, `matrix` fields.
-		 * @type {boolean}
-		 */
 		this.needsUpdate = false;
 
 		if ( min ) this.min.copy( min );
@@ -49,12 +24,6 @@ export class OrientedBox {
 
 	}
 
-	/**
-	 * Sets the oriented box parameters.
-	 * @param {Vector3} min
-	 * @param {Vector3} max
-	 * @param {Matrix4} matrix
-	 */
 	set( min, max, matrix ) {
 
 		this.min.copy( min );
@@ -131,15 +100,9 @@ OrientedBox.prototype.update = ( function () {
 
 } )();
 
-/**
- * Returns true if intersecting with the provided box.
- * @function
- * @param {Box3} box
- * @returns {boolean}
- */
 OrientedBox.prototype.intersectsBox = ( function () {
 
-	const aabbBounds = /* @__PURE__ */ new SeparatingAxisBounds();
+	const aabbBounds = new SeparatingAxisBounds();
 	return function intersectsBox( box ) {
 
 		// TODO: should this be doing SAT against the AABB?
@@ -182,19 +145,13 @@ OrientedBox.prototype.intersectsBox = ( function () {
 
 } )();
 
-/**
- * Returns true if intersecting with the provided triangle.
- * @function
- * @param {Triangle} triangle
- * @returns {boolean}
- */
 OrientedBox.prototype.intersectsTriangle = ( function () {
 
-	const saTri = /* @__PURE__ */ new ExtendedTriangle();
-	const pointsArr = /* @__PURE__ */ new Array( 3 );
-	const cachedSatBounds = /* @__PURE__ */ new SeparatingAxisBounds();
-	const cachedSatBounds2 = /* @__PURE__ */ new SeparatingAxisBounds();
-	const cachedAxis = /* @__PURE__ */ new Vector3();
+	const saTri = new ExtendedTriangle();
+	const pointsArr = new Array( 3 );
+	const cachedSatBounds = new SeparatingAxisBounds();
+	const cachedSatBounds2 = new SeparatingAxisBounds();
+	const cachedAxis = new Vector3();
 	return function intersectsTriangle( triangle ) {
 
 		if ( this.needsUpdate ) {
@@ -265,14 +222,6 @@ OrientedBox.prototype.intersectsTriangle = ( function () {
 
 } )();
 
-/**
- * Returns the distance to the provided point. Sets `target` to the closest point on the surface
- * of the box if provided.
- * @function
- * @param {Vector3} point
- * @param {Vector3} target
- * @returns {number}
- */
 OrientedBox.prototype.closestPointToPoint = ( function () {
 
 	return function closestPointToPoint( point, target1 ) {
@@ -295,12 +244,6 @@ OrientedBox.prototype.closestPointToPoint = ( function () {
 
 } )();
 
-/**
- * Returns the distance to the provided point.
- * @function
- * @param {Vector3} point
- * @returns {number}
- */
 OrientedBox.prototype.distanceToPoint = ( function () {
 
 	const target = new Vector3();
@@ -313,25 +256,14 @@ OrientedBox.prototype.distanceToPoint = ( function () {
 
 } )();
 
-/**
- * Returns the distance to the provided box. `threshold` is an optional distance to return early
- * if the distance is found to be within it. `target1` and `target2` are set to the points on the
- * surface of this box and the `box` argument respectively.
- * @function
- * @param {Box3} box
- * @param {number} [threshold=0]
- * @param {Vector3} [target1]
- * @param {Vector3} [target2]
- * @returns {number}
- */
 OrientedBox.prototype.distanceToBox = ( function () {
 
 	const xyzFields = [ 'x', 'y', 'z' ];
-	const segments1 = /* @__PURE__ */ new Array( 12 ).fill().map( () => new Line3() );
-	const segments2 = /* @__PURE__ */ new Array( 12 ).fill().map( () => new Line3() );
+	const segments1 = new Array( 12 ).fill().map( () => new Line3() );
+	const segments2 = new Array( 12 ).fill().map( () => new Line3() );
 
-	const point1 = /* @__PURE__ */ new Vector3();
-	const point2 = /* @__PURE__ */ new Vector3();
+	const point1 = new Vector3();
+	const point2 = new Vector3();
 
 	// early out if we find a value below threshold
 	return function distanceToBox( box, threshold = 0, target1 = null, target2 = null ) {
@@ -417,11 +349,11 @@ OrientedBox.prototype.distanceToBox = ( function () {
 
 					start[ f1 ] = min[ f1 ];
 					start[ f2 ] = i1 ? min[ f2 ] : max[ f2 ];
-					start[ f3 ] = i2 ? min[ f3 ] : max[ f3 ];
+					start[ f3 ] = i2 ? min[ f3 ] : max[ f2 ];
 
 					end[ f1 ] = max[ f1 ];
 					end[ f2 ] = i1 ? min[ f2 ] : max[ f2 ];
-					end[ f3 ] = i2 ? min[ f3 ] : max[ f3 ];
+					end[ f3 ] = i2 ? min[ f3 ] : max[ f2 ];
 
 					count ++;
 

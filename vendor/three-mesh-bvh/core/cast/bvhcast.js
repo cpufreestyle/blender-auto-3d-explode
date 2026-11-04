@@ -3,16 +3,15 @@ import { BufferStack } from '../utils/BufferStack.js';
 import { BOUNDING_DATA_INDEX, COUNT, IS_LEAF, LEFT_NODE, OFFSET, RIGHT_NODE } from '../utils/nodeBufferUtils.js';
 import { arrayToBox } from '../../utils/ArrayBoxUtilities.js';
 import { PrimitivePool } from '../../utils/PrimitivePool.js';
-import { BYTES_PER_NODE, UINT32_PER_NODE } from '../Constants.js';
 
-const _bufferStack1 = /* @__PURE__ */ new BufferStack.constructor();
-const _bufferStack2 = /* @__PURE__ */ new BufferStack.constructor();
-const _boxPool = /* @__PURE__ */ new PrimitivePool( () => new Box3() );
-const _leftBox1 = /* @__PURE__ */ new Box3();
-const _rightBox1 = /* @__PURE__ */ new Box3();
+const _bufferStack1 = new BufferStack.constructor();
+const _bufferStack2 = new BufferStack.constructor();
+const _boxPool = new PrimitivePool( () => new Box3() );
+const _leftBox1 = new Box3();
+const _rightBox1 = new Box3();
 
-const _leftBox2 = /* @__PURE__ */ new Box3();
-const _rightBox2 = /* @__PURE__ */ new Box3();
+const _leftBox2 = new Box3();
+const _rightBox2 = new Box3();
 
 let _active = false;
 
@@ -29,15 +28,15 @@ export function bvhcast( bvh, otherBvh, matrixToLocal, intersectsRanges ) {
 	const roots = bvh._roots;
 	const otherRoots = otherBvh._roots;
 	let result;
-	let nodeOffset1 = 0;
-	let nodeOffset2 = 0;
+	let offset1 = 0;
+	let offset2 = 0;
 	const invMat = new Matrix4().copy( matrixToLocal ).invert();
 
 	// iterate over the first set of roots
 	for ( let i = 0, il = roots.length; i < il; i ++ ) {
 
 		_bufferStack1.setBuffer( roots[ i ] );
-		nodeOffset2 = 0;
+		offset2 = 0;
 
 		// prep the initial root box
 		const localBox = _boxPool.getPrimitive();
@@ -51,12 +50,12 @@ export function bvhcast( bvh, otherBvh, matrixToLocal, intersectsRanges ) {
 
 			result = _traverse(
 				0, 0, matrixToLocal, invMat, intersectsRanges,
-				nodeOffset1, nodeOffset2, 0, 0,
+				offset1, offset2, 0, 0,
 				localBox,
 			);
 
 			_bufferStack2.clearBuffer();
-			nodeOffset2 += otherRoots[ j ].byteLength / BYTES_PER_NODE;
+			offset2 += otherRoots[ j ].length;
 
 			if ( result ) {
 
@@ -69,7 +68,7 @@ export function bvhcast( bvh, otherBvh, matrixToLocal, intersectsRanges ) {
 		// release stack info
 		_boxPool.releasePrimitive( localBox );
 		_bufferStack1.clearBuffer();
-		nodeOffset1 += roots[ i ].byteLength / BYTES_PER_NODE;
+		offset1 += roots[ i ].length;
 
 		if ( result ) {
 
@@ -92,8 +91,8 @@ function _traverse(
 	intersectsRangesFunc,
 
 	// offsets for ids
-	node1IndexOffset = 0,
-	node2IndexOffset = 0,
+	node1IndexByteOffset = 0,
+	node2IndexByteOffset = 0,
 
 	// tree depth
 	depth1 = 0,
@@ -135,15 +134,13 @@ function _traverse(
 	if ( isLeaf2 && isLeaf1 ) {
 
 		// if both bounds are leaf nodes then fire the callback if the boxes intersect
-		// Note the "nodeIndex" values are just intended to be used as unique identifiers in the tree and
-		// not used for accessing data
 		if ( reversed ) {
 
 			result = intersectsRangesFunc(
 				OFFSET( node2Index32, uint32Array2 ), COUNT( node2Index32 * 2, uint16Array2 ),
 				OFFSET( node1Index32, uint32Array1 ), COUNT( node1Index32 * 2, uint16Array1 ),
-				depth2, node2IndexOffset + node2Index32 / UINT32_PER_NODE,
-				depth1, node1IndexOffset + node1Index32 / UINT32_PER_NODE,
+				depth2, node2IndexByteOffset + node2Index32,
+				depth1, node1IndexByteOffset + node1Index32,
 			);
 
 		} else {
@@ -151,8 +148,8 @@ function _traverse(
 			result = intersectsRangesFunc(
 				OFFSET( node1Index32, uint32Array1 ), COUNT( node1Index32 * 2, uint16Array1 ),
 				OFFSET( node2Index32, uint32Array2 ), COUNT( node2Index32 * 2, uint16Array2 ),
-				depth1, node1IndexOffset + node1Index32 / UINT32_PER_NODE,
-				depth2, node2IndexOffset + node2Index32 / UINT32_PER_NODE,
+				depth1, node1IndexByteOffset + node1Index32,
+				depth2, node2IndexByteOffset + node2Index32,
 			);
 
 		}
@@ -180,13 +177,13 @@ function _traverse(
 		result = (
 			intersectCl1 && _traverse(
 				node2Index32, cl1, matrix1to2, matrix2to1, intersectsRangesFunc,
-				node2IndexOffset, node1IndexOffset, depth2, depth1 + 1,
+				node2IndexByteOffset, node1IndexByteOffset, depth2, depth1 + 1,
 				newBox, ! reversed,
 			)
 		) || (
 			intersectCr1 && _traverse(
 				node2Index32, cr1, matrix1to2, matrix2to1, intersectsRangesFunc,
-				node2IndexOffset, node1IndexOffset, depth2, depth1 + 1,
+				node2IndexByteOffset, node1IndexByteOffset, depth2, depth1 + 1,
 				newBox, ! reversed,
 			)
 		);
@@ -211,11 +208,11 @@ function _traverse(
 			// continue to traverse both children if they both intersect
 			result = _traverse(
 				node1Index32, cl2, matrix2to1, matrix1to2, intersectsRangesFunc,
-				node1IndexOffset, node2IndexOffset, depth1, depth2 + 1,
+				node1IndexByteOffset, node2IndexByteOffset, depth1, depth2 + 1,
 				currBox, reversed,
 			) || _traverse(
 				node1Index32, cr2, matrix2to1, matrix1to2, intersectsRangesFunc,
-				node1IndexOffset, node2IndexOffset, depth1, depth2 + 1,
+				node1IndexByteOffset, node2IndexByteOffset, depth1, depth2 + 1,
 				currBox, reversed,
 			);
 
@@ -226,7 +223,7 @@ function _traverse(
 				// if the current box is a leaf then just continue
 				result = _traverse(
 					node1Index32, cl2, matrix2to1, matrix1to2, intersectsRangesFunc,
-					node1IndexOffset, node2IndexOffset, depth1, depth2 + 1,
+					node1IndexByteOffset, node2IndexByteOffset, depth1, depth2 + 1,
 					currBox, reversed,
 				);
 
@@ -248,13 +245,13 @@ function _traverse(
 				result = (
 					intersectCl1 && _traverse(
 						cl2, cl1, matrix1to2, matrix2to1, intersectsRangesFunc,
-						node2IndexOffset, node1IndexOffset, depth2, depth1 + 1,
+						node2IndexByteOffset, node1IndexByteOffset, depth2, depth1 + 1,
 						newBox, ! reversed,
 					)
 				) || (
 					intersectCr1 && _traverse(
 						cl2, cr1, matrix1to2, matrix2to1, intersectsRangesFunc,
-						node2IndexOffset, node1IndexOffset, depth2, depth1 + 1,
+						node2IndexByteOffset, node1IndexByteOffset, depth2, depth1 + 1,
 						newBox, ! reversed,
 					)
 				);
@@ -270,7 +267,7 @@ function _traverse(
 				// if the current box is a leaf then just continue
 				result = _traverse(
 					node1Index32, cr2, matrix2to1, matrix1to2, intersectsRangesFunc,
-					node1IndexOffset, node2IndexOffset, depth1, depth2 + 1,
+					node1IndexByteOffset, node2IndexByteOffset, depth1, depth2 + 1,
 					currBox, reversed,
 				);
 
@@ -292,13 +289,13 @@ function _traverse(
 				result = (
 					intersectCl1 && _traverse(
 						cr2, cl1, matrix1to2, matrix2to1, intersectsRangesFunc,
-						node2IndexOffset, node1IndexOffset, depth2, depth1 + 1,
+						node2IndexByteOffset, node1IndexByteOffset, depth2, depth1 + 1,
 						newBox, ! reversed,
 					)
 				) || (
 					intersectCr1 && _traverse(
 						cr2, cr1, matrix1to2, matrix2to1, intersectsRangesFunc,
-						node2IndexOffset, node1IndexOffset, depth2, depth1 + 1,
+						node2IndexByteOffset, node1IndexByteOffset, depth2, depth1 + 1,
 						newBox, ! reversed,
 					)
 				);
