@@ -24,7 +24,7 @@ import { isQuest3Model, yieldToMain } from "./src/utils.js";
 import { createARPreview } from "./src/ar-preview.js";
 import { createExportPanel } from "./src/export-panel.js";
 import { calculateExplodePos } from "./src/explode-geometry.js";
-import { autoSplitModel, generatePartName } from "./src/geometry-split.js";
+import { autoSplitModelAsync, generatePartName } from "./src/geometry-split.js";
 import { createQuest3Model } from "./src/quest3-model.js";
 import { splitModelToQuest3Regions } from "./src/quest3-parts.js";
 import { setupUpload } from "./src/upload-panel.js";
@@ -275,7 +275,7 @@ customModelLoader = createCustomModelLoader({
   loadGLTFLoader,
   isQuest3Model,
   splitModelToQuest3Regions,
-  autoSplitModel,
+  autoSplitModel: autoSplitModelAsync,
   disposeNodeTree,
   yieldToMain,
   calculateExplodePos,

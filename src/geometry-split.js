@@ -5,7 +5,19 @@
 // 与 main.js 共用同一个 "three" 裸导入实例（ESM 按解析路径缓存，材质/几何类型一致）。
 
 import { Box3, BufferGeometry, Float32BufferAttribute, Mesh, Vector3 } from "three";
+import { computeConnectedComponents } from "./connected-components-core.js";
+import { createConnectedComponentsWorker } from "./connected-components-client.js";
 import { UnionFind, generatePartName as _generatePartName } from "./utils.js";
+
+// 连通分量 Worker 单例：页面级复用（Worker 创建有成本，拆分只在加载模型时
+// 发生，串行队列足够）；不可用时保持 null，走同步回退。
+let connectedComponentsWorker = null;
+function getConnectedComponentsWorker() {
+  if (connectedComponentsWorker === null) {
+    connectedComponentsWorker = createConnectedComponentsWorker();
+  }
+  return connectedComponentsWorker;
+}
 
 // 从几何体中提取指定面，创建新的非索引几何体
 export function extractFacesToGeometry(geometry, faceIndices) {
@@ -97,6 +109,59 @@ export function splitByConnectedComponents(geometry) {
   return results;
 }
 
+/**
+ * 按连通分量拆分几何体（异步，Worker 加速；Worker 不可用回退同步实现）。
+ * 输出结构与 splitByConnectedComponents 完全一致（BufferGeometry 数组）。
+ * @param {BufferGeometry} geometry
+ * @param {object} [deps]
+ * @param {{ generate({position: Float32Array, index: Uint32Array|null}): Promise<{components: Array, misc: Uint32Array}> }} [deps.worker] 注入 Worker 客户端（测试替身）
+ * @returns {Promise<BufferGeometry[]>}
+ */
+export async function splitByConnectedComponentsAsync(geometry, { worker } = {}) {
+  const pos = geometry.attributes.position;
+  const index = geometry.index;
+  const vertexCount = pos.count;
+  if (vertexCount === 0) return [];
+
+  const client = worker !== undefined ? worker : getConnectedComponentsWorker();
+
+  let result = null;
+  if (client) {
+    try {
+      // Worker 路径：slice 后 transfer，原几何体属性保持可用
+      const positionCopy = new Float32Array(pos.array);
+      const indexCopy =
+        index ? new (index.array.constructor === Uint16Array ? Uint16Array : Uint32Array)(index.array) : null;
+      result = await client.generate({ position: positionCopy, index: indexCopy });
+    } catch (err) {
+      console.warn("Worker 拆分失败，回退同步路径:", err?.message);
+      result = null;
+    }
+  }
+
+  if (!result) {
+    // 同步回退：直接用纯函数核心（与 Worker 相同算法）
+    const position = new Float32Array(pos.array);
+    const indexArr = index ? new Uint32Array(index.count) : null;
+    if (indexArr) {
+      for (let i = 0; i < index.count; i++) indexArr[i] = index.getX(i);
+    }
+    result = computeConnectedComponents(position, indexArr);
+  }
+
+  // 用分量分组重建几何体（大分量各自成体 + 小分量合并成杂项体）
+  const results = [];
+  for (const comp of result.components) {
+    const newGeo = extractFacesToGeometry(geometry, comp.faces);
+    if (newGeo) results.push(newGeo);
+  }
+  if (result.misc.length >= 3) {
+    const newGeo = extractFacesToGeometry(geometry, result.misc);
+    if (newGeo) results.push(newGeo);
+  }
+  return results;
+}
+
 // 按材质组拆分
 export function splitByMaterialGroups(geometry) {
   if (!geometry.groups || geometry.groups.length <= 1) return [];
@@ -164,6 +229,7 @@ export function generatePartName(index, position, bbox) {
 // 连通分量两种自然拆分，都不适用则保留原 mesh（不强制空间切分）。
 // 返回值形如 { mesh, name, isOriginal }，未命名的按整体包围盒经 generatePartName 命名。
 export function autoSplitModel(model) {
+  // 同步版保留：小模型 / Worker 不可用 / 简单直通场景仍在用（quest3-parts 等）
   // 第一步：收集所有 mesh 及其世界变换
   const rawMeshes = [];
   model.traverse(child => {
@@ -225,6 +291,78 @@ export function autoSplitModel(model) {
   }
 
   // 为拆分后的部件命名
+  return splitParts.map((part, i) => {
+    if (!part.name) {
+      const pos = new Vector3();
+      part.mesh.getWorldPosition(pos);
+      part.name = generatePartName(i, pos, bbox);
+    }
+    return part;
+  });
+}
+
+/**
+ * 自动拆分编排器（异步版）：与 autoSplitModel 相同决策树，唯一区别是
+ * 单 mesh 的连通分量拆分走 Worker（splitByConnectedComponentsAsync），
+ * 大模型不卡主线程。材质组拆分仍同步（groups 元数据读取极快）。
+ * @param {object} model
+ * @param {object} [deps] 透传给 splitByConnectedComponentsAsync（worker 注入测试）
+ * @returns {Promise<Array<{mesh, name, isOriginal}>>}
+ */
+export async function autoSplitModelAsync(model, deps = {}) {
+  const rawMeshes = [];
+  model.traverse(child => {
+    if (child.isMesh && child.geometry && child.geometry.attributes.position) {
+      rawMeshes.push(child);
+    }
+  });
+
+  if (rawMeshes.length >= 2) {
+    return rawMeshes.map((mesh, i) => {
+      const name = mesh.name || mesh.userData.name || `部件${i + 1}`;
+      return { mesh, name, isOriginal: true };
+    });
+  }
+
+  const splitParts = [];
+  for (const mesh of rawMeshes) {
+    const geometry = mesh.geometry;
+    const material = mesh.material;
+
+    const groupResults = splitByMaterialGroups(geometry);
+    if (groupResults.length >= 2) {
+      for (const gr of groupResults) {
+        const newMesh = new Mesh(
+          gr.geometry,
+          Array.isArray(material) ? material[gr.materialIndex] || material[0] : material,
+        );
+        newMesh.matrix.copy(mesh.matrixWorld);
+        newMesh.matrixAutoUpdate = false;
+        splitParts.push({ mesh: newMesh, name: "", isOriginal: false });
+      }
+      continue;
+    }
+
+    const ccResults = await splitByConnectedComponentsAsync(geometry, deps);
+    if (ccResults.length >= 2) {
+      for (const ccGeo of ccResults) {
+        const newMesh = new Mesh(ccGeo, material);
+        newMesh.matrix.copy(mesh.matrixWorld);
+        newMesh.matrixAutoUpdate = false;
+        splitParts.push({ mesh: newMesh, name: "", isOriginal: false });
+      }
+      continue;
+    }
+
+    splitParts.push({ mesh, name: mesh.name || "", isOriginal: true });
+  }
+
+  const bbox = new Box3();
+  for (const part of splitParts) {
+    const partBox = new Box3().setFromObject(part.mesh);
+    bbox.union(partBox);
+  }
+
   return splitParts.map((part, i) => {
     if (!part.name) {
       const pos = new Vector3();

@@ -16,12 +16,34 @@
 // 与 main.js 约定的共享状态键集合
 const SHARED_STATE_KEYS = ["customModelParts", "assemblySequenceOrder"];
 
-/** 释放单个材质：先 dispose 其自有属性里的贴图，再 dispose 材质本身 */
-function disposeMaterial(m) {
-  for (const value of Object.values(m)) {
-    if (value && value.isTexture) value.dispose();
+/**
+ * 释放单个材质：先 dispose 其自有属性里的贴图（含 ShaderMaterial uniforms
+ * 嵌套的贴图），再 dispose 材质本身。已释放对象经 released 集合去重 ——
+ * GLTF 场景常有多 mesh 共享同一材质/贴图，重复 dispose 会触发冗余 GPU 删除。
+ */
+function disposeMaterial(m, released) {
+  // ShaderMaterial：贴图嵌在 uniforms.<name>.value 里，材质自有属性遍历不到
+  if (m.uniforms) {
+    for (const uniform of Object.values(m.uniforms)) {
+      const uv = uniform?.value;
+      if (uv && uv.isTexture && !released.has(uv)) {
+        released.add(uv);
+        uv.dispose();
+      }
+    }
   }
-  m.dispose();
+  for (const value of Object.values(m)) {
+    if (value && value.isTexture) {
+      if (!released.has(value)) {
+        released.add(value);
+        value.dispose();
+      }
+    }
+  }
+  if (!released.has(m)) {
+    released.add(m);
+    m.dispose();
+  }
 }
 
 /**
@@ -31,13 +53,24 @@ function disposeMaterial(m) {
  */
 export function disposeNodeTree(node) {
   if (!node) return;
+  // 本树内去重：共享几何体/材质/贴图/骨骼只释放一次
+  const released = new Set();
   node.traverse(child => {
-    if (child.geometry) child.geometry.dispose();
+    // 骨骼资源：SkinnedMesh 的 skeleton.boneTexture 不在材质属性里，
+    // three 0.186 的 Skeleton.dispose() 会释放它
+    if (child.skeleton?.dispose && !released.has(child.skeleton)) {
+      released.add(child.skeleton);
+      child.skeleton.dispose();
+    }
+    if (child.geometry && !released.has(child.geometry)) {
+      released.add(child.geometry);
+      child.geometry.dispose();
+    }
     if (child.material) {
       if (Array.isArray(child.material)) {
-        child.material.forEach(disposeMaterial);
+        child.material.forEach(m => disposeMaterial(m, released));
       } else {
-        disposeMaterial(child.material);
+        disposeMaterial(child.material, released);
       }
     }
   });
