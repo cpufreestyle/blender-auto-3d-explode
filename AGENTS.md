@@ -72,6 +72,10 @@ npm run format
 
 云端 3D 生成适配层。封装 Meshy、Tripo(Triple 3D)、Hyper3D(Rodin) 的 REST API 调用，输入图片 base64 返回 `{ glbBuffer, manifest }`。`provider-models.js` 维护各提供商的默认模型列表。
 
+### 6. 导出与安全支撑 — `src/export-panel.js` + `src/blender-mcp-client.js` + `scripts/blender_net_safe.py`
+
+`export-panel.js` 负责截图/教案 Markdown/GLB/STL(3D 打印，整体+选中部件)四类导出与 toast 轻提示，可变状态经 `getState()` 注入现取；`blender-mcp-client.js` 是 addon 的 TCP 客户端（行分隔 JSON，含远程执行门禁报错的可行动指引传导）；`blender_net_safe.py` 是纯 stdlib 的出站 URL/路径校验共享模块（`_safe_url`/`_safe_path`/`_open_url`），各 Blender/CLI 脚本经 importlib 按 `__file__` 定位加载。
+
 ## Coding Conventions
 
 - **模块系统**: ES Modules（`import`/`export`），`"type": "module"` in package.json

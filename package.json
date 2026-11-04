@@ -36,7 +36,7 @@
     "build:dev": "npx webpack --mode=development",
     "serve:dev": "npx webpack serve --mode=development",
     "serve:prod": "npx serve dist/",
-    "validate": "npm run lint:all:check && npm test"
+    "validate": "npm run lint:all:check && npm test && npm run test:py"
   },
   "keywords": [
     "three.js",
