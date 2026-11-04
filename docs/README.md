@@ -2,7 +2,9 @@
 
 基于 Three.js 的交互式 3D 拆解教学预览工具，支持爆炸视图、AI 智能爆炸、自定义模型上传、WebXR AR 预览、**Blender Python API 自动化集成**。
 
-**当前版本**：[v3.0.0](RELEASE_NOTES_v3.0.0.md) | **状态**：✅ Stable | **更新**：2026-07-06
+**当前版本**：v3.3.3（见根目录 `README.md` 与 `package.json`）| **状态**：✅ Stable
+
+> 本目录下带版本号的历史 README 只作阶段性记录；当前行为契约与验证台账见 `spec.md` / `harness.md`（仓库根）。
 
 ## ✨ 核心功能
 

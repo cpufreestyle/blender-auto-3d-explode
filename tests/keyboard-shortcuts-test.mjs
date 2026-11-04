@@ -69,8 +69,12 @@ function setup(displayed = 2) {
     focusCurrentPart: rec("focusCurrentPart"),
   };
   const controls = { autoRotate: true };
-  const exportPanel = { exportScreenshot: rec("exportScreenshot") };
+  const exportPanel = {
+    exportScreenshot: rec("exportScreenshot"),
+    copyStepLink: rec("copyStepLink"),
+  };
   const toggleSidebar = rec("toggleSidebar");
+  const toggleTeachingMode = rec("toggleTeachingMode");
   let step = displayed;
 
   setupKeyboardShortcuts({
@@ -80,6 +84,7 @@ function setup(displayed = 2) {
     exportPanel,
     getDisplayedStep: () => step,
     toggleSidebar,
+    toggleTeachingMode,
   });
   const key = (k, target = { tagName: "DIV" }) => {
     let prevented = false;
@@ -171,6 +176,26 @@ describe("keydown 分发", async() => {
     assert(w.calls.length === 0, "q 无动作");
   });
 
+  await it("l/L：复制当前步骤的分享深链", async() => {
+    const w = setup();
+    w.setStep(3);
+    const p1 = w.key("l");
+    const p2 = w.key("L");
+    assert(w.calls.length === 2, "两次 copyStepLink");
+    assert(w.calls[0].name === "copyStepLink" && w.calls[0].args[0] === 3, "传的是当前 displayedStep");
+    assert(w.calls[1].args[0] === 3, "大写同样传当前步");
+    assert(p1 && p2, "两个分支都 preventDefault");
+  });
+
+  await it("t/T：切换授课模式", async() => {
+    const w = setup();
+    const p1 = w.key("t");
+    const p2 = w.key("T");
+    assert(w.calls.length === 2, "两次 toggleTeachingMode");
+    assert(w.calls.every(c => c.name === "toggleTeachingMode"), "走到授课模式开关");
+    assert(p1 && p2, "两个分支都 preventDefault");
+  });
+
   await it("没注入 toggleSidebar 时按 H 不抛（面板缺失时 main.js 传的就是空操作）", async() => {
     const calls = [];
     const rec2 = name => () => calls.push(name);
@@ -195,11 +220,14 @@ describe("keydown 分发", async() => {
     let threw = null;
     try {
       local.keydown({ key: "h", target: { tagName: "DIV" }, preventDefault: () => {} });
+      local.keydown({ key: "t", target: { tagName: "DIV" }, preventDefault: () => {} });
+      local.keydown({ key: "l", target: { tagName: "DIV" }, preventDefault: () => {} });
     } catch (e) {
       threw = e;
     }
     Object.defineProperty(globalThis, "document", { configurable: true, value: prevDoc });
-    assert(threw === null && calls.length === 0, `H 被静默忽略（抛错：${threw && threw.message}）`);
+    // 该用例的 exportPanel 上也没挂 copyStepLink，按 L 同样应当静默忽略
+    assert(threw === null && calls.length === 0, `H / T / L 在缺依赖时均被静默忽略（抛错：${threw && threw.message}）`);
   });
 });
 

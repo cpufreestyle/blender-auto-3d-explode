@@ -8,7 +8,7 @@ webpack 构建产物走 node_modules，不经过这里）。镜像与 node_modul
 版本（镜像停在 r160，package.json 早已 0.186），GLTFExporter 的 utils 相对路径
 在平铺布局下也是断的。
 
-做法：以一组入口文件（core 构建产物 + 源码实际 import 的 6 个 examples）做
+做法：以一组入口文件（core 构建产物 + 源码实际 import 的 5 个 examples）做
 BFS，沿相对导入（from './x' / from '../x'）求闭包，同构拷贝进 vendor/three/，
 并清掉镜像里不在闭包内的残留文件。入口清单与 tests/vendor-three-test.mjs 的
 期望清单、守卫断言三者对齐；升级 three 后跑 `npm run vendor:sync` 一次即可。
@@ -22,7 +22,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT / "node_modules" / "three"
+# resolve() 不是洁癖：worktree 的 node_modules 常是指向主仓库的 symlink，不解析
+# 的话 resolve() 出来的 import 目标落在主仓库树下，SRC in target.parents 永远为假，
+# 整个 BFS 会把跨文件 import 全部剪掉——r186 的 three.module.js 就是靠
+# './three.core.js' 活的，剪掉后 dev 模式 importmap 直接 404。
+SRC = (ROOT / "node_modules" / "three").resolve()
 DEST = ROOT / "vendor" / "three"
 
 # 源码实际 import 的 examples 入口（main.js + src/ 全量扫描见守卫测试）
@@ -30,10 +34,10 @@ ENTRIES = [
     "build/three.module.js",
     "examples/jsm/controls/OrbitControls.js",
     "examples/jsm/exporters/GLTFExporter.js",
-    "examples/jsm/exporters/STLExporter.js",
     "examples/jsm/geometries/RoundedBoxGeometry.js",
     "examples/jsm/loaders/GLTFLoader.js",
     "examples/jsm/loaders/STLLoader.js",
+    "examples/jsm/exporters/STLExporter.js",
 ]
 
 REL_IMPORT = re.compile(r"""from\s+['"](\.{1,2}/[^'"]+)['"]""")
@@ -54,7 +58,7 @@ def closure() -> set:
         seen.add(rel)
         text = f.read_text(encoding="utf-8")
         for spec in REL_IMPORT.findall(text):
-            target = resolve(spec, f)
+            target = (f.parent / spec).resolve()
             if target.exists() and SRC in target.parents:
                 queue.append(target)
     return seen

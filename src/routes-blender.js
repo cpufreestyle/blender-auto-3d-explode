@@ -169,11 +169,51 @@ async function handleHealth(req, res) {
 /**
  * 列出 models/generated/ 下已生成的模型（最新在前），供前端「从生成库加载」
  */
+async function handleManifestSave(req, res) {
+  try {
+    const body = await readBody(req, { maxSize: 1024 * 1024 });
+    const manifest = body && body.manifest;
+    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+      sendJSON(res, 400, { success: false, error: "manifest 必须是对象" });
+      return;
+    }
+    if (!Array.isArray(manifest.parts)) {
+      sendJSON(res, 400, { success: false, error: "manifest.parts 必须是数组" });
+      return;
+    }
+
+    // 文件名：模型名 + 时间戳。模型名来自用户输入，可能含路径分隔符或
+    // shell 元字符；只保留安全字符，超长截断。
+    const rawName = typeof body.name === "string" && body.name ? body.name : "model";
+    const safeName = rawName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, "_").slice(0, 60) || "model";
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const fileName = `${safeName}-manifest-${ts}.json`;
+
+    fs.mkdirSync(GENERATED_DIR, { recursive: true });
+    const outPath = path.join(GENERATED_DIR, fileName);
+    // 防御路径穿越：join 之后仍要确认落点在 GENERATED_DIR 内
+    if (!outPath.startsWith(GENERATED_DIR)) {
+      sendJSON(res, 400, { success: false, error: "非法文件名" });
+      return;
+    }
+    fs.writeFileSync(outPath, JSON.stringify(manifest, null, 2));
+    const size = fs.statSync(outPath).size;
+    console.log(`  📋 部件清单已落盘: ${outPath} (${size} B)`);
+    sendJSON(res, 200, {
+      success: true,
+      url: `/models/generated/${encodeURIComponent(fileName)}`,
+      fileName,
+      size,
+    });
+  } catch (err) {
+    sendJSON(res, 500, { success: false, error: err.message });
+  }
+}
 async function handleGeneratedList(req, res) {
   try {
     const entries = fs.readdirSync(GENERATED_DIR, { withFileTypes: true });
     const files = entries
-      .filter(e => e.isFile() && /\.(glb|gltf|stl)$/i.test(e.name))
+      .filter(e => e.isFile() && /\.(glb|gltf|stl|json)$/i.test(e.name))
       .map(e => {
         const full = path.join(GENERATED_DIR, e.name);
         const stat = fs.statSync(full);
@@ -343,6 +383,7 @@ async function handleSplit(req, res) {
   }
 }
   return {
+    handleManifestSave,
     handleAIPaint,
     handleHealth,
     handleGeneratedList,

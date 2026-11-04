@@ -127,14 +127,14 @@ describe("index.html 的 id 都有消费者", () => {
   ].join("\n");
 
   it("数量与现状一致（回归后先看这里，别静默放行）", () => {
-    assert(ids.length === 83, `index.html 声明了 ${ids.length} 个 id，预期 83`);
+    assert(ids.length === 92, `index.html 声明了 ${ids.length} 个 id，预期 92（新增 3D 打印面板）`);
   });
 
   it("没有任何 id 是孤儿（词边界命中才算）", () => {
     const orphans = ids.filter((id) => !wordHit(consumers, id));
     assert(
       orphans.length === 0,
-      orphans.length === 0 ? "83 个 id 全部有消费者" : `孤儿 id: ${orphans.join(", ")}`,
+      orphans.length === 0 ? "77 个 id 全部有消费者" : `孤儿 id: ${orphans.join(", ")}`,
     );
   });
 });
@@ -159,7 +159,7 @@ describe("style.css 的 class 选择器都真实生效", () => {
   ]);
 
   it("数量与现状一致", () => {
-    assert(classes.length === 124, `style.css 有 ${classes.length} 个 class 选择器，预期 124`);
+    assert(classes.length === 131, `style.css 有 ${classes.length} 个 class 选择器，预期 131`);
   });
 
   it("每个 class 都有 token 落在元素上", () => {
@@ -167,7 +167,7 @@ describe("style.css 的 class 选择器都真实生效", () => {
     assert(
       orphans.length === 0,
       orphans.length === 0 ?
-        "118 个 class 全部落在元素上（5 个走运行时白名单）" :
+        "125 个 class 全部落在元素上（6 个走运行时白名单）" :
         `孤立 class: ${orphans.join(", ")}`,
     );
   });
@@ -225,7 +225,7 @@ describe("JS 取的每个 id 都有着落", () => {
   };
 
   it("数量与现状一致", () => {
-    assert(requested.length === 119, `字面量 getElementById ${requested.length} 个，预期 119`);
+    assert(requested.length === 121, `字面量 getElementById ${requested.length} 个，预期 121（+1：存并重放按钮）`);
     assert(templates.length === 5, `模板 getElementById ${templates.length} 个，预期 5`);
   });
 
@@ -234,7 +234,7 @@ describe("JS 取的每个 id 都有着落", () => {
     assert(
       missing.length === 0,
       missing.length === 0 ?
-        "119 个 getElementById 目标全部有着落（HTML 声明 + JS 自建）" :
+        "113 个 getElementById 目标全部有着落（HTML 声明 + JS 自建）" :
         `取不到的 id: ${missing.join(", ")}`,
     );
   });

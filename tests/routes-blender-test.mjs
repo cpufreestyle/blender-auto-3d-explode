@@ -379,6 +379,102 @@ describe("handleHealth", async() => {
 });
 
 // ── handleGeneratedList ─────────────────────────────────
+
+describe("handleManifestSave", async() => {
+  const okManifest = () => ({
+    version: 1,
+    model: "Quest 3",
+    totalParts: 2,
+    bounds: { min: [0, 0, 0], max: [1, 1, 1] },
+    parts: [
+      { index: 0, name: "后盖", centroid: [0, 0, 0], explodePos: [1, 0, 0] },
+      { index: 1, name: "电池", centroid: [1, 0, 0], explodePos: [2, 0, 0] },
+    ],
+    summary: { skipped: 0, reasons: [] },
+  });
+
+  await it("正常落盘：写文件、返回可寻址 url 与体积", async() => {
+    clearState();
+    generatedDir = tmp("blenroutes-ms-ok-");
+    routes = build();
+    await routes.handleManifestSave(fakeReq({ manifest: okManifest(), name: "Quest 3" }), fakeRes());
+    assert(lastJSON().statusCode === 200, "200");
+    const d = lastJSON().data;
+    assert(d.success === true, "success:true");
+    assert(d.url.startsWith("/models/generated/"), "url 前缀正确（实测 " + d.url + "）");
+    assert(d.url.endsWith(".json"), "url 以 .json 结尾");
+    assert(d.fileName.startsWith("Quest_3-"), "空格被消毒成下划线（实测 " + d.fileName + "）");
+    assert(d.size > 0, "返回文件体积");
+    const onDisk = JSON.parse(fs.readFileSync(path.join(generatedDir, d.fileName), "utf8"));
+    assert(onDisk.totalParts === 2, "落盘内容一致");
+    assert(onDisk.parts[1].name === "电池", "部件明细一致");
+  });
+
+  await it("url 经过 encodeURIComponent：文件名带空格也能寻址", async() => {
+    clearState();
+    generatedDir = tmp("blenroutes-ms-space-");
+    routes = build();
+    await routes.handleManifestSave(fakeReq({ manifest: okManifest(), name: "my model" }), fakeRes());
+    const d = lastJSON().data;
+    assert(d.url.includes("my_model"), "空格在消毒阶段就变成下划线，url 无需编码（实测 " + d.url + "）");
+    assert(!d.url.includes(" "), "url 里不留裸空格");
+    const decoded = decodeURIComponent(d.url.split("/").pop());
+    assert(fs.existsSync(path.join(generatedDir, decoded)), "解码后文件存在");
+  });
+
+  await it("模型名消毒：路径分隔符与 shell 元字符不落盘", async() => {
+    clearState();
+    generatedDir = tmp("blenroutes-ms-evil-");
+    routes = build();
+    const evil = "../../etc/passwd;rm -rf /";
+    await routes.handleManifestSave(fakeReq({ manifest: okManifest(), name: evil }), fakeRes());
+    const d = lastJSON().data;
+    assert(lastJSON().statusCode === 200, "仍返回 200");
+    assert(!d.fileName.includes("/"), "文件名不含路径分隔符（实测 " + d.fileName + "）");
+    assert(!d.fileName.includes(".."), "文件名不含 ..（实测 " + d.fileName + "）");
+    assert(fs.existsSync(path.join(generatedDir, d.fileName)), "文件落在 GENERATED_DIR 内");
+  });
+
+  await it("manifest 不是对象 → 400", async() => {
+    clearState();
+    generatedDir = tmp("blenroutes-ms-bad1-");
+    routes = build();
+    for (const bad of [null, 42, "str", [1, 2]]) {
+      clearState();
+      await routes.handleManifestSave(fakeReq({ manifest: bad }), fakeRes());
+      assert(lastJSON().statusCode === 400, "manifest=" + JSON.stringify(bad) + " → 400");
+      assert(lastJSON().data.success === false, "success:false");
+    }
+  });
+
+  await it("manifest.parts 不是数组 → 400", async() => {
+    clearState();
+    generatedDir = tmp("blenroutes-ms-bad2-");
+    routes = build();
+    await routes.handleManifestSave(fakeReq({ manifest: { version: 1, totalParts: 0 } }), fakeRes());
+    assert(lastJSON().statusCode === 400, "400");
+    assert(lastJSON().data.error.includes("parts"), "错误文案点名 parts");
+  });
+
+  await it("缺 name 时回落 model，不抛错", async() => {
+    clearState();
+    generatedDir = tmp("blenroutes-ms-noname-");
+    routes = build();
+    await routes.handleManifestSave(fakeReq({ manifest: okManifest() }), fakeRes());
+    assert(lastJSON().statusCode === 200, "200");
+    assert(lastJSON().data.fileName.startsWith("model-"), "回落名 model（实测 " + lastJSON().data.fileName + "）");
+  });
+
+  await it("空 parts 也接受：0 部件是合法状态，由重放页负责提示", async() => {
+    clearState();
+    generatedDir = tmp("blenroutes-ms-empty-");
+    routes = build();
+    await routes.handleManifestSave(fakeReq({ manifest: { version: 1, parts: [] } }), fakeRes());
+    assert(lastJSON().statusCode === 200, "200");
+  });
+});
+
+
 describe("handleGeneratedList", async() => {
   await it("过滤扩展名与目录项、按 mtime 倒序、url 编码", async() => {
     clearState();
@@ -388,6 +484,8 @@ describe("handleGeneratedList", async() => {
     fs.writeFileSync(path.join(generatedDir, "new.GLTF"), "bb");
     fs.writeFileSync(path.join(generatedDir, "mid.stl"), "ccc");
     fs.writeFileSync(path.join(generatedDir, "note.txt"), "x");
+    fs.writeFileSync(path.join(generatedDir, "plan.obj"), "x"); // 上传收但生成库不收
+    fs.writeFileSync(path.join(generatedDir, "m-manifest.json"), "{}"); // 生成库收但上传不收
     fs.mkdirSync(path.join(generatedDir, "sub.glb")); // 目录：同扩展名也要被滤掉
     const now = Date.now() / 1000;
     fs.utimesSync(path.join(generatedDir, "old.glb"), now - 300, now - 300);
@@ -398,10 +496,19 @@ describe("handleGeneratedList", async() => {
     assert(lastJSON().statusCode === 200, "200");
     const files = lastJSON().data.files;
     assert(lastJSON().data.success === true, "success:true");
-    assert(files.map(f => f.name).join(",") === "new.GLTF,mid.stl,old.glb", "按 mtime 倒序");
-    assert(files.every(f => ALLOWED_EXTENSIONS.includes(path.extname(f.name).toLowerCase())), "只收白名单扩展名");
-    assert(files[0].size === 2 && files[2].size === 1, "size 来自 stat");
-    assert(files[0].url === "/models/generated/new.GLTF", "url 中文名不编码");
+    // 期望顺序：m-manifest.json（最后创建）→ new.GLTF → mid.stl → old.glb。
+    // .json 进来了、.obj 没进来——这正是本次改动要钉的白名单差异。
+    assert(
+      files.map(f => f.name).join(",") === "m-manifest.json,new.GLTF,mid.stl,old.glb",
+      "按 mtime 倒序，且 .json 入库 / .obj 被排除",
+    );
+    // 生成库白名单与上传白名单不是同一个集合：上传收 .obj，生成库不收；
+    // 生成库收 .json（部件清单落盘），上传不收。原先这里拿
+    // ALLOWED_EXTENSIONS 断言是错的耦合，只是夹具里没有 .json 才没暴露。
+    const LIB_EXTS = [".glb", ".gltf", ".stl", ".json"];
+    assert(files.every(f => LIB_EXTS.includes(path.extname(f.name).toLowerCase())), "只收生成库白名单扩展名");
+    assert(files[0].size === 2 && files[3].size === 1, "size 来自 stat");
+    assert(files[1].url === "/models/generated/new.GLTF", "url 中文名不编码");
 
     // 文件名带空格与中文时 encodeURIComponent 生效
     clearState();

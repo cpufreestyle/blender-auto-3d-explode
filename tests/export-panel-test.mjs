@@ -9,14 +9,14 @@
  *   - buildLessonMarkdown：教案内容契约（标题/步骤/部件/工具去重汇总/页脚来源）
  *   - exportScreenshot / exportLessonMarkdown / copyLessonMarkdown / exportGLB：
  *     成功与失败两条路径的下载文件名、Blob MIME、URL 回收时机、toast 文案
- *   - exportSTLWhole / exportSTLPart（3D 打印 STL）：空组 / 未选部件 / 找不到部件
- *     三条失败路径与三条成功路径的文件名 / Blob MIME / toast 文案，同假 exporter 注入模式
+ *   - exportSplitManifest：部件级 JSON 清单。与 GLB 导出同套路——buildManifest
+ *     经注入缝替换（Node 里跑不了真 three 几何），锁住的是接线而非清单内容
+ *     （内容契约在 tests/split-manifest-test.mjs）
  *   - 建厂后状态变更仍生效：原 main.js 里这些值是模块级 let，抽取后经 getState()
  *     现取，这是本次重构最容易踩的坑，专门用一条用例钉住。
  *
  * GLTFExporter.parse 在 Node 里会卡在 FileReader/纹理路径上，因此成功/失败回调
- * 路径用注入的假 exporter 驱动；STLExporter.parse 虽是同步调用，也复用同一注入缝
- * 模式（stlOutcome 控制抛错），其余全部走真实模块代码。
+ * 路径用注入的假 exporter 驱动，其余全部走真实模块代码。
  *
  * 用法：node tests/export-panel-test.mjs
  */
@@ -113,7 +113,13 @@ function installBrowser({
   lightTheme = false,
   clipboardMode = "resolve", // resolve | reject | none
   glbOutcome = "ok", //         ok | error
-  stlOutcome = "ok", //         ok | error
+  manifestOutcome = "ok", //    ok | error（buildManifest 抛错）
+  manifestParts = null, //      非 null 时用它覆盖 state.parts
+  manifestSkipped = 0, //       假清单里造出的跳过项数
+  manifestUrl = null, //        假落盘端点返回的 url；null 时给一个默认值
+  manifestApiError = null, //   非 null 时 manifestApi 抛错
+  manifestApiOk = true, //        false 时返回 success:false
+  stepUrl = null, //            步骤深链构造器；null 时教案不带链接（默认行为）
 } = {}) {
   const calls = {
     toasts: [],
@@ -127,9 +133,10 @@ function installBrowser({
     textareasCreated: 0,
     parseCalls: [],
     exporterBuilt: 0,
-    stlParseCalls: [],
-    stlExporterBuilt: 0,
     appendedToBody: [],
+    manifestBuilds: [],
+    openedUrls: [],
+    manifestApiCalls: [],
   };
 
   // ── 时间与动画回调：改为手动排空，避免测试里真等 2.2 秒的 toast 消失动画 ──
@@ -162,8 +169,8 @@ function installBrowser({
     "export-md-btn",
     "copy-md-btn",
     "export-glb-btn",
-    "export-stl-btn",
-    "export-stl-part-btn",
+    "export-manifest-btn",
+    "replay-manifest-btn",
   ];
   const buttons = {};
   for (const id of BUTTON_IDS) buttons[id] = makeEl("button");
@@ -218,6 +225,13 @@ function installBrowser({
     configurable: true,
   });
 
+  // 假 window.open：记录地址，不真开标签页
+  globalThis.window = globalThis.window || {};
+  globalThis.window.open = (url, target, feats) => {
+    calls.openedUrls.push({ url, target, feats });
+    return null;
+  };
+
   URL.createObjectURL = blob => {
     const url = `blob:fake/${++urlSeq}`;
     calls.objectUrls.push({ url, blob });
@@ -255,17 +269,29 @@ function installBrowser({
     }
   };
 
-  // STLExporter.parse 是同步的：成功返回 DataView（binary: true），失败直接抛错
-  const FakeSTLExporter = class {
-    constructor() {
-      calls.stlExporterBuilt++;
-    }
-    parse(target, options) {
-      calls.stlParseCalls.push({ target, options });
-      if (stlOutcome === "error") throw new Error("STL 炸了");
-      return new DataView(new ArrayBuffer(64));
-    }
+  // 假 buildManifest：Node 里跑不了真 three 几何，记录入参并返回可断言的形状
+  const fakeManifest = {
+    version: 1,
+    model: state.currentModelName,
+    totalParts: 2 + manifestSkipped,
+    bounds: { min: [0, 0, 0], max: [1, 1, 1] },
+    parts: [
+      { index: 0, name: "后盖", isOriginal: false, triangles: 12, volume: 1, surfaceArea: 6,
+        bounds: { min: [0, 0, 0], max: [1, 1, 1] }, size: [1, 1, 1], centroid: [0.5, 0.5, 0.5],
+        explodePos: [1.5, 0.5, 0.5] },
+      { index: 1, name: "电池", isOriginal: false, triangles: 12, volume: 1, surfaceArea: 6,
+        bounds: { min: [0, 0, 0], max: [1, 1, 1] }, size: [1, 1, 1], centroid: [0.5, 0.5, 0.5],
+        explodePos: [1.5, 0.5, 0.5] },
+    ],
+    summary: { skipped: manifestSkipped, reasons: manifestSkipped > 0 ? ["x"] : [] },
   };
+  const buildManifest = (parts, options) => {
+    if (manifestOutcome === "error") throw new Error("清单炸了");
+    calls.manifestBuilds.push({ parts, options });
+    return fakeManifest;
+  };
+  // 需要「空部件」语义时覆盖 state.parts
+  const effectiveState = manifestParts ? Object.assign({}, state, { parts: manifestParts }) : state;
 
   const panel = createExportPanel({
     renderer,
@@ -273,9 +299,25 @@ function installBrowser({
     camera,
     questGroup,
     customModelGroup,
-    getState: () => state,
+    getState: () => effectiveState,
     GLTFExporterClass: FakeExporter,
-    STLExporterClass: FakeSTLExporter,
+    buildManifest,
+    manifestApi: async(manifest, name) => {
+      if (manifestApiError) throw new Error(manifestApiError);
+      calls.manifestApiCalls.push({ manifest, name });
+      // manifestApiOk === false 时返回「服务端明确失败」——这与抛异常是
+      // 两条不同路径（HTTP 200 + success:false vs 网络层错误），都要测。
+      if (manifestApiOk === false) {
+        return { success: false, error: "磁盘配额不足" };
+      }
+      return {
+        success: true,
+        url: manifestUrl || `/models/generated/${encodeURIComponent(name || "model")}-manifest-x.json`,
+        fileName: "x.json",
+        size: 128,
+      };
+    },
+    buildStepUrl: stepUrl,
   });
 
   const world = {
@@ -339,7 +381,6 @@ function makeState(overrides = {}) {
       hasCustomModel: false,
       customModelParts: [],
       parts: [{ name: "后盖" }, { name: "电池" }, { name: "主板" }],
-      selectedPartName: null,
       stepGroups: [
         {
           name: "第一步：<b>拆后盖</b>",
@@ -642,6 +683,172 @@ describe("导出模块（src/export-panel.js）", async() => {
     }
   });
 
+
+  await it("exportSplitManifest：空部件直接报错，不构造清单", () => {
+    const w = installBrowser({ state: makeState(), manifestParts: [] });
+    try {
+      w.panel.exportSplitManifest();
+      assert(w.calls.manifestBuilds.length === 0, "没有调用 buildManifest");
+      assert(w.calls.downloads.length === 0, "没有下载");
+      assert(w.lastToast().className === "toast toast-error", "error toast");
+      assert(w.lastToast().textContent.includes("当前没有可导出的部件"), "文案说明原因");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("exportSplitManifest：默认模型传 parts 与 camera，文件名带模型名", () => {
+    const w = installBrowser({ state: makeState() });
+    try {
+      w.panel.exportSplitManifest();
+      assert(w.calls.manifestBuilds.length === 1, "构造了一次清单");
+      const b = w.calls.manifestBuilds[0];
+      assert(Array.isArray(b.parts) && b.parts.length === 3, "传入 parts 数组（默认模型 3 件）");
+      assert(b.options.camera === w.camera, "传入 camera：explodePos 与屏幕同算法");
+      assert(b.options.model === "Meta Quest 3", "model 名透传");
+      assert(w.calls.downloads.length === 1, "触发下载");
+      assert(
+        /^Meta Quest 3-部件清单-\d{8}-\d{6}\.json$/.test(w.calls.downloads[0].filename),
+        `文件名含模型名与时间戳（${w.calls.downloads[0].filename}）`,
+      );
+      assert(w.calls.objectUrls[0].blob.type === "application/json", "Blob MIME 是 JSON");
+      assert(w.lastToast().className === "toast toast-success", "success toast");
+      assert(w.lastToast().textContent.includes("2 个部件"), "文案报出部件数");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("exportSplitManifest：自定义模型走 customModelParts", () => {
+    const w = installBrowser({
+      state: makeState({ hasCustomModel: true, customModelParts: [{ name: "自定义件" }] }),
+    });
+    try {
+      w.panel.exportSplitManifest();
+      assert(w.calls.manifestBuilds.length === 1, "构造了一次清单");
+      assert(w.calls.manifestBuilds[0].parts.length === 1, "取的是 customModelParts");
+      assert(w.calls.manifestBuilds[0].parts[0].name === "自定义件", "内容正确");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("exportSplitManifest：有跳过项时 toast 降级为 info 并报出数量", () => {
+    const w = installBrowser({ state: makeState(), manifestSkipped: 1 });
+    try {
+      w.panel.exportSplitManifest();
+      assert(w.calls.downloads.length === 1, "仍然下载（跳过项不阻断）");
+      assert(w.lastToast().className === "toast toast-info", "skipped>0 时降级为 info");
+      assert(w.lastToast().textContent.includes("跳过 1 个异常项"), "报出跳过数量");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+
+  await it("saveManifestAndReplay：空部件直接报错，不请求服务端", async() => {
+    const w = installBrowser({ state: makeState(), manifestParts: [] });
+    try {
+      await w.panel.saveManifestAndReplay();
+      assert(w.calls.manifestApiCalls.length === 0, "没有调用落盘端点");
+      assert(w.calls.openedUrls.length === 0, "没有打开重放页");
+      assert(w.calls.downloads.length === 0, "也没有回退下载");
+      assert(w.lastToast().className === "toast toast-error", "error toast");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("saveManifestAndReplay：成功时打开 replay.html 且 manifest 参数已编码", async() => {
+    const w = installBrowser({
+      state: makeState(),
+      manifestUrl: "/models/generated/Quest 3-manifest-x.json",
+    });
+    try {
+      await w.panel.saveManifestAndReplay();
+      assert(w.calls.manifestApiCalls.length === 1, "调用了一次落盘端点");
+      assert(w.calls.manifestApiCalls[0].name === "Meta Quest 3", "模型名透传给落盘端点");
+      assert(w.calls.openedUrls.length === 1, "打开了一次重放页");
+      const opened = w.calls.openedUrls[0];
+      assert(opened.url.startsWith("replay.html?manifest="), "指向重放页（实测 " + opened.url + "）");
+      assert(opened.url.includes("%2Fmodels%2Fgenerated%2F"), "url 参数已编码");
+      assert(!opened.url.includes(" "), "打开的地址里不留裸空格");
+      assert(opened.target === "_blank", "新标签页打开");
+      assert(w.lastToast().textContent.includes("已打开重放页"), "成功文案");
+      assert(w.calls.downloads.length === 0, "成功路径不触发下载");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("saveManifestAndReplay：服务端返回 success:false 时回退下载", async() => {
+    // 让假 api 返回失败：用 manifestUrl 指向空串，代码会抛「未返回可寻址地址」
+    const w = installBrowser({ state: makeState(), manifestApiOk: false });
+    try {
+      await w.panel.saveManifestAndReplay();
+      assert(w.calls.openedUrls.length === 0, "没有打开重放页");
+      assert(w.calls.downloads.length === 1, "回退到下载");
+      assert(w.calls.downloads[0].filename.endsWith(".json"), "下载的是 JSON");
+      assert(w.lastToast().textContent.includes("已改为下载文件"), "告知用户降级了");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("saveManifestAndReplay：网络异常时回退下载，不把异常抛给调用方", async() => {
+    const w = installBrowser({ state: makeState(), manifestApiError: "connect ECONNREFUSED" });
+    try {
+      await w.panel.saveManifestAndReplay();
+      assert(w.calls.openedUrls.length === 0, "没有打开重放页");
+      assert(w.calls.downloads.length === 1, "回退到下载");
+      assert(w.lastToast().textContent.includes("已改为下载文件"), "toast 说明降级");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("saveManifestAndReplay：自定义模型走 customModelParts", async() => {
+    const w = installBrowser({
+      state: makeState({ hasCustomModel: true, customModelParts: [{ name: "自定义件" }] }),
+    });
+    try {
+      await w.panel.saveManifestAndReplay();
+      assert(w.calls.manifestApiCalls.length === 1, "调用了一次");
+      assert(w.calls.manifestBuilds.length === 1, "构建了一次清单");
+      assert(w.calls.manifestBuilds[0].parts.length === 1, "取的是 customModelParts");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+
+  await it("exportSplitManifest：buildManifest 抛错时只报错不下载", () => {
+    const w = installBrowser({ state: makeState(), manifestOutcome: "error" });
+    try {
+      w.panel.exportSplitManifest();
+      assert(w.calls.downloads.length === 0, "没有下载");
+      assert(w.calls.revokedUrls.length === 0, "也没有回收 URL");
+      assert(w.lastToast().className === "toast toast-error", "error toast");
+      assert(w.lastToast().textContent.includes("清单导出失败"), "文案说明是清单导出");
+      assert(w.lastToast().textContent.includes("清单炸了"), "透出底层错误信息");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("exportSplitManifest：下载后回收 objectURL", () => {
+    const w = installBrowser({ state: makeState() });
+    try {
+      w.panel.exportSplitManifest();
+      assert(w.calls.objectUrls.length === 1, "创建了一次 objectURL");
+      w.runTimers();
+      assert(w.calls.revokedUrls.length === 1, "2 秒后回收");
+      assert(w.calls.revokedUrls[0] === w.calls.objectUrls[0].url, "回收的是同一个 URL");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
   await it("exportGLB：parse 失败回调时只报错不下载", () => {
     const w = installBrowser({ state: makeState(), glbOutcome: "error" });
     try {
@@ -656,164 +863,14 @@ describe("导出模块（src/export-panel.js）", async() => {
     }
   });
 
-  // ===== STL 导出（3D 打印）=====
-
-  await it("exportSTLWhole：空组直接报错，不构造 exporter", () => {
-    const w = installBrowser({ state: makeState() });
-    try {
-      if (typeof w.panel.exportSTLWhole !== "function") {
-        assert(false, "exportSTLWhole 尚未实现");
-        return;
-      }
-      w.panel.exportSTLWhole();
-      assert(w.calls.stlExporterBuilt === 0, "空组不构造 exporter");
-      assert(w.calls.stlParseCalls.length === 0, "没有调用 parse");
-      assert(w.calls.downloads.length === 0, "没有下载");
-      assert(w.lastToast().className === "toast toast-error", "error toast");
-      assert(w.lastToast().textContent.includes("当前没有可导出的模型"), "文案说明原因");
-    } finally {
-      restoreGlobals();
-    }
-  });
-
-  await it("exportSTLWhole：默认模型走 questGroup，二进制文件名含步骤号", () => {
-    const w = installBrowser({ state: makeState() });
-    try {
-      if (typeof w.panel.exportSTLWhole !== "function") {
-        assert(false, "exportSTLWhole/尚未实现");
-        return;
-      }
-      w.questGroup.children.push(makeEl("mesh"));
-      w.panel.exportSTLWhole();
-      assert(w.calls.stlParseCalls.length === 1, "调用了一次 parse");
-      assert(w.calls.stlParseCalls[0].target === w.questGroup, "默认导出 questGroup");
-      assert(w.calls.stlParseCalls[0].options.binary === true, "二进制 STL");
-      assert(w.calls.downloads.length === 1, "触发下载");
-      assert(
-        /^Meta Quest 3-拆解步骤1-\d{8}-\d{6}\.stl$/.test(w.calls.downloads[0].filename),
-        `文件名含模型名与步骤号（${w.calls.downloads[0].filename}）`,
-      );
-      assert(w.calls.objectUrls[0].blob.type === "model/stl", "Blob MIME 用 model/stl");
-      assert(w.lastToast().textContent.includes("STL 已导出"), "成功文案");
-    } finally {
-      restoreGlobals();
-    }
-  });
-
-  await it("exportSTLWhole：自定义模型走 customModelGroup", () => {
-    const w = installBrowser({ state: makeState({ hasCustomModel: true, currentModelName: "机械臂", displayedStep: 2 }) });
-    try {
-      if (typeof w.panel.exportSTLWhole !== "function") {
-        assert(false, "exportSTLWhole 尚未实现");
-        return;
-      }
-      w.customModelGroup.children.push(makeEl("mesh"));
-      w.panel.exportSTLWhole();
-      assert(w.calls.stlParseCalls[0].target === w.customModelGroup, "自定义模型走 customModelGroup");
-      assert(
-        w.calls.downloads[0].filename.startsWith("机械臂-拆解步骤2-"),
-        `文件名用自定义模型名与步骤（${w.calls.downloads[0].filename}）`,
-      );
-    } finally {
-      restoreGlobals();
-    }
-  });
-
-  await it("exportSTLPart：未选部件报错，不构造 exporter", () => {
-    const w = installBrowser({ state: makeState() });
-    try {
-      if (typeof w.panel.exportSTLPart !== "function") {
-        assert(false, "exportSTLPart 尚未实现");
-        return;
-      }
-      w.questGroup.children.push(makeEl("mesh"));
-      w.panel.exportSTLPart();
-      assert(w.calls.stlExporterBuilt === 0, "未选部件不构造 exporter");
-      assert(w.calls.downloads.length === 0, "没有下载");
-      assert(w.lastToast().className === "toast toast-error", "error toast");
-      assert(w.lastToast().textContent.includes("请先在部件清单中选中部件"), "文案说明原因");
-    } finally {
-      restoreGlobals();
-    }
-  });
-
-  await it("exportSTLPart：选中部件在组里找不到时报错", () => {
-    const w = installBrowser({ state: makeState({ selectedPartName: "不存在部件" }) });
-    try {
-      if (typeof w.panel.exportSTLPart !== "function") {
-        assert(false, "exportSTLPart 尚未实现");
-        return;
-      }
-      const backCover = makeEl("mesh");
-      backCover.name = "后盖";
-      w.questGroup.children.push(backCover);
-      w.panel.exportSTLPart();
-      assert(w.calls.stlExporterBuilt === 0, "找不到部件不构造 exporter");
-      assert(w.calls.downloads.length === 0, "没有下载");
-      assert(w.lastToast().className === "toast toast-error", "error toast");
-      assert(w.lastToast().textContent.includes("未找到部件"), "文案说明找不到");
-      assert(w.lastToast().textContent.includes("不存在部件"), "透传部件名");
-    } finally {
-      restoreGlobals();
-    }
-  });
-
-  await it("exportSTLPart：成功导出选中部件的网格", () => {
-    const w = installBrowser({ state: makeState({ selectedPartName: "后盖" }) });
-    try {
-      if (typeof w.panel.exportSTLPart !== "function") {
-        assert(false, "exportSTLPart 尚未实现");
-        return;
-      }
-      const backCover = makeEl("mesh");
-      backCover.name = "后盖";
-      w.questGroup.children.push(backCover);
-      w.panel.exportSTLPart();
-      assert(w.calls.stlParseCalls.length === 1, "调用了一次 parse");
-      assert(w.calls.stlParseCalls[0].target === backCover, "parse 的目标就是选中部件的网格");
-      assert(w.calls.stlParseCalls[0].options.binary === true, "二进制 STL");
-      assert(w.calls.downloads.length === 1, "触发下载");
-      assert(
-        /^Meta Quest 3-部件后盖-\d{8}-\d{6}\.stl$/.test(w.calls.downloads[0].filename),
-        `文件名含模型名与部件名（${w.calls.downloads[0].filename}）`,
-      );
-      assert(w.calls.objectUrls[0].blob.type === "model/stl", "Blob MIME 用 model/stl");
-      assert(w.lastToast().textContent.includes("部件 STL 已导出"), "成功文案含部件导出");
-      assert(w.lastToast().textContent.includes("后盖"), "成功文案透传部件名");
-    } finally {
-      restoreGlobals();
-    }
-  });
-
-  await it("exportSTLPart：parse 抛错时只报错不下载", () => {
-    const w = installBrowser({ state: makeState({ selectedPartName: "后盖" }), stlOutcome: "error" });
-    try {
-      if (typeof w.panel.exportSTLPart !== "function") {
-        assert(false, "exportSTLPart 尚未实现");
-        return;
-      }
-      const backCover = makeEl("mesh");
-      backCover.name = "后盖";
-      w.questGroup.children.push(backCover);
-      w.panel.exportSTLPart();
-      assert(w.calls.downloads.length === 0, "失败不下载");
-      assert(w.lastToast().className === "toast toast-error", "error toast");
-      assert(w.lastToast().textContent.includes("部件 STL 导出失败"), "文案含失败");
-      assert(w.lastToast().textContent.includes("STL 炸了"), "透传 exporter 的错误信息");
-    } finally {
-      restoreGlobals();
-    }
-  });
-
-  await it("建厂时绑定六个导出按钮（缺失的按钮静默跳过）", () => {
+  await it("建厂时绑定四个导出按钮（缺失的按钮静默跳过）", () => {
     const w = installBrowser({ state: makeState() });
     try {
       assert(typeof w.buttons["shot-btn"].listeners.click === "function", "截图按钮已绑定");
       assert(typeof w.buttons["export-md-btn"].listeners.click === "function", "导出教案按钮已绑定");
       assert(typeof w.buttons["copy-md-btn"].listeners.click === "function", "复制教案按钮已绑定");
       assert(typeof w.buttons["export-glb-btn"].listeners.click === "function", "导出 GLB 按钮已绑定");
-      assert(typeof w.buttons["export-stl-btn"].listeners.click === "function", "导出 STL 按钮已绑定");
-      assert(typeof w.buttons["export-stl-part-btn"].listeners.click === "function", "部件 STL 按钮已绑定");
+      assert(typeof w.buttons["export-manifest-btn"].listeners.click === "function", "导出清单按钮已绑定");
     } finally {
       restoreGlobals();
     }
@@ -850,6 +907,78 @@ describe("导出模块（src/export-panel.js）", async() => {
       );
       const md = w.panel.buildLessonMarkdown();
       assert(md.includes("- 部件总数：2"), "教案也读到新 customModelParts");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("buildLessonMarkdown：未注入深链构造器时不出现链接行", () => {
+    const w = installBrowser({ state: makeState() });
+    try {
+      const md = w.panel.buildLessonMarkdown();
+      assert(!md.includes("本步链接"), "默认不注入时不写链接，教案格式不变");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("buildLessonMarkdown：注入后每一步都带一条可点深链", () => {
+    const w = installBrowser({
+      state: makeState(),
+      stepUrl: step => "http://localhost:3000/#step=" + step,
+    });
+    try {
+      const md = w.panel.buildLessonMarkdown();
+      assert(md.includes("- **本步链接**：http://localhost:3000/#step=1"), "第 1 步链接");
+      assert(md.includes("- **本步链接**：http://localhost:3000/#step=2"), "第 2 步链接");
+      assert(md.includes("- **本步链接**：http://localhost:3000/#step=3"), "第 3 步链接");
+      const count = Array.from(md.matchAll(/本步链接/g)).length;
+      assert(count === 3, "三步各一条，实际 " + count);
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("copyStepLink：Clipboard API 可用时直接写链接", async() => {
+    const w = installBrowser({ state: makeState(), stepUrl: step => "http://x/#step=" + step });
+    try {
+      w.panel.copyStepLink(4);
+      await flushMicrotasks();
+      assert(w.calls.clipboardWrites.length === 1, "写了 navigator.clipboard");
+      assert(w.calls.clipboardWrites[0] === "http://x/#step=4", "写的是第 4 步的深链");
+      assert(w.calls.textareasCreated === 0, "没有走 textarea 兜底");
+      assert(w.lastToast().textContent.includes("第 4 步"), "toast 报出步号");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("copyStepLink：Clipboard 被拒时回退 execCommand", async() => {
+    const w = installBrowser({
+      state: makeState(),
+      clipboardMode: "reject",
+      stepUrl: () => "http://x/#step=1",
+    });
+    try {
+      w.panel.copyStepLink(1);
+      await flushMicrotasks();
+      assert(w.calls.clipboardWrites.length === 1, "仍然先尝试 Clipboard API");
+      assert(w.calls.textareasCreated === 1, "回退创建隐藏 textarea");
+      assert(w.calls.execCommandCalls === 1, "走了一次 execCommand");
+      assert(w.lastToast().textContent.includes("第 1 步"), "兜底成功也报步号");
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  await it("copyStepLink：拿不到链接时明确报错，不硬拼地址", () => {
+    const w = installBrowser({ state: makeState() });
+    try {
+      w.panel.copyStepLink(2);
+      assert(w.calls.clipboardWrites.length === 0, "没有写剪贴板");
+      assert(w.calls.execCommandCalls === 0, "也没有走兜底复制");
+      assert(w.lastToast().className === "toast toast-error", "error toast");
+      assert(w.lastToast().textContent.includes("无法生成"), "文案说清是链接生成不了");
     } finally {
       restoreGlobals();
     }

@@ -5,6 +5,7 @@
  * 功能：
  *   POST /api/split  —  接收 GLB 文件，调用 Blender CLI 拆解，返回二进制 GLB + manifest 头
  *   GET  /api/health —  健康检查（检测 Blender 是否可用）
+ *   GET  /api/identity — 服务身份标记（供桌面启动器确认端口上是不是本服务）
  *
  * 改进：
  *   - 错误处理作用域修复（blenderStdout/blenderStderr 提到外层）
@@ -45,6 +46,10 @@ import { createResponseUtils } from "./src/response-utils.js";
 import { createBlenderRunner } from "./src/blender-runner.js";
 import { createGenerateRoutes } from "./src/routes-generate.js";
 import { createBlenderRoutes } from "./src/routes-blender.js";
+import {
+  createIdentityRoutes,
+  readPackageVersion,
+} from "./src/routes-identity.js";
 import { callAI } from "./src/ai-call.js";
 import { detectProxy } from "./src/proxy-detect.js";
 import { fileURLToPath } from "url";
@@ -169,6 +174,7 @@ const {
   handleAIPaint,
   handleHealth,
   handleGeneratedList,
+  handleManifestSave,
   launchBlenderApp,
   handleLaunchBlender,
   handleSplit,
@@ -183,21 +189,6 @@ const {
   execFile: execFileAsync,
 })
 
-
-/**
- * 身份端点：返回本服务的 app 标记、版本、pid 与端口。
- * 桌面启动器（scripts/mac/quest3-launcher）据此判断端口上监听的是不是本项目：
- * 端口被别的程序占用时拒绝打开它的页面，也避免把别人的 HTTP 200 当成就绪。
- * app 字段必须与启动器里的 APP_ID 一致。
- */
-async function handleIdentity(req, res) {
-  sendJSON(res, 200, {
-    app: "blender-auto-3d-explode",
-    version: "3.2.13",
-    pid: process.pid,
-    port: Number(PORT),
-  });
-}
 
 // ── AI 生成类路由（图片转3D / 文生3D）──────────────────
 // 实现（finishImageTo3D / handleImageTo3D / handleTextTo3D / runLocalTextTo3D）
@@ -288,6 +279,15 @@ const { handleGenToBlender, handleBlenderExport } = createClosedLoop({
   rootDir: __dirname,
 });
 
+// ── 服务身份标记：桌面启动器靠它认「这个端口是不是我」──────────
+// /api/health 要 exec Blender（最长 10s），不能用来做身份判定；这里只回一个
+// 即时的 app 标记 + 版本 + 监听进程 PID，详见 src/routes-identity.js 顶部注释。
+const { handleIdentity } = createIdentityRoutes({
+  sendJSON,
+  version: readPackageVersion(__dirname),
+  port: PORT,
+});
+
 // ── 创建 HTTP 服务器 ──────────────────────────────────
 
 const server = http.createServer(
@@ -302,16 +302,15 @@ const server = http.createServer(
     const url = new URL(req.url, `http://localhost:${PORT}`);
     log.info(`${req.method} ${url.pathname}`);
 
-    // 身份端点：桌面启动器（scripts/mac/quest3-launcher）据此判断端口上的
-    // 服务是不是本项目——端口被别的程序占用时不打开它的页面、也不误报
-    // 「服务已在运行」。app 标记必须与启动器里的 APP_ID 一致。
-    if (req.method === "GET" && url.pathname === "/api/identity") {
-    await handleIdentity(req, res);
-    } else if (req.method === "GET" && url.pathname === "/api/health") {
+    if (req.method === "GET" && url.pathname === "/api/health") {
     await handleHealth(req, res);
-    } else if (req.method === "GET" && url.pathname === "/api/generated") {
+  } else if (req.method === "GET" && url.pathname === "/api/identity") {
+    await handleIdentity(req, res);
+  } else if (req.method === "GET" && url.pathname === "/api/generated") {
     await handleGeneratedList(req, res);
-    } else if (req.method === "POST" && url.pathname === "/api/blender/launch") {
+  } else if (req.method === "POST" && url.pathname === "/api/manifest") {
+    await handleManifestSave(req, res);
+  } else if (req.method === "POST" && url.pathname === "/api/blender/launch") {
     await handleLaunchBlender(req, res);
     } else if (req.method === "POST" && url.pathname === "/api/split") {
     await handleSplit(req, res);
@@ -380,6 +379,7 @@ server.listen(PORT, () => {
   console.log("\n  端点:");
   console.log("    GET  /              — 静态文件 (index.html)");
   console.log("    GET  /api/health   — 健康检查");
+  console.log("    GET  /api/identity — 服务身份标记（桌面启动器识别端口占用者用）");
   console.log("    POST /api/blender/launch — 一键启动 Blender（GUI）");
   console.log("    POST /api/split    — 拆解 GLB（二进制响应）");
   console.log("    POST /api/ai-paint — AI 绘画（生成3D模型）");
@@ -388,6 +388,7 @@ server.listen(PORT, () => {
   console.log("    GET  /api/blender/export   — 从 Blender 导出对象 GLB（读回）");
   console.log("    GET  /api/assembly/sequence — 装配拆解顺序（Blender MCP）");
   console.log("    GET  /api/assembly/analysis — 装配/干涉/可制造性分析（Blender MCP）\n");
+    console.log("    POST /api/manifest — 部件清单落盘到生成库（供重放页寻址）");
 
   // 启动时检测 Blender
   execFileAsync(BLENDER_PATH, ["--version"], { timeout: 10_000 })

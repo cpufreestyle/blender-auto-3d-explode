@@ -9,6 +9,10 @@
  * 这个脚本用真实 Chrome 点真实页面，把这类回归挡在提交前。
  *
  * 覆盖：
+ *   0. 页面就绪（加载遮罩收起 / 画布与清单就位），且没有被「首次配置」弹窗盖住
+ *      —— 那层弹窗铺满视口且内含 iframe，CDP 派发的鼠标事件会被它整层吃掉，
+ *      于是「点了没用」全是假阴性（本文件此前 7 条失败的真因）；点行前再做一次
+ *      命中测试，把「被浮层挡住」当场判死而不是伪装成产品缺陷；
  *   1. 首屏部件清单每行都有眼睛按钮，行数与静态清单一致；
  *   2. 点行 → 该行激活 + 相机聚焦（画面亮像素大幅上升）；
  *   3. 再点同一行 → 取消选中；
@@ -47,7 +51,9 @@ let failed = 0;
 const A = (cond, msg) => { OUT((cond ? "  OK   " : "  FAIL ") + msg); if (cond) passed++; else failed++; };
 
 try {
-  await sleep(9000);
+  const rdy = await ui.waitReady();
+  A(rdy.ok, `页面就绪：加载遮罩收起 / 画布就位 / 部件 ${rdy.rows} 行（耗时 ${rdy.ms}ms）`);
+  A((await ui.hideFirstRunModal()) === false, "首屏没有被「首次配置」弹窗遮挡（被 iframe 盖住时鼠标事件全落空）");
   A(pageErrors.length === 0, `页面 0 运行时异常（实际 ${pageErrors.length}${pageErrors.length ? ": " + pageErrors.slice(0, 2).join(" | ") : ""}）`);
 
   // 展开「工具 & 部件清单」面板（默认折叠，不展开点不到行）
@@ -72,6 +78,8 @@ try {
     return JSON.stringify({ x: r.x + r.width * 0.35, y: r.y + r.height / 2, name: row.dataset.part });
   })()`));
   OUT("目标行:", rect.name, "at", rect.x.toFixed(0), rect.y.toFixed(0));
+  const hit = await ui.hitTest(rect.x, rect.y, ".parts-grid .part-item");
+  A(hit.inside, `行中心的最上层元素就在清单行里（实际命中 ${hit.hit}）`);
   const beforeBright = await brightRatio();
   await click(rect.x, rect.y);
   await sleep(2600);

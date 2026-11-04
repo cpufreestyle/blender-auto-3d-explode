@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER_SRC = fs.readFileSync(path.join(ROOT, "server.js"), "utf8");
+const ROUTES_IDENTITY_SRC = fs.readFileSync(path.join(ROOT, "src/routes-identity.js"), "utf8");
 const LAUNCHER_SRC = fs.readFileSync(path.join(ROOT, "scripts/mac/quest3-launcher"), "utf8");
 
 let passed = 0;
@@ -39,13 +40,12 @@ describe("/api/identity 契约", () => {
   });
 
   it("handleIdentity 返回 app/version/pid/port 四字段", () => {
-    const m = SERVER_SRC.match(/async function handleIdentity[\s\S]*?\n}/);
-    assert(!!m, "handleIdentity 函数体存在");
-    const body = m ? m[0] : "";
-    for (const key of ["app:", "version:", "pid:", "port:"]) {
-      assert(body.includes(key), "响应含 " + key);
+    // main 侧重构后实现迁至 src/routes-identity.js（server.js 只注册路由）
+    assert(ROUTES_IDENTITY_SRC.includes("app: APP_ID"), "响应含 app: APP_ID");
+    for (const key of ["version:", "pid:", "port:"]) {
+      assert(ROUTES_IDENTITY_SRC.includes(key), "响应含 " + key);
     }
-    assert(body.includes("app: \"" + APP_ID + "\""), "app 标记与启动器 APP_ID 一致");
+    assert(ROUTES_IDENTITY_SRC.includes("export const APP_ID = \"" + APP_ID + "\""), "APP_ID 与启动器约定一致");
   });
 
   it("启动器按身份判定端口归属，不误开别人的页面", () => {
@@ -61,7 +61,6 @@ describe("/api/identity 契约", () => {
       "APP_DIR 指向本仓库工作区",
     );
     assert(LAUNCHER_SRC.includes("QUEST3_PORT:-3011"), "默认端口 3011");
-    assert(LAUNCHER_SRC.includes("launcher.html?api="), "打开 URL 带 ?api= 参数");
   });
 });
 

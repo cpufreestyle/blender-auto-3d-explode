@@ -23,6 +23,10 @@
 
 import { Color, MathUtils, Vector3 } from "three";
 import { easeOutCubic, smoothStep } from "./utils.js";
+// 步骤深链：把「学到第几步」镜像进地址栏，复制链接即可分发同一节课的进度。
+// 借鉴 47ng/nuqs（MIT，10.8k★）「URL 即状态」：真相仍在 currentStep/displayedStep，
+// 深链只是投影；写回走 replaceState，逐步点下来不会把浏览器历史灌爆。
+import { applyStepFromLocation, syncStepToUrl } from "./step-link.js";
 
 // 与 main.js 约定的共享状态键集合：s.* 读取走 getState()，写入走 setState({ key: value })
 const SHARED_STATE_KEYS = [
@@ -56,6 +60,10 @@ export function createExplodeController({
   ui,
   getState,
   setState,
+  // 地址栏写回目标：生产传 window.location / window.history，测试环境（Node）下
+  // window 不存在，两个默认值都是 null，所有写回自动退化成空操作。
+  location = typeof window !== "undefined" ? window.location : null,
+  history = typeof window !== "undefined" ? window.history : null,
 }) {
   // 共享状态响应式视图：读时现取、写时立即回写，等价于直接操作 main.js 的那些 let
   const s = {};
@@ -87,6 +95,11 @@ export function createExplodeController({
     explodeLoopBtn,
     explodeLoopSpeed,
   } = ui;
+
+  // 地址栏同步：值没变就不写（updateStepUI 会被动画每帧调用，白写会写穿 history）
+  function syncStepUrl(step) {
+    syncStepToUrl({ location, history, step });
+  }
 
   console.log("Step UI elements:", {
     prevBtn: !!prevBtn,
@@ -120,6 +133,10 @@ export function createExplodeController({
   let mouseControlEnabled = false; // 是否启用鼠标控制
   const stepDuration = 600; // 每步动画时长（毫秒）
   let isAnimating = false;
+  let timelineDragging = false; // 用户是否正在拖动时间轴（拖动中禁止程序回写滑块值）
+  let depthActive = false; // 爆炸深度滑块是否接管了观看姿态（此时忽略分步位置）
+  let depthDragging = false; // 用户是否正在拖动深度滑块（拖动中禁止程序回写）
+  let depthFactor = 0; // 滑块设定的观看因子 (0-1)
 
   // ===== 一键爆炸/合体的平滑动画（所有部件同时炸开/合体）=====
   let explodeAnimActive = false; // 是否正在播放爆炸/合体动画
@@ -207,8 +224,19 @@ export function createExplodeController({
 
     // 更新时间轴
     if (timelineSlider) {
-      timelineSlider.value = displayStep;
+      // 用户正在拖动时不要回写，否则会把拖动的目标值冲掉（表现为「拖时间轴没反应」）
+      // 赋字符串：真实 DOM 会自动 normalize，测试假 DOM 不会，类型不一致会埋坑
+      if (!timelineDragging) timelineSlider.value = String(displayStep);
       timelineStepEl.textContent = displayStep;
+    }
+
+    // 深度读数跟着教学进度走：炸开程度由当前步骤的进度决定，
+    // 避免出现时间轴说第 6 步、深度滑块还停在 20% 的自相矛盾。
+    // 滑块正被拖动、或滑块正在接管观看姿态时都不回写。
+    if (depthSlider && !depthActive && !depthDragging) {
+      const pct = Math.round((s.currentStep / s.totalSteps) * 100);
+      depthSlider.value = String(pct);
+      depthValueEl.textContent = pct + "%";
     }
 
     if (stepUIHook) stepUIHook();
@@ -217,6 +245,7 @@ export function createExplodeController({
   // 退出鼠标控制模式，将当前 mouseFactor 同步到 currentStep/displayedStep
   function exitMouseControl() {
     mouseControlEnabled = false;
+    depthActive = false; // 鼠标控制退出后交回分步进度
     needsExplodeUpdate = true; // 标记需要重新计算
     s.isExploded = false;
     explodeBtn?.classList.remove("exploded");
@@ -230,7 +259,9 @@ export function createExplodeController({
     newStep = MathUtils.clamp(newStep, 0, s.totalSteps);
     if (newStep === s.displayedStep || isAnimating) return;
 
+    depthActive = false; // 分步控制接管，深度滑块退出
     stopExplodeLoop(); // 手动分步控制接管，停止循环播放
+    syncStepUrl(newStep); // 深链跟着步骤走，点开链接即落在同一步
     needsExplodeUpdate = true; // 标记需要重新计算部件位置
     animationFrom = s.currentStep;
     s.animatingStep = newStep;
@@ -243,6 +274,7 @@ export function createExplodeController({
     isAnimating = false;
     s.currentStep = s.animatingStep;
     s.displayedStep = s.animatingStep;
+    syncStepUrl(s.displayedStep); // 动画落定后再同步一次，避免中途值覆盖最终值
     updateStepUI();
   }
 
@@ -256,6 +288,23 @@ export function createExplodeController({
       const step = parseInt(e.target.value);
       goToStep(step);
     });
+  }
+
+  // 拖动期间锁定滑块值，松手时才让 updateStepUI 重新接管显示
+  if (timelineSlider) {
+    timelineSlider.addEventListener("pointerdown", () => { timelineDragging = true; });
+    timelineSlider.addEventListener("pointerup", () => { timelineDragging = false; });
+    timelineSlider.addEventListener("pointercancel", () => { timelineDragging = false; });
+    timelineSlider.addEventListener("blur", () => { timelineDragging = false; });
+  }
+
+  // 深度滑块同理：拖动中不被 updateStepUI 回写覆盖
+  if (depthSlider) {
+    depthSlider.addEventListener("pointerdown", () => { depthDragging = true; });
+    const endDepthDrag = () => { depthDragging = false; };
+    depthSlider.addEventListener("pointerup", endDepthDrag);
+    depthSlider.addEventListener("pointercancel", endDepthDrag);
+    depthSlider.addEventListener("blur", endDepthDrag);
   }
 
   if (timelinePlayBtn) {
@@ -317,6 +366,7 @@ export function createExplodeController({
     s.isExploded = !s.isExploded;
     // 退出其它控制模式，由本次爆炸动画接管
     mouseControlEnabled = false;
+    depthActive = false; // 一键爆炸接管，深度滑块退出
     explodeAllMode = true;
     isAnimating = false;
     clearInterval(playInterval);
@@ -404,13 +454,15 @@ export function createExplodeController({
       // 计算炸开因子 (0-1)
       const factor = depth / 100;
 
-      // 如果不在动画中，直接应用
+      // 如果不在动画中，直接应用。注意：这里只改「观看姿态」，
+      // 不写 currentStep/displayedStep —— 那两个字段属于教学步骤（学到第几步），
+      // 深度滑块回答的是「现在拆得多开」，两者混用会让调深度把课程进度一起改掉，
+      // 时间轴读数也会跟着跳到意料之外的位置。
       if (!isAnimating) {
         needsExplodeUpdate = true; // 标记需要重新计算
-        s.currentStep = factor * s.totalSteps;
-        s.displayedStep = Math.round(s.currentStep);
+        depthFactor = factor; // 滑块接管时的观看因子
+        depthActive = true; // 滑块接管，直到分步/一键爆炸把姿态抢回去
         explodeAnimFactor = factor; // 同步整体炸开因子，供后续动画续接
-        updateStepUI();
       }
 
       // 更新爆炸状态
@@ -551,17 +603,23 @@ export function createExplodeController({
       explodeAnimFactor :
       mouseControlEnabled ?
         mouseFactor :
-        s.currentStep / s.totalSteps;
+        depthActive ?
+          depthFactor :
+          s.currentStep / s.totalSteps;
     axisMat.opacity = globalFactor * 0.5;
 
     // 统一的部件更新函数（避免重复代码）
     const updatePart = part => {
+      // 观看因子：整体炸开 > 鼠标控制 > 深度滑块 > 分步进度。
+      // 深度滑块只改「整体观看姿态」，部件仍按各自的 stepIndex 渐进展开，
+      // 所以下面依旧走 smoothStep，只是把进度换成滑块给出的连续值。
+      const depthProgress = depthActive ? depthFactor * s.totalSteps : s.currentStep;
       const partFactor = explodeAllMode ?
         explodeAnimFactor :
         smoothStep(
           part.stepIndex - 1,
           part.stepIndex,
-          mouseControlEnabled ? mouseFactor * s.totalSteps : s.currentStep,
+          mouseControlEnabled ? mouseFactor * s.totalSteps : depthProgress,
         );
 
       part.mesh.position.lerpVectors(part.homePos, part.explodePos, partFactor);
@@ -583,9 +641,25 @@ export function createExplodeController({
       needsExplodeUpdate = false;
     }
   }
+  // 首屏应用深链：#step=N 比当前步大/小时由 goToStep 动画落位，重复或非法值不动
+  function applyDeepLink() {
+    return applyStepFromLocation({
+      location,
+      goToStep,
+      totalSteps: s.totalSteps,
+      currentStep: s.displayedStep,
+    });
+  }
+
+  // 地址栏被直接改写（用户粘贴链接、点历史记录）时跟着走
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    window.addEventListener("hashchange", () => applyDeepLink());
+  }
+
   return {
     updateStepUI,
     goToStep,
+    applyDeepLink,
     toggleExplode,
     focusCurrentPart,
     focusPart,

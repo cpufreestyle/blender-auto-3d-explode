@@ -237,6 +237,17 @@ function setup(overrides) {
   const controls = { target: new Vector3(0, 0, 0) };
   const renderer = { domElement: makeEl("canvas") };
   const axisMat = { opacity: 0 };
+  // 假地址栏：replaceState 要像浏览器那样真的改掉 hash，否则
+  // 「同一步不重复写历史」这条断言在替身上恒真、在浏览器里恒假。
+  const url = { hash: (overrides && overrides.hash) || "" };
+  const writes = [];
+  const history = {
+    writes,
+    replaceState: (_s, _u, next) => {
+      writes.push(next);
+      url.hash = next; // 浏览器就是这样：写完 hash 立刻变
+    },
+  };
   const ctl = createExplodeController({
     camera,
     controls,
@@ -246,8 +257,10 @@ function setup(overrides) {
     ui,
     getState: store.getState,
     setState: store.setState,
+    location: url,
+    history,
   });
-  return { ctl, ui, store, parts, camera, controls, renderer, axisMat };
+  return { ctl, ui, store, parts, camera, controls, renderer, axisMat, url, history, writes };
 }
 
 // ===== 用例 =====
@@ -333,8 +346,8 @@ describe("updateStepUI 与 highlightPart", async() => {
     assert(ui.stepDescEl.innerHTML === "断开电池排线", "说明写入 innerHTML");
     assert(ui.toolsListEl.innerHTML === "<div class=\"tools-none\">✅ 本步骤无需工具</div>", "无工具文案");
     assert(ui.progressFillEl.style.width === `${(1 / 3) * 100}%`, "进度条宽度按显示步占比");
-    assert(ui.timelineSlider.value === 1, "时间轴滑块跟随");
-    assert(ui.timelineStepEl.textContent === 1, "时间轴步号文案");
+    assert(ui.timelineSlider.value === "1", "时间轴滑块跟随");
+    assert(String(ui.timelineStepEl.textContent) === "1", "时间轴步号文案");
   });
 
   await it("有工具时渲染 tool-item 清单", () => {
@@ -539,15 +552,40 @@ describe("updateExplodedView 三条插值路径", async() => {
 });
 
 describe("深度滑块", async() => {
-  await it("拖到 50%：文案/状态/按钮/步骤同步", () => {
+  await it("拖到 50%：文案/状态/按钮切换，但不改教学步骤", () => {
     const { ui, store } = setup();
     ui.depthSlider.fire("input", { target: { value: "50" } });
     assert(ui.depthValueEl.textContent === "50%", "深度文案");
     assert(store.state.isExploded === true, "isExploded 置 true");
     assert(ui.explodeBtn.classList.contains("exploded"), "按钮加 exploded");
     assert(ui.explodeBtn.textContent === "🔄 合体", "按钮切合体");
-    assert(store.state.currentStep === 1.5, "currentStep = 0.5*totalSteps");
-    assert(store.state.displayedStep === 2, "displayedStep 取整");
+    // 深度滑块只改观看姿态，不写 currentStep/displayedStep：
+    // 否则「把模型拆得开一点」会把教学进度一起改掉，时间轴也会乱跳
+    assert(store.state.currentStep === 0, "currentStep 保持原步骤");
+    assert(store.state.displayedStep === 0, "displayedStep 保持原步骤");
+  });
+
+  await it("深度滑块接管后，goToStep 把姿态交还给分步控制", () => {
+    const { ui, store, ctl } = setup();
+    ui.depthSlider.fire("input", { target: { value: "100" } });
+    assert(store.state.currentStep === 0, "滑块不推进度");
+    ctl.goToStep(2);
+    ctl.updateExplodedView(100000); // 落定动画（本套件用假 performance.now，见既有用例写法）
+    assert(store.state.currentStep === 2 && store.state.displayedStep === 2, "goToStep 落定");
+    // 交还后深度读数跟着步骤走，不再停留在 100%
+    ctl.updateStepUI();
+    assert(ui.depthSlider.value === String(Math.round((2 / store.state.totalSteps) * 100)), "深度读数同步到步骤");
+  });
+
+  await it("拖动时间轴会同步深度读数，两处读数不再矛盾", () => {
+    const { ui, ctl } = setup();
+    ui.timelineSlider.value = "3";
+    ui.timelineSlider.fire("input", { target: { value: "3" } });
+    ctl.updateExplodedView(100000); // 落定动画
+    ctl.updateStepUI();
+    assert(ui.timelineSlider.value === "3", "时间轴滑块值");
+    assert(String(ui.timelineStepEl.textContent) === "3", "时间轴文字");
+    assert(ui.depthSlider.value === "100", "深度读数与步骤一致（3/3 = 100%）");
   });
 
   await it("拖回 0：退出爆炸态", () => {
@@ -688,6 +726,78 @@ describe("鼠标控制默认路径", async() => {
     ui.explodeBtn.fire("dblclick");
     assert(store.state.isExploded === true, "炸开态 dblclick 保持炸开");
     assert(ui.explodeBtn.textContent === "🔄 合体", "按钮文本不变");
+  });
+});
+
+describe("步骤深链（地址栏同步）", async() => {
+  await it("goToStep 把目标步写进地址栏", () => {
+    const { ctl, url, store } = setup();
+    ctl.goToStep(2);
+    assert(url.hash === "#step=2", "地址栏写成 #step=2，实际 " + url.hash);
+    assert(store.state.animatingStep === 2, "同时照常启动分步动画");
+  });
+
+  await it("动画落定不重复写历史（值没变就不碰）", () => {
+    const { ctl, url, writes } = setup();
+    ctl.goToStep(2);
+    assert(writes.length === 1, "goToStep 写了一次");
+    ctl.updateExplodedView(100000); // 落定
+    assert(url.hash === "#step=2", "落定后仍是 #step=2");
+    assert(writes.length === 1, "落定那次没有重复写（真实浏览器里 hash 已相同）");
+  });
+
+  await it("只刷新 UI 不写地址栏", () => {
+    const { ctl, url } = setup();
+    ctl.updateStepUI();
+    assert(url.hash === "", "updateStepUI 不动地址栏（它每帧都会被调）");
+  });
+
+  await it("applyDeepLink：命中合法深链才落位", () => {
+    const w1 = setup({ hash: "#step=2" });
+    assert(w1.ctl.applyDeepLink() === true, "#step=2 被应用");
+    assert(w1.store.state.animatingStep === 2, "落到第 2 步");
+
+    const w2 = setup({ hash: "" });
+    assert(w2.ctl.applyDeepLink() === false, "没有 hash 时不动作");
+    assert(w2.store.state.animatingStep === 0, "仍在第 0 步");
+
+    const w3 = setup({ hash: "#step=99" });
+    assert(w3.ctl.applyDeepLink() === false, "越界深链被拒");
+
+    const w4 = setup({ hash: "#step=abc" });
+    assert(w4.ctl.applyDeepLink() === false, "非整数深链被拒");
+  });
+
+  await it("applyDeepLink：与当前步相同时不触发动画", () => {
+    const w = setup({ hash: "#step=0" });
+    assert(w.ctl.applyDeepLink() === false, "已在第 0 步，返回 false");
+    assert(w.store.state.animatingStep === 0, "没有启动动画");
+  });
+
+  await it("hashchange：用户粘贴 / 点历史记录时跟着跳步", () => {
+    const listeners = {};
+    const prevWindow = globalThis.window;
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        addEventListener: (type, fn) => { listeners[type] = fn; },
+      },
+    });
+    try {
+      const w = setup({ hash: "#step=1" });
+      assert(typeof listeners.hashchange === "function", "绑定了 hashchange");
+      w.url.hash = "#step=3";
+      listeners.hashchange();
+      assert(w.store.state.animatingStep === 3, "跳到第 3 步");
+      w.ctl.updateExplodedView(100000); // 落定，否则 isAnimating 会挡住下一次
+      w.url.hash = "#step=1";
+      listeners.hashchange();
+      assert(w.store.state.animatingStep === 1, "再跳到第 1 步");
+      assert(w.store.state.displayedStep === 3, "仍是 goToStep 起的头：动画未落定，displayedStep 尚未变");
+    } finally {
+      if (prevWindow === undefined) delete globalThis.window;
+      else Object.defineProperty(globalThis, "window", { configurable: true, value: prevWindow });
+    }
   });
 });
 

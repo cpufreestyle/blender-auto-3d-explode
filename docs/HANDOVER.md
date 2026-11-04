@@ -2,7 +2,7 @@
 
 > 交接对象：`blender-auto-3d-explode` / 本地目录名 `quest3-exploded`
 > 远程：`https://github.com/cpufreestyle/blender-auto-3d-explode.git`
-> 文档日期：2026-09-20（末次修订 2026-09-23，见下方「复核后落地」）
+> 文档日期：2026-09-20（末次修订 2026-09-27，见下方「二次修订」与「第三轮交叉验证」）
 > 交接时状态（2026-09-20，三条不同指针，别搞混）：
 > - 本地 `main` = `dc0678b`，**落后 origin/main 恰好 1 个提交、无分叉**（`gh api compare` 实测 ahead_by=1 / behind_by=0，可快进）
 > - 远程 `origin/main` = `101e7ec`（v3.2.13 拆解状态导出 GLB，由另一会话/机器推入；因 git 直连被墙，本地 `origin/main` 引用仍是过期的 `dc0678b`，见 §6）
@@ -10,12 +10,24 @@
 > - CI 现状：`main` 上 **CI workflow 连续失败**，失败点是 `Python — Lint & Test` job 的 **Lint Python** 步骤；`Build and Test` workflow 为绿
 >
 > **2026-09-23 复核后**：上述待办已全部处理（见 §1 末尾「复核后落地」与 §7）。当前 `origin/main` = `8c128cd`（图片转3D 统一调度器 #17 已合入），CI 双 job 全绿。
+> **2026-09-26 发布 v3.3.0 后**：本轮 66 个堆叠 PR（#26–#91，连同 09-23 的 15 个共 81 个）按栈序自底向上全部合入 `main`（栈链用 merge commit，#91 用 squash），内容与栈顶 `stack/065-narrow-ui-smoke` 一致；版本号 3.3.0，`package.json` 与 `index.html` 两处 `?v=` 版本键同步（有单测钉住一致）；CI 四门禁（Frontend / Python / Blender 冒烟 / sync）全绿，`npm test` 3149 条断言 0 失败。合并前 main 的备份在 `backup/pre-merge-main`。
+> **2026-09-27 发布 v3.3.1 后**：「意义」专项第一轮落地两个 PR —— **#93 拆分引擎窄颈判据重写**（导入一颗球曾被切成 8 块、圆柱 7 块；改为按 dA/da 面密度判据后球/柱/锥/环/胶囊/空心管一律保持 1 件，哑铃 808/808 正中切开；顺带修掉 `weldVertices` 传裸 `Uint32Array` 导致 `index.count` 变 `undefined` 的静默失能）、**#94 教学核心上移到侧栏首屏**（三块教学 UI 上移，AI 生成入口降级为一行，`#assembly-panel` 默认展开）。版本号 3.3.1，`package.json` / `package-lock.json` / `index.html` 两处 `?v=` 全部同步——lockfile 根版本此前漏在 3.2.11，本次补齐。CI 三门禁全绿，`npm test` 53 个套件 0 失败，`tests/geometry-split-test.mjs` 63 → 126 条。已知遗留：`smoke:parts`（8 通过 7 失败）与 `smoke:sidebar`（8 通过 9 失败）在本机改动前后失败项一字不差，属既有问题（疑似本机 Chrome / headless 行为），`smoke:narrow` 22 条全绿，待单独排查。
+> **2026-09-27 二次修订（v3.3.1 之后）**：上一条遗留的「`smoke:parts` 8 通过 7 失败、`smoke:sidebar` 8 通过 9 失败」已定位并修好，**真因不在产品，在门禁自己**——冒烟每次都拿全新 `--user-data-dir` 起 Chrome，于是必定撞上「首次使用：模型配置」引导弹窗（`index.html` 的 `#first-config-modal`）：它 `display:flex` 铺满视口、内层还是个 `iframe`，CDP 派发的鼠标事件全被这层 iframe 吃掉，所以「点部件行不激活 / 点收起钮没反应」清一色假阴性；而 Escape、H 走的是全局键盘监听，不受遮挡影响，于是只有鼠标断言红——看起来才那么像产品缺陷（`smoke:narrow` 只用 `setViewport` + DOM 断言、全程不点击，所以一直 22 条全绿，是同一条线索）。修法全在冒烟侧（`scripts/ui_smoke_lib.mjs`）：① 在页面脚本之前预置弹窗自己的 sessionStorage 钥匙 `configPromptDismissed=1`（与弹窗 `dismiss()` 同一把钥匙），并保留一条「万一还弹出来就明确报出来」的兜底断言；② 新增 `waitReady()`（加载遮罩收起 + 画布在 + 清单有行）取代每步硬 sleep 9 秒（实测就绪 3.7–4.1 秒），`hitTest()` 在点击前判定落点是否被浮层挡住，`reload()` 复用同一套等待；③ Chrome profile 目录加 pid、并把 Chrome 自己的输出留档，起不来时不再只有一句「没有 page target」（三条门禁并发跑时曾撞出过这个现象）。结果：`smoke:parts` **18/0**、`smoke:sidebar` **21/0**、`smoke:narrow` **24/0**，合计 **63 条断言 0 失败**（修前 38 通过 / 16 失败）。版本号 3.3.2。
+> **2026-09-27 第三轮交叉验证（同一真因的独立复现 + 两个被排除的假设）**：该修复经 PR #96 合入 `main`（merge `5eba183`）并发布 v3.3.2 后，另有一轮独立排查走了弯路，值得记下以免下一轮重走：
+> - **被排除的假设一：headless 页面无焦点导致 CDP 鼠标事件被丢弃。** 现象高度吻合——`document.hasFocus()` 确为 `false`，且 `ui.click()` 无效而 JS `el.click()` 完全正常。但 `Emulation.setFocusEmulationEnabled({enabled:true})` 与 `Page.bringToFront` 单独加上去都**无效**，该假设不成立。
+> - **被排除的假设二：`Input.dispatchMouseEvent` 缺 `buttons` 字段。** 按 CDP 规范补全 `mouseMoved → mousePressed(buttons:1) → mouseReleased(buttons:0)` 完整序列后仍**无效**。
+> - **决定性消融实验**：把临时加进 `ui_smoke_lib.mjs` 的 `Input.setIgnoreInputEvents({ignore:false})` 撤掉后重跑 `smoke:sidebar`，**仍是 21/0**——证明那行属冗余，已撤除，未进入提交。教训：单个探针里「加了 X 就好了」不等于 X 是根因，必须做消融；本例若不做消融，就会把一个无效的 CDP 调用当成修复固化下来。
+> - 排查中确认过的「应用侧无罪」证据（可复用）：`DOMDebugger.getEventListeners` 显示按钮监听器确实绑着；`document.elementFromPoint` 命中正确元素；`localStorage` 读写正常；`pageErrors` 为空；加载期无异常；`performance.getEntriesByType("resource")` 无 404（仅 `ai-config.json`、`favicon.ico` 两个预期 404）。
+> - **2026-10-29 3D 打印功能落地并推送**：`74a4d02` `feat(print): 可打印性预检与逐部件 STL 导出` 已进 `origin/main`（HEAD `74a4d02`）。桌面版运行时已同步到该提交（`git archive origin/main | tar -x -C ~/Apps/quest3-exploded` + launcher restart，实测首页含「打印预检 / 导出打印STL」两个按钮、`/api/health` 返回 Blender 5.1.2 可用、三个 `src/print-*.js` 与 `vendor/three/examples/jsm/exporters/STLExporter.js` 均 200）。门禁：`npm test` 全绿、`npm run build` OK、eslint 0 error（53 warnings 与基线一致，均为既有 `no-console`）。
+> - **桌面版运行时已同步到 v3.3.2**（`git archive origin/main | tar -x -C ~/Apps/quest3-exploded` + launcher restart，实测首页返回 `?v=3.3.2`、`/api/health` ok、Blender 5.1.2 可用）。
+> **2026-10-03 发版进行中（v3.3.3）**：本轮收口桌面启动器修复——启动器原先拿「端口有响应」当「服务已在运行」，本机 :3001 被 freellmapi 占住时双击桌面图标会打开别人的 Vite 首页。新增 `GET /api/identity`（即时、不 exec、不碰磁盘）供启动器认亲，陌生人占用时拒绝拉起并报出占用者，stop 只终止自己那个 PID。分支 `chore/release-3.3.3`（基于 `origin/main` = `2488162`），版本号 `package.json` / `package-lock.json` / `index.html` 两处 `?v=` 全部同步到 3.3.3；`npm test` 新增 `tests/desktop-launcher-test.mjs`（28 条）后全绿，`lint:check` 0 errors。**推送/开 PR 待 GitHub 可达后补做**（本机直连与系统代理 :1082 均不通，CONNECT 返回 503）。
+
 
 ---
 
 ## 1. 交接概览
 
-一个基于 **Three.js + Node.js + Blender** 的交互式 3D 拆解教学工具：加载/生成模型 → 爆炸视图动画 → 分步骤拆解教学 → WebXR AR 预览。当前版本 `3.2.12`（本地）/ `3.2.13`（远程）。
+一个基于 **Three.js + Node.js + Blender** 的交互式 3D 拆解教学工具：加载/生成模型 → 爆炸视图动画 → 分步骤拆解教学 → WebXR AR 预览。当前版本 `3.3.3`（远程 `origin/main` 与桌面版运行时 `~/Apps/quest3-exploded` 一致，均已包含 3D 打印功能）。
 
 **最近一轮成果：**
 
@@ -52,8 +64,8 @@
 npm install          # 安装依赖
 npm run dev          # 前端静态服务（npx serve . ，默认 3000）
 npm run server       # Node 后端（server.js，默认 3001，调用 Blender）
-npm test             # 单元（209 项）+ provider（38 项）测试
-npm run test:py      # Python 侧单测（20 项，零依赖，与 CI 的 pytest tests/ 同一批）
+npm test             # 56 个 .mjs 套件 / 3328 断言（见 harness.md §4）
+npm run test:py      # Python 侧单测（36 项，零依赖，与 CI 的 pytest tests/ 同一批）
 npm run test:e2e     # E2E
 npm run lint:all     # ESLint + StyleLint（带 --fix，会改文件）
 npm run lint:all:check  # 同上但不改文件，CI 用的就是这组
@@ -64,7 +76,7 @@ Python 侧工具**本机没装、也不必 pip 安装到系统环境**，用 `uv
 
 ```bash
 uvx ruff@0.16.8 check *.py scripts/*.py blender_scripts/*.py tests/*.py
-uvx --with numpy pytest@8 tests/ -q   # 34 passed（= ai_paint 9 + vlm_out_path 6 + img2depth 14 + 其余 5）
+uvx --with numpy pytest@8 tests/ -q   # 36 passed（= ai_paint 9 + vlm_out_path 11 + img2depth 14 + blender6_compat 2）
 ```
 
 > ⚠️ **numpy 必须显式给**：`img2depth_test` 的深度先验测试依赖 numpy，`uvx pytest@8` 默认隔离环境
@@ -85,7 +97,7 @@ uvx --with numpy pytest@8 tests/ -q   # 34 passed（= ai_paint 9 + vlm_out_path 
 
 | 模块 | 文件 | 职责 |
 |---|---|---|
-| 3D 场景引擎 | `main.js`（实测 2855 行） | Three.js 场景、OrbitControls、GLB/STL 加载、爆炸动画、乐高砖块、WebXR AR、导出 |
+| 3D 场景引擎 | `main.js`（实测 681 行） | Three.js 场景、OrbitControls、GLB/STL 加载、爆炸动画、乐高砖块、WebXR AR、导出 |
 | Node 后端 | `server.js`、`src/server-utils.js`、`src/body.js`、`src/logger.js` | 零外部依赖 HTTP 服务，调用 Blender CLI |
 | 数据/步骤 | `src/quest3-data.js`、`src/quest3-steps.js` | Quest 3 规格、分步骤拆解教学方案 |
 | 几何/材质 | `src/geometry-split.js`、`src/lego-materials.js`、`src/utils.js` | 连通分量/材质分组拆分、UnionFind、原生与乐高材质 |
@@ -203,7 +215,7 @@ Hyper3D 图生/文生共用模块私有的 `finishHyper3DTask`（轮询 → 取�
 | 优先级 | 事项 | 说明 |
 |---|---|---|
 | ~~**Next**~~ | ~~本地"真实深度"模式~~ | ✅ 已完成（见 §1）：`--mode depth` 多线索单目深度先验 + 真实厚度，离线即用与天生可拆解两个优点均保留；relief/voxel 仍可选 |
-| Later | `main.js` 继续拆分 | 实测 2886 行（`AGENTS.md` 已同步为 2886）；已抽出 `model-loaders.js`、`quest3-parts.js`、`explode-geometry.js`，建议继续拆爆炸动画 / AR / 面板 |
+| ~~Later~~ | ~~`main.js` 继续拆分~~ | ✅ 已完成：`main.js` 实测 681 行，应用外壳仅剩事件监听引导 / 桥接块与编排收尾函数 |
 | ~~Later~~ | ~~统一图片转3D调度器~~ | ✅ 已完成（见 §1）：`generateImageTo3D()` 收敛在 `src/image-to-3d-router.js`，deps 注入可单测，回退/超时规则各只有一份 |
 | ~~Later~~ | ~~E2E / Blender 冒烟进 CI~~ | ✅ 已完成（见 §1）：`blender-smoke` job 实跑两条 Blender 路径并对产物断言；断言脚本本机可复现，tarball 缓存后增量耗时约 1 分钟 |
 | Later | `Material.use_nodes` 迁移 | Blender 6.0 计划移除该属性（本机 5.1 已报 DeprecationWarning），涉及仓库所有材质创建处 |
@@ -216,11 +228,11 @@ Hyper3D 图生/文生共用模块私有的 `finishHyper3DTask`（轮询 → 取�
 ```bash
 # 1) Python 质量门（与 CI 的 Lint Python 完全一致）
 uvx ruff@0.16.8 check *.py scripts/*.py blender_scripts/*.py tests/*.py   # 期望 All checks passed!
-uvx --with numpy pytest@8 tests/ -q                                        # 期望 34 passed（不加 --with numpy 会 skip 6 项）
+uvx --with numpy pytest@8 tests/ -q                                        # 期望 36 passed（不加 --with numpy 会 skip 14 项）
 
 # 2) JS 质量门
-npm run lint:check  # 期望 0 errors（既有 26 条 warning 不阻断：CI 未加 --max-warnings 0）
-npm test         # 期望 unit 209/0、provider 38/0、router 45/0
+npm run lint:check  # 期望 0 errors（既有 52 条 warning 不阻断：CI 未加 --max-warnings 0）
+npm test         # 期望 56 套件 / 3328 断言 / 0 失败
 
 # 3) Blender 实跑（最硬的一条证据，证明 Python 侧行为没被改坏）
 /Applications/Blender.app/Contents/MacOS/Blender --background \
@@ -236,13 +248,14 @@ node /tmp/e2e_img3d.mjs    # 期望 200 / X-Success: true / X-Total-Parts: 9
 BLENDER_PATH=/Applications/Blender.app/Contents/MacOS/Blender npm run test:blender
 ```
 
-上述数字是**本地分支 `e2eb2fb` 上的实测值**。origin/main 已前进一个提交，其测试计数可能略有差异。
+上述数字是 **main `e8fb32e`（v3.3.3）上的实测值**，详见 `harness.md` §4。
 
 ---
 
 ## 9. 参考文档索引
 
 - 项目规范（**接手先读**）：`AGENTS.md` — 构建命令、模块架构、编码与 Python 脚本约定
+- 行为契约与验证台账：`spec.md` / `harness.md` — 端点、不变式、验证命令、核验结论与 Drift 台账
 - Python 质量门：`ruff.toml`（规则集收窄理由写在文件头注释里）
 - Blender 相关：`BLENDER_QUICK_START.md`、`BLENDER_MCP_INTEGRATION.md`、`BLENDER_MCP_TROUBLESHOOTING.md`、`BLENDER_PYTHON_API.md`
 - AR/WebXR：`WEBXR_AR_IMPLEMENTATION.md`、`AR_FEATURE_COMPLETE.md`、`AR_TEST_QUICKSTART.md`
@@ -250,6 +263,9 @@ BLENDER_PATH=/Applications/Blender.app/Contents/MacOS/Blender npm run test:blend
 - 排障：`TROUBLESHOOTING.md`、`EXPLOSION_TROUBLESHOOTING.md`、`BUG_REPORT.md`
 - 选型：`UNITY_MIGRATION_PLAN.md`（暂不迁移）
 - 版本：`CHANGELOG.md`、`RELEASE_NOTES_v3.0.0.md`
+- 可参考的开源项目（含实测 star / 许可 / 借了什么 / 落在哪）：`OSS_REFERENCES.md`
 
+> **2026-09-30 追加（「意义」专项第三轮）**：交付了步骤深链与分享（src/step-link.js，地址栏 #step=N + 复制本步链接按钮 + L 键 + 教案每步带链）、授课模式（src/teaching-mode.js，按钮 / T 键，AI 生成与上传入口整块收起并记忆状态）、部件清单前置为第一个面板且默认展开；新增真机门禁 smoke:teaching（26 条，已并入 smoke:ui）。参考依据与实测数据见 docs/OSS_REFERENCES.md。
+>
 > 本文档已于 2026-09-23 纳入版本控制（随本轮复核一起提交）。后续改动请直接改这里，别另起新文档——
 > `docs/` 下已经有 40+ 个阶段性总结文件，信息重复是最大的维护成本。

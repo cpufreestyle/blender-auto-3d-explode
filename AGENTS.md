@@ -19,7 +19,7 @@ npm run server
 # 运行全部单元测试
 npm test
 
-# 运行 Python 侧单元测试（15 项，零依赖，与 CI 的 pytest tests/ 同一批）
+# 运行 Python 侧单元测试（36 项，零依赖，与 CI 的 pytest tests/ 同一批）
 npm run test:py
 
 # 运行 E2E 测试
@@ -48,7 +48,7 @@ npm run format
 
 ### 1. 3D 场景引擎 — `main.js`
 
-前端入口，2886 行。负责 Three.js 场景初始化、WebGL/WebXR 检测、OrbitControls 相机控制、GLB/STL 模型加载、爆炸动画插值、乐高砖块拼接、AR 会话管理。所有用户交互与 UI 状态在此汇聚。
+前端入口，681 行。负责 Three.js 场景初始化、WebGL/WebXR 检测、OrbitControls 相机控制、GLB/STL 模型加载、爆炸动画插值、乐高砖块拼接、AR 会话管理。所有用户交互与 UI 状态在此汇聚。
 
 ### 2. Node.js 后端 — `server.js` + `src/server-utils.js` + `src/body.js` + `src/logger.js`
 
@@ -72,7 +72,11 @@ npm run format
 
 云端 3D 生成适配层。封装 Meshy、Tripo(Triple 3D)、Hyper3D(Rodin) 的 REST API 调用，输入图片 base64 返回 `{ glbBuffer, manifest }`。`provider-models.js` 维护各提供商的默认模型列表。
 
-### 6. 导出与安全支撑 — `src/export-panel.js` + `src/blender-mcp-client.js` + `scripts/blender_net_safe.py`
+### 6. 3D 打印通道 — `src/print-analyze.js` + `src/print-export.js` + `src/print-panel.js`
+
+可打印性预检与逐部件 STL 导出，纯前端计算。`print-analyze.js` 统计边邻接（水密判定）、退化三角形、尺寸/体积/表面积（含单位换算），并对比四台主流打印机构建体积；`print-export.js` 用 three 官方 `STLExporter` 把每个部件转成 Z-up 贴底的二进制 STL（缩放到毫米、只改 clone 不动现场 mesh）；`print-panel.js` 负责 UI 接线与结果渲染。与装配分析的分工：那条要 Blender 后端，这条任何时候都能点。
+
+### 7. 导出与安全支撑 — `src/export-panel.js` + `src/blender-mcp-client.js` + `scripts/blender_net_safe.py`
 
 `export-panel.js` 负责截图/教案 Markdown/GLB/STL(3D 打印，整体+选中部件)四类导出与 toast 轻提示，可变状态经 `getState()` 注入现取；`blender-mcp-client.js` 是 addon 的 TCP 客户端（行分隔 JSON，含远程执行门禁报错的可行动指引传导）；`blender_net_safe.py` 是纯 stdlib 的出站 URL/路径校验共享模块（`_safe_url`/`_safe_path`/`_open_url`），各 Blender/CLI 脚本经 importlib 按 `__file__` 定位加载。
 

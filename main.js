@@ -23,6 +23,7 @@ import { assignPartStepIndices, defaultStepGroups } from "./src/quest3-steps.js"
 import { isQuest3Model, yieldToMain } from "./src/utils.js";
 import { createARPreview } from "./src/ar-preview.js";
 import { createExportPanel } from "./src/export-panel.js";
+import { createPrintPanel } from "./src/print-panel.js";
 import { calculateExplodePos } from "./src/explode-geometry.js";
 import { autoSplitModelAsync, generatePartName } from "./src/geometry-split.js";
 import { createQuest3Model } from "./src/quest3-model.js";
@@ -30,6 +31,8 @@ import { splitModelToQuest3Regions } from "./src/quest3-parts.js";
 import { setupUpload } from "./src/upload-panel.js";
 import { setupGeneratedLibrary } from "./src/generated-library.js";
 import { setupKeyboardShortcuts } from "./src/keyboard-shortcuts.js";
+import { buildStepUrl } from "./src/step-link.js";
+import { setupTeachingMode } from "./src/teaching-mode.js";
 import { createStepDescAnimation } from "./src/step-desc.js";
 import { createRenderLoop } from "./src/render-loop.js";
 import { createSceneSetup } from "./src/scene-setup.js";
@@ -519,6 +522,32 @@ const exportPanel = createExportPanel({
     parts,
     selectedPartName: partInteractions?.getSelected?.() ?? null,
   }),
+  // 步骤深链：教案里每一步都带一条可点链接，复制链接按钮也走同一构造器
+  buildStepUrl: step => buildStepUrl(location, step),
+});
+
+// 复制当前步骤的深链（教案分发的另一半：链接即进度）
+const copyStepLinkBtn = document.getElementById("copy-step-link-btn");
+if (copyStepLinkBtn) {
+  copyStepLinkBtn.addEventListener("click", () => exportPanel.copyStepLink(displayedStep));
+}
+
+// ===== 3D 打印面板（可打印性预检 + 逐部件 STL 导出）=====
+// 部件来源与导出面板完全同源（hasCustomModel ? customModelParts : parts），
+// 同样经 getState() 惰性读——切换模型后点预检，分析的是新模型而不是旧数组。
+// 与装配分析的分工：那条要 Blender 后端，这条纯前端算，任何时候都能点。
+createPrintPanel({
+  getState: () => ({ hasCustomModel, customModelParts, parts }),
+  showToast: exportPanel.showToast,
+});
+
+// ===== 授课模式 =====
+// 投影 / 讲台上只留 3D 视图与教学控件，AI 生成、上传、配置入口整块收起。
+// 实现迁至 src/teaching-mode.js（含 storage 记忆与 .hidden 原状保护）。
+// 必须在快捷键建立之前创建：t 键要拿它的 toggle。
+const teachingMode = setupTeachingMode({
+  btn: document.getElementById("teaching-mode-btn"),
+  storage: typeof localStorage !== "undefined" ? localStorage : null,
 });
 
 // ===== 侧栏折叠 =====
@@ -538,10 +567,13 @@ setupKeyboardShortcuts({
   exportPanel,
   getDisplayedStep: () => displayedStep,
   toggleSidebar: () => (sidebar ? sidebar.toggle() : undefined),
+  toggleTeachingMode: () => (teachingMode ? teachingMode.toggle() : undefined),
 });
 
 explodeCtl.updateStepUI();
 
+// 首屏应用深链：#step=N 命中时直接落到那一步（点开别人发的链接就在同一步）
+explodeCtl.applyDeepLink();
 
 // ===== 响应窗口大小 + 渲染循环 =====
 // 实现迁至 src/render-loop.js：resize 监听与 animate 自递归整段搬迁，行为

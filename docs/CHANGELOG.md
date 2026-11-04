@@ -2,6 +2,137 @@
 
 所有项目的显著变更都将记录在此文件中。
 
+## [Unreleased] - 2026-10-28
+
+> 结合 3D 打印做功能：把「看得见的几何」变成切片软件能吃的文件。
+
+### ✨ 新增
+
+- **3D 打印通道**（src/print-analyze.js + src/print-export.js + src/print-panel.js）— 侧栏「🖨️ 3D 打印」面板两个入口：
+  - **🖨️ 打印预检**：逐部件报告能否直接送进切片软件——水密性（每条边必须恰好被两个三角形共享，否则切片器求不出闭合轮廓）、非流形边、退化三角形、构建体积（内置 Bambu X1C/P1、A1 mini、Prusa MK4、Ender-3 四台，可切换）。汇总徽章给「可直接切片」或「N 个部件有问题」，明细表列尺寸（mm）/ 体积 / 三角面数 / 逐条问题。预检只报告不修复——补面与重网格化是 Blender 3D-Print Toolbox 的职责，前端负责在导出前把问题讲清楚。
+  - **📐 导出打印STL**：逐部件导出二进制 STL。three/GLTF 是 Y-up 而构建板是 Z-up，故每个部件绕 X 转 -90° 把 +Y 落到 +Z，再 XY 居中、min.z = 0 贴底；场景单位默认 1 = 1 米，按 1000 缩放到毫米（STL 没有单位字段，切片软件不会替我们猜）。80 字节头写部件名，切片软件的库里能认人。**只改 clone 不动现场 mesh**——现场 mesh 带 homePos/explodePos，爆炸动画还在跑，改了视图会跳位。
+  - 与「🔧 装配分析」的分工：那条回答「做得出来吗」（面向工程，需 Blender 后端），这条回答「打得出来吗」（面向切片软件，纯前端算，任何时候都能点）。
+- **新增一条真机冒烟门禁**：scripts/ci_print_ui_smoke.mjs（25 条）钉住面板与控件在位、点预检出结果、明细表行数等于部件数且每行有尺寸/体积/三角面、切构建体积自动重跑、每个部件真的触发一次 .stl 下载、全程 0 运行时异常。
+- **装配定位销**（src/print-export.js + vendor/three-bvh-csg + vendor/three-mesh-bvh）— 「📐 导出打印STL」默认开启：在装配位相邻部件的贴合面上自动配对加销与孔（A 侧挖含 0.4mm 打印间隙的孔、B 侧加半露定位销），打印出来可以直接对位拼装，不用胶水不用卡扣。CSG 用 three-bvh-csg 0.0.18 的闭包子集（22+39 文件，MIT），与 vendor/three 同策略 vendored，npm 零新增依赖。世界坐标几何烘进 Brush、CDT 裁剪、1e-6 焊接容差三个坑全部实测钉死；CSG 失败自动退回无销导出，`joinFeatures:false` 可整体关闭。
+- **自动拼板**（src/print-export.js）— 「📐 导出打印STL」默认开启：按目标打印机的板面尺寸（Bambu 256² / Prusa 250×210 / Ender 220²，跟随打印预检的下拉选择）用 Skyline Bottom-Left 启发式把所有部件自动排进若干块板，文件名带板号（`B01-主机身-01.stl`），切片软件按名字排序即同板相邻，多件模型不用再手动逐个摆。件间恒留 5mm 掰件间距，放不进任何朝向的巨件自动跳过（单件导出不排版，`autoPlate:false` 可关），排版结果按输入顺序回排、按下标对齐（部件名可重复）。
+
+### 🐛 修复
+
+- **切口封盖**（src/print-export.js + src/print-analyze.js）— 「📐 导出打印STL」默认开启：导出前自动检测拆解切口的开放边界环，平面切口沿环补封面三角形把部件补成水密实体（切片器求不出闭合轮廓的「⚠️ N 条开放边」从此在导出时自动修掉）。封面朝向由边界约束传播保证（法线朝外），嵌套环（空心管端面）合成带洞环垫，非平面环 / 非流形边 / 任何自检失败一律退回原几何，绝不悄悄导出坏文件；`capHoles:false` 可关。焊接拓扑（1e-4）与打印预检同源（countEdges/weldPositions 从 print-analyze.js 导出复用），预检口径与修复口径一致。
+- **可打印性预检曾会永远报「水密」**（src/print-analyze.js）— three r186 起 `setIndex` 不再自动把裸 `Uint32Array` 包成 `BufferAttribute`，传裸数组存进去后 `index.count` 是 `undefined`，边邻接统计静默循环 0 次、开放边恒为 0。改为显式 `new Uint32BufferAttribute(next, 1)`（仓库既有正确写法见 src/geometry-split.js:239）。
+- **非索引几何的顶点索引漏了偏移**（src/print-analyze.js 四处）— `index ? index.getX(i+1) : i` 在非索引分支退化成 `i`，把同一个顶点读三遍，面积极值判退化、边统计全错。所有 STL 风格几何与所有 `toNonIndexed()` 夹具都踩这条。
+- **STL 导出先把部件贴底再缩放，部件被撑到板下**（src/print-export.js）— 克隆矩阵是 `T*R*S`，`scale.setScalar(1000)` 放在对位之后会把贴底部件撑到构建板下方（实测首顶点 z = -49.95 而非 0）。缩放移到 `updateMatrixWorld(true)` 之前。
+- **vendor 同步脚本在 worktree 里把跨文件 import 全剪掉**（scripts/vendor_three_sync.py）— `node_modules` 是指向主仓库的 symlink 时，`resolve()` 产出主仓库路径，`SRC in target.parents` 永远为假，BFS 闭包只剩入口文件自身。r186 的 `three.module.js` 正是靠 `./three.core.js` 活的，剪掉后 dev 模式 importmap 直接 404。修法是 `SRC` 自身也 `resolve()`。
+
+### 🧪 测试与工程
+
+- 单测新增三套：tests/print-analyze-test.mjs（57 断言，含水密/非流形/退化/空几何/非索引/焊接阈值）、tests/print-export-test.mjs（33 断言，含朝向/缩放/贴底/文件名消毒/二进制头）、tests/print-panel-test.mjs（42 断言，含部件来源跟随当前模型、构建体积透传、HTML 转义、分批下载、异常路径按钮恢复）。
+- 数值期望以 three 官方 `BoxGeometry` 为金标准——仓库既有手搓「焊接方块」有几个 quad 是蝶式顶序，切出的两个三角形面积不相等，拿它当数值期望会把夹具缺陷误报成模块缺陷。
+- print-export-test 59 → 71 断言：新增 planPlateLayout（输入顺序回排 / 5mm 间距分板 / 无重叠无出界 / 巨件过滤）与 exportModelSTL 集成（板号文件名 / autoPlate 开关 / 单件跳过）两组。
+- print-export-test 33 → 59 断言：新增 findJoinPairs（相邻检测/轴向/对称双销/小界面跳过）、applyJoinFeatures（孔件与销件水密、体积账逐 mm³ 对上、空输入返回 null）、exportModelSTL 集成（默认开启、开关关闭、现场 mesh 不变）四组。
+- 门禁：npm test 58 → 61 套件、3275 → 3774+ 断言，0 失败；test:py 36 项 OK；build compiled successfully；lint:all:check 0 error。
+
+## [v3.3.3] - 2026-09-30
+
+> 「意义」专项第三轮：直面「Tripo AI 已经能拆 3D」的冲击。生成与重建这一层确实被商品化了，本轮不追，转而加固它给不了的三件事——确定性的拆分、可复现的步骤、可分发的那条链接。
+
+### ✨ 新增
+
+- **步骤深链与分享**（src/step-link.js）— 「学到第几步」写进地址栏 #step=3：点开别人发的链接就落在同一步；换模型、刷新、点浏览器历史都同步。写回走 replaceState 而不是 pushState（逐步点下来不会把历史灌成几十条），且只在值真的变了时才碰 history——updateStepUI 每帧都被调，白写会把历史写穿。用 hash 而非 search：静态托管与 file:// 直开都能用，也不会让 step= 参与本仓库按 ?v= 给的 immutable 缓存键。配套：复制本步链接按钮与快捷键 L，以及教案里每一步都带一条可点链接——讲义可以直接发到群里。设计边界：深链只是 currentStep / displayedStep 的镜像，hashchange 只触发一次 goToStep，永远不反向当真相。
+- **授课模式**（src/teaching-mode.js）— 一键把 AI 绘画、上传自定义模型、AI 配置入口与页脚提示整块收起，只留 3D 视图与教学控件；按钮加快捷键 T，状态记忆在 localStorage 的 quest3-teaching-mode（讲台上刷新页面不该又见到满屏生成面板）。收起复用仓库既有的 .hidden，不新增 CSS。有个坑：#blender-banner 常态就是 .hidden，一刀切减类会把它「还」出来，所以收起前先记原状、还原时按原状决定去不去类。
+
+### 🐛 修复
+
+- **桌面启动器会把别人的页面当成自己的打开**（scripts/mac/quest3-launcher + src/routes-identity.js）— 本机 :3001 早已被 freellmapi 占住，双击桌面图标后启动器 curl 到「端口有响应」就认定「服务已在运行」，于是打开的是那个 Vite 脚手架首页，通知却写着正常——用户双击得到的是个陌生应用。根因是启动器把「端口活着」当成了「是我的服务」。/api/health 顶不了这个缺：它要 execFile 跑一次 blender --version，最长 10s，Blender 慢起时会被误判成陌生人。因此新增 GET /api/identity：不 exec、不碰磁盘、不读配置，即时回 { app, name, version, pid, port }，启动器只认 app 是否等于 APP_ID。端口被陌生人占住时明确拒绝拉起并报出占用者；stop 只终止 identity 里自己那个 PID，不再对端口上所有监听进程下手——此前整端口扫 kill 会把别人的服务一起带走。identity_body 走 curl --max-time 2，识别不出的端口直接判陌生人，不会让启动器卡在黑屏。
+- **桌面启动器测试框架并发**（tests/desktop-launcher-test.mjs）— 该套件的 it() 自己 await 用例，而 describe() 的函数体是同步调用 it(...) 且没人 await 它，于是 6 个用例同时开跑，互相抢同一个端口 3457 与同一套夹具：日志里所有 ▶ 标题先打、assert 后打，用例异常变成 unhandledRejection 直接打挂进程（症状是 status 断言里 JSON.parse(body).pid 崩在空串上）。改为 it() 只入队、runner 串行 await，单例异常转成 assert(false) 而不是掀桌。顺带修掉三处会误伤的点：kill(0) 会射杀整个进程组（测试自己也在里面）故改成按 PID 定点 kill；pidAlive 对 pid<=0 补 false；4 处裸 process.kill 收敛到 killPid。
+
+### 🔧 依赖
+
+- **undici 8.10.0 → 8.10.2**（#99）— 跨源缓存投毒、BalancedPool 丢弃连接选项、WebSocket 子协议选择等多条高/中危漏洞（GHSA-vp8m-p9jh-q5pm / GHSA-w293-vg96-wgc3 / GHSA-rfgv-xxqx-mfg5）。
+
+### 🎨 界面
+
+- **部件清单成为第一个面板且默认展开**— 教学核心（这一步拆什么、用哪些工具、共几个部件）原先排在 AI 绘画、上传、装配分析之后的折叠层里。现在它排在 AI 生成入口之前并默认展开，AI 绘画与上传保持默认折叠。
+
+### 🧪 测试与工程
+
+- **新增一条真机冒烟门禁**：scripts/ci_teaching_ui_smoke.mjs（26 条）钉住「部件清单默认展开且排在 AI 绘画之前」「授课模式四处收起再还原」「按方向键后地址栏跟着写成 #step=N」「带 #step=3 打开即落在第 3 步」「全程 0 运行时异常」，已挂进 npm run smoke:ui。三个既有门禁未被拖红：smoke:parts 18/0、smoke:sidebar 21/0、smoke:narrow 24/0。
+- 单测：新增 tests/step-link-test.mjs（30 条）与 tests/teaching-mode-test.mjs（38 条，后者当场抓出「一刀切减类会把常态隐藏的横幅还出来」这个设计缺陷），并给 explode-controller / export-panel / keyboard-shortcuts 三个既有套件补 43 条用例。npm test 由 3218 增至 3328 条断言 0 失败；lint:check 0 errors。
+- **新增桌面启动器测试**：tests/desktop-launcher-test.mjs（28 条）钉住「端口被别的程序占用时拒绝拉起、stop 一个都不杀」「端口是自己的就正常拉起、stop 只杀自己那个 PID」「identity 缺字段或端口不符都判陌生人」，已挂进 npm test。做过变异验证：把 is_own_service 的 grep 判据改成恒真，立刻报 8 失败并精准复现「误开别人的页面」这个原始 bug。启动器本身读 QUEST3_* 环境变量，手工搭 foreign stub 复现出的行为是正确的——接手时见到的红全是测试框架并发造成的假象。
+- 排查实录（值得留下）：headless 视口只有 717px 高而侧栏内容约 1.4k px，按钮在折叠线以下时 document.elementsFromPoint 返回空数组、CDP 的点直接落到画布上——「点了没反应」在这里是假阴性，冒烟里必须先 scrollIntoView 再取矩形。另一条：连续两次方向键间隔若小于 600ms，第二次会被 goToStep 的 isAnimating 守卫挡掉，冒烟里要等动画落定。
+- 文档：新增 docs/OSS_REFERENCES.md——本轮调研过的开源项目清单（star / 许可 / 最近推送均为 2026-09-30 GitHub API 实测）、各自借了什么、落在哪个文件，以及「这个细分领域最高只有 2 星、没有同类作业可抄」这个关键发现。
+
+## [v3.3.2] - 2026-09-27
+
+> 「意义」专项第二轮：把三条真机 UI 门禁从「本机常年红」修成真的能跑——它们此前从未在这台机器上绿过，等于本地唯一的真实浏览器覆盖形同虚设。
+
+### 🐛 修复
+
+- **UI 冒烟被首屏引导弹窗挡住**（本 PR）— `smoke:parts` 长期 8 通过 7 失败、`smoke:sidebar` 8 通过 9 失败，且失败项在改动前后一字不差。真因是冒烟每次都用全新的 `--user-data-dir` 起 Chrome，于是必定弹「首次使用：模型配置」引导弹窗（`#first-config-modal`）：它铺满视口、内层还是一个 `iframe`，CDP 派发的鼠标事件被整层吃掉，于是「点部件行不激活、点收起钮没反应」全是假阴性；键盘路径（Escape / H）走全局监听不受影响，因此只有鼠标断言红。修法在 `scripts/ui_smoke_lib.mjs`：**在页面脚本之前**预置弹窗自己的 sessionStorage 钥匙 `configPromptDismissed=1`（与弹窗 `dismiss()` 同一把钥匙），另留一条「万一还弹出来就明确报出来并收掉」的兜底断言——不再让十几条断言陪葬。
+
+### 🧪 测试与工程
+
+- **冒烟骨架三项加固**（同一 PR）— ① `waitReady()`：按「加载遮罩收起 + 没有错误框 + 画布在 + 清单有行」判就绪，取代每步硬 `sleep(9000)`（实测就绪耗时 3.7–4.1 秒）；② `hitTest()`：点击前判定落点是否被浮层挡住，让这类缺陷当场显形而不是伪装成产品行为；`reload()` 复用同一套等待；③ Chrome profile 目录加 `pid`、并把 Chrome 自己的输出留档，调试端口起不来时回吐真正原因（此前并发跑三条门禁只会得到一句「没有 page target」）。
+- 门禁断言数：`smoke:parts` 15 → **18**、`smoke:sidebar` 17 → **21**、`smoke:narrow` 22 → **24**（各加「页面就绪」「没被弹窗遮挡」，部件与侧栏各加一条命中测试）。现状合计 **63 条断言 0 失败**（修前 38 通过 / 16 失败）。
+- 实测数字：部件交互——聚焦后亮像素 0.0124 → 0.3955（32 倍），isolate 差分 41.9%（相机自转漂移对照 3.27%）、恢复 39.3%、Escape 40.6%；侧栏——收起后整体平移 `matrix(1, 0, 0, 1, -364, 0)` 移出视口、localStorage 写回 `collapsed` / `open`、刷新后仍收起；窄屏 24 条全绿。
+
+## [v3.3.1] - 2026-09-27
+
+> 「意义」专项第一轮：把产品的真正价值（拆解教学）摆到台面上，同时修掉一个会把凸体当装配体切碎的拆分引擎缺陷。
+
+### 🐛 修复
+
+- **窄颈切面判据重写**（#93）— 导入一个球曾被切成 8 块、一个圆柱 7 块。旧判据把**面数**按质心分桶，盒壳中段只有侧面穿过、面数远低于两端盖满一桶的端盖，于是实心盒壳被当成细颈；细分少时中段还会出现空桶的梳齿伪影。改为按 **dA/da（沿轴面密度）** 判据：每个面按「面积 × (1−|n·a|) / 沿轴跨度」摊进它**跨过的所有桶**，按与桶的重叠长度精确分配；端盖法向与轴平行、权重恰好为 0，天然不计入——凸体的截面周长恒定，剖面就是一条平线，只有真细颈才会在中间凹下去。另加两条否决：颈部整段粗细一致（排掉锥体、球顶的斜坡）、两侧都够厚且各至少 2 个桶（排掉球面极肩与贴边细杆这类单侧薄结构）。切口取整段最窄的一格，哑铃由 792/824 修正为 **808/808 正中切开**。
+- **`weldVertices` 索引失能**（#93）— `setIndex` 传裸 `Uint32Array` 时 three 不会包装成 BufferAttribute，`index.count` 变成 `undefined`，下游按面数切分静默失效；改用 `Uint32BufferAttribute`。
+
+### 🎨 界面
+
+- **教学核心上移到首屏**（#94）— 侧栏第一屏原本是「⚙️ 配置 AI 模型 / 图片转3D」这颗满幅渐变主 CTA，步骤进度、爆炸深度、下一步全被压在下面。教学三块整体上移到 Blender 横幅之后；AI 配置入口降级为自适应宽度、低对比度的一行（缺配置时仍保留橙色脉冲提醒）；`#assembly-panel` 默认展开——云端只给几何体，「做得出来吗」的可制造性评分是本地独有价值。纯 DOM 顺序 + 样式，不改任何 id 与事件绑定。
+
+### 🧪 测试与工程
+
+- `tests/geometry-split-test.mjs` **63 → 126 条**：18 个形状的「不该拆 / 该拆」用例（含空心管、胶囊、半球、薄壁管、球头连杆等历史假阳性）、面数守恒、退化输入与形参边界；全量 **53 个套件 0 失败**。
+- 性能实测：232,704 面大哑铃 102ms 切 2 块且面数守恒，130,560 面球体 34ms 不误切。
+- 补齐 `package-lock.json` 根版本同步（v3.3.0 发布时漏改，本次一并对齐到 3.3.1）。
+
+## [v3.3.0] - 2026-09-26
+
+> 本版覆盖 v3.2.8 之后的全部变更（81 个 PR，#10–#91，其中 2026-09-23 15 个 / 2026-09-26 66 个）。期间的 v3.2.9 与栈内 3.2.10–3.2.13 只是过程版本号推进，未单独发布，改动一并归入本条目。
+
+### ✨ 新功能
+
+- **部件清单可交互**（#87）— `.parts-grid` 从纯展示变成可操作：点部件行即选中高亮并把相机聚焦到它，再点取消；点行尾眼睛按钮进入 isolate（其余 `mesh.visible = false`），`Esc` / 下一步 / 「全部显示」均可复原。顺带修掉一个只有真机才暴露的致命回归：`refresh()` 无条件重写眼睛按钮文本，与监听 `.parts-grid` 的 MutationObserver 互相喂养，点一下「单独显示」渲染进程就被拖死、整页无响应；修复双保险为「写前先比」加上「只在行集合真的变化时才 refresh」。
+- **侧栏可折叠**（#88）— 340px 工具面板可一键收起到视口外，快捷键 `H`，折叠态存 `localStorage("quest3-sidebar")`；收起时给面板打 `inert`，避免键盘用户 Tab 钻进看不见的面板，焦点也跟着面板走；不支持 `inert` 的浏览器退化成「只是看不见」。另补 `prefers-reduced-motion` 尊重。
+- **窄屏响应式双路径**（#90）— `style.css` 新增移动端 / 窄屏媒体块：`width <= 560px` 下 overlay 全宽、触控目标 ≥ 40px、滑块轨道加高到 7px、时间轴控件与 AI 输入行 wrap 独占整行；桌面窗口拉窄走媒体查询，平板竖屏走 `.mobile-device`（UA 检测），两条路径互补。可读性微调：`.panel-header` 加 0.3px letter-spacing，`.step-desc` 与 `.status-box` 的 padding 收敛到间距令牌。
+- **图片转3D 统一调度**（#17、#16）— 本地 / 云端 / VLM 三条图片转3D 路径收敛为统一调度器，新增「真实深度」模式（多线索单目先验 + 实体厚度）；VLM 生成产物 `_vlm_generated_blender.py` 移出版本控制（#19）。
+
+### 🧱 模块化与工程化
+
+- **前端模块化收尾**（#22–#42、#54–#64）— `main.js` 3399 → 659 行，逐一抽出 `ar-preview` / `export-panel` / `upload-panel` / `explode-controller` / `scene-setup` / `quest3-steps` / `lighting` / `render-loop` / `custom-model-loader` 等模块；`src/` 从 12 个文件长到 57 个（含 `panels/`、`providers/` 两层）。
+- **服务端模块化**（#43–#53）— `server.js` 1776 → 391 行，AI 配置、静态服务、路由、AI 调用、代理探测、闭环任务、Blender 任务与 MCP 客户端各自成模块（`src/ai-config.js`、`src/routes-generate.js`、`src/closed-loop.js` 等）。
+- **three 同构镜像**（#86）— `vendor/three/` 纳入版本控制，dev 与生产共用同一套 three 0.186，importmap 直指 `vendor/three/build/three.module.js`，消除「开发能跑、线上报错」的分叉；`npm run vendor:sync` 负责同步，CI 有镜像守卫。
+- **死代码与单一数据源**（#65、#72、#74、#76、#80）— 删掉零引用的 `partInfo` / `SERVER_PORT` / `part-tooltip` / `upload-enhancement.css`，以及「写入即蒸发」的 `providers.hyper3d.mode`；模型默认值、API_BASE、配置提醒规则收口共享模块，静态页面改走单一数据源；eslint 把游离在外的 `src/` 文件纳入对应 files 块，告警从 48 条压到 43 条。
+
+### 🧪 测试与质量门禁
+
+- **单测规模** — 测试文件 22 → 56 个，`npm test` 3149 条断言 0 失败；为乐高材质、爆炸几何、`splitSpatially`、`model-loaders`、`quest3Specs`、`validateImageFile`、`nearestTemplateIndex` 等补首批直接单测，并普遍附变异验证。
+- **真机 UI 冒烟门禁**（#87、#88、#90）— 新增 `scripts/ui_smoke_lib.mjs`（headless Chrome + CDP 骨架共用）与三套冒烟：部件交互 15 条断言（配对截图差分证明 isolate 真的让其它部件从画面里消失）、侧栏折叠 17 条、窄屏 22 条，`npm run smoke:ui` 一次跑三个。
+- **CI 门禁**（#10、#12、#21、#91）— `blender-smoke` job 用真实 Blender 跑拆分与建模冒烟；`ci.yml` 的 `pull_request.branches` 补上 `'stack/**'`，此前 base 指向 `stack/*` 的堆叠 PR 一个门禁都不触发；合并重叠 workflow、lint 步骤只检查不改文件、`test:py` 跑满 15 项。Python 侧收敛 ruff 规则集并修掉全部 93 项真实缺陷，同时修掉 Linux CI 必红的导出路径断言（#10）。
+
+### 🐛 修复
+
+- URDF 外部 mesh 引用的「需单独上传」提示不再被抹掉（#67，行为变更）。
+- `providers.meshy.model` 取不到元素时静默用默认值的坑修掉（#79）。
+- Blender 脚本两处 5.x 兼容缺陷修掉（`--` 分隔符参数解析 + Principled BSDF 本地化节点名，#14）；`use_nodes` 迁移至 Blender 6.0 兼容写法并修中文界面取节点（#20，含守卫测试）。
+- VLM 图片转3D 改用每次请求唯一的临时文件路径，修并发互踩（#13）。
+- 纯图标按钮补 `title`、数字读数改等宽、键盘焦点环统一（#89）。
+- 文档里四处「悬停/点击看部件信息」的过期描述修正（#77）。
+
+### 📄 文档
+
+- README 补齐部件交互 / 侧栏折叠 / 窄屏自适应与 `H` 快捷键，刷新项目结构、开发与质量门命令。
+- `docs/HANDOVER.md`、`docs/ARCH-ROADMAP.md` 回填模块化与巩固轮状态。
+
 ## [v3.2.3] - 2026-07-20
 
 ### 🐛 修复 · 图片转 3D VLM 脚本与文档

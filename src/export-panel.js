@@ -1,9 +1,8 @@
 /**
- * 导出与轻提示（截图 / 教案 Markdown / GLB / STL 3D 打印）——从 main.js 抽取，行为不变。
+ * 导出与轻提示（截图 / 教案 Markdown / GLB）——从 main.js 抽取，行为不变。
  *
  * 原 main.js 1826-2023 行的导出块：toast 提示、时间戳、下载入口、截图导出、教案导出
- * （Markdown 文件 + 剪贴板）、GLB 导出六个职能，外加四个按钮绑定；后续新增 STL
- * 3D 打印导出（整体 + 当前选中部件，二进制 STL）。
+ * （Markdown 文件 + 剪贴板）、GLB 导出六个职能，外加四个按钮绑定。
  *
  * 对主模块的依赖分两类，注入方式 deliberately 不同：
  *   - 稳定引用（const，不会重赋值）：renderer / scene / camera / questGroup /
@@ -17,7 +16,8 @@
  */
 
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
-import { STLExporter } from "three/examples/jsm/exporters/STLExporter.js";
+import { buildSplitManifest, serializeSplitManifest } from "./split-manifest.js";
+import { API_BASE } from "./config.js";
 
 export function createExportPanel({
   renderer,
@@ -29,8 +29,16 @@ export function createExportPanel({
   // 仅测试注入的缝：生产中恒为 three 的 GLTFExporter。GLTFExporter.parse 在 Node 里
   // 会卡在 FileReader/纹理路径上，假实现让 GLB 的成功/失败回调用例不依赖浏览器。
   GLTFExporterClass = GLTFExporter,
-  // STL 同样走注入缝：STLExporter.parse 是同步调用，假实现驱动成功/抛错两条路径。
-  STLExporterClass = STLExporter,
+  // 步骤深链构造器（src/step-link.js）。缺省 null 时教案里不带链接、复制链接按钮
+  // 明确报错，而不是硬拼一个错的地址。由 main.js 注入，测试不必管地址栏。
+  buildStepUrl = null,
+  // 部件级清单构造函数（src/split-manifest.js）。仅测试注入的缝：生产中恒为
+  // buildSplitManifest。与 GLTFExporterClass 同一套路——Node 里跑不了真 three
+  // 几何，假实现让「清单内容正确性」用例不依赖浏览器。
+  buildManifest,
+  // 部件清单落盘 + 打开重放页。生产中走 API_BASE + window.open；
+  // 测试注入假实现即可断言 URL 拼法与失败路径，不必真起服务。
+  manifestApi = null,
 }) {
   // ===== 可变状态（原 main.js 的模块级 let，会随加载/清除自定义模型重赋值）=====
   // 不能在建厂时拷一份快照：按钮点击发生在模块求值之后，必须每次读最新值。
@@ -41,7 +49,6 @@ export function createExportPanel({
   let customModelParts;
   let stepGroups;
   let parts;
-  let selectedPartName;
 
   function syncState() {
     const s = getState();
@@ -52,7 +59,6 @@ export function createExportPanel({
     customModelParts = s.customModelParts;
     stepGroups = s.stepGroups;
     parts = s.parts;
-    selectedPartName = s.selectedPartName || null;
   }
 
   function getToastWrap() {
@@ -155,6 +161,10 @@ export function createExportPanel({
       lines.push(`- **涉及部件（${stepParts.length}）**：${stepParts.length ? stepParts.join("、") : "无（概览步骤）"}`);
       const tools = step.tools || [];
       lines.push(`- **所需工具**：${tools.length ? tools.map(stripTags).join("、") : "无需工具"}`);
+      // 每一步一条深链：讲义可以直接发到群里，点开落在同一步（Tripo 之类的一次性
+      // 爆炸图给不了这个——那张图里没有「课程进度」这回事）。
+      const stepUrl = typeof buildStepUrl === "function" ? buildStepUrl(idx + 1) : "";
+      if (stepUrl) lines.push(`- **本步链接**：${stepUrl}`);
       lines.push("");
     });
 
@@ -188,33 +198,59 @@ export function createExportPanel({
     }
   }
 
-  // 复制教案到剪贴板：安全上下文用 Clipboard API，否则回退 execCommand
+  // 复制到剪贴板：安全上下文用 Clipboard API，否则回退 execCommand。
+  // 教案与步骤深链两条路径共用，fallback 的实现只有一份。
+  function writeClipboard(text, ok, fail) {
+    const fallback = () => {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const copied = document.execCommand && document.execCommand("copy");
+        ta.remove();
+        copied ? ok() : fail("浏览器不支持复制");
+      } catch (e) {
+        fail(e.message);
+      }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(ok).catch(fallback);
+    } else {
+      fallback();
+    }
+  }
+
+  // 复制教案到剪贴板
   function copyLessonMarkdown() {
     try {
       const text = buildLessonMarkdown();
-      const ok = () => showToast("📋 教案已复制到剪贴板", "success");
-      const fail = (msg) => showToast("❌ 复制失败：" + msg, "error");
-      const fallback = () => {
-        try {
-          const ta = document.createElement("textarea");
-          ta.value = text;
-          ta.style.position = "fixed";
-          ta.style.opacity = "0";
-          document.body.appendChild(ta);
-          ta.focus();
-          ta.select();
-          const copied = document.execCommand && document.execCommand("copy");
-          ta.remove();
-          copied ? ok() : fail("浏览器不支持复制");
-        } catch (e) {
-          fail(e.message);
-        }
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(ok).catch(fallback);
-      } else {
-        fallback();
+      writeClipboard(
+        text,
+        () => showToast("📋 教案已复制到剪贴板", "success"),
+        msg => showToast("❌ 复制失败：" + msg, "error"),
+      );
+    } catch (err) {
+      showToast("❌ 复制失败：" + err.message, "error");
+    }
+  }
+
+  // 复制「当前这一步」的深链：讲课/答疑时说「打开这个链接就是我此刻讲的地方」
+  function copyStepLink(step) {
+    try {
+      const url = typeof buildStepUrl === "function" ? buildStepUrl(step) : "";
+      if (!url) {
+        showToast("❌ 当前环境无法生成步骤链接", "error");
+        return;
       }
+      writeClipboard(
+        url,
+        () => showToast("🔗 已复制第 " + step + " 步的链接", "success"),
+        msg => showToast("❌ 复制失败：" + msg, "error"),
+      );
     } catch (err) {
       showToast("❌ 复制失败：" + err.message, "error");
     }
@@ -249,74 +285,81 @@ export function createExportPanel({
     }
   }
 
-  // ===== STL 导出（3D 打印）：二进制 STL =====
-  // 导出的是当前显示状态：整体打印建议先把拆解滑块调回 0（合体）再导出；
-  // AI 生成/照片转 3D 的网格常不水密，切片器需自行修复。
-  function exportSTLWhole() {
+  // ===== 部件级清单导出：autoSplitModel 的产出 -> 可交换 JSON =====
+  // 与 GLB 导出的分工：GLB 是「看得见的几何」，manifest 是「可编程的索引」——
+  // 部件名 / 三角形数 / 体积 / 表面积 / 包围盒 / 质心 / 爆炸位置。刷新页面、
+  // 换设备、交给别的工具做数据驱动 UI 或离线重放时，不必重跑拆分。
+  function exportSplitManifest() {
     syncState();
     try {
-      const target = hasCustomModel ? customModelGroup : questGroup;
-      if (!target || target.children.length === 0) {
-        showToast("❌ 当前没有可导出的模型", "error");
+      const partsInModel = hasCustomModel ? customModelParts : parts;
+      if (!partsInModel || partsInModel.length === 0) {
+        showToast("❌ 当前没有可导出的部件", "error");
         return;
       }
-      const exporter = new STLExporterClass();
-      const data = exporter.parse(target, { binary: true });
-      const blob = new Blob([data], { type: "model/stl" });
+      // camera 传入：manifest 里的 explodePos 与屏幕上看到的是同一个算法的结果
+      const manifest = buildManifest(partsInModel, { model: currentModelName, camera });
+      const blob = new Blob([serializeSplitManifest(manifest)], {
+        type: "application/json",
+      });
       const url = URL.createObjectURL(blob);
-      triggerDownload(url, `${currentModelName}-拆解步骤${displayedStep}-${fileTimestamp()}.stl`);
+      triggerDownload(url, `${currentModelName}-部件清单-${fileTimestamp()}.json`);
       setTimeout(() => URL.revokeObjectURL(url), 2000);
-      showToast("🖨️ STL 已导出（当前拆解状态）", "success");
+      const skipped = manifest.summary.skipped;
+      showToast(
+        `📋 部件清单已导出（${manifest.totalParts} 个部件` +
+          (skipped > 0 ? `，跳过 ${skipped} 个异常项` : "") +
+          "）",
+        skipped > 0 ? "info" : "success",
+      );
     } catch (err) {
-      showToast("❌ STL 导出失败：" + err.message, "error");
+      showToast("❌ 清单导出失败：" + (err && err.message ? err.message : err), "error");
+    }
+  }
+  // ===== 清单落盘并打开重放页 =====
+  // exportSplitManifest 走 blob: URL，刷新即失效也没法分享；replay.html 需要
+  // 可寻址的 ?manifest=<URL>。所以这条路径先把 manifest POST 到
+  // /api/manifest 落进 models/generated/（静态服务托管），再用返回的 url
+  // 拼重放页地址。落盘失败时回退到下载，不让用户白点一次。
+  async function saveManifestAndReplay() {
+    syncState();
+    try {
+      const partsInModel = hasCustomModel ? customModelParts : parts;
+      if (!partsInModel || partsInModel.length === 0) {
+        showToast("❌ 当前没有可导出的部件", "error");
+        return;
+      }
+      const manifest = buildManifest(partsInModel, { model: currentModelName, camera });
+      const api = manifestApi || defaultManifestApi;
+      showToast("📤 正在保存部件清单...", "info");
+      const result = await api(manifest, currentModelName);
+      if (!result || !result.success || !result.url) {
+        throw new Error((result && result.error) || "服务端未返回可寻址地址");
+      }
+      // 重放页与前端同源（都在静态根下），用相对地址即可，
+      // 换端口 / 换机器部署时不需要改这里。
+      const replayUrl = `replay.html?manifest=${encodeURIComponent(result.url)}`;
+      window.open(replayUrl, "_blank", "noopener");
+      showToast(`🎬 已打开重放页（${manifest.totalParts} 个部件）`, "success");
+    } catch (err) {
+      // 落盘失败（服务没起 / 磁盘满 / 413）时回退到下载：
+      // 用户至少拿到文件，重放页可以之后手动用 ?manifest= 指向它。
+      // 注意顺序：先调用导出（它自己会弹成功 toast），再把降级说明补上。
+      // 反过来的话降级说明会被成功 toast 盖掉，用户会以为已经存进服务端。
+      exportSplitManifest();
+      showToast("⚠️ 未能保存到服务端，已改为下载文件", "info");
     }
   }
 
-  // 深度优先在组里按名字找部件网格：先精确匹配，找不到再退到包含匹配（部件清单的
-  // 名字可能只是网格名的子串）。找到后把该对象直接交给 STLExporter.parse。
-  function findPartMesh(root, name) {
-    if (!root || !Array.isArray(root.children)) return null;
-    let exact = null;
-    let loose = null;
-    const walk = (node) => {
-      if (exact) return;
-      for (const child of node.children) {
-        if (child.name === name) {
-          exact = child;
-          return;
-        }
-        if (!loose && child.name && String(child.name).includes(name)) loose = child;
-        if (child.children) walk(child);
-      }
-    };
-    walk(root);
-    return exact || loose;
-  }
-
-  // 导出当前选中/单独显示的部件（部件清单点击或 isolate 的那个）为二进制 STL
-  function exportSTLPart() {
-    syncState();
-    try {
-      if (!selectedPartName) {
-        showToast("❌ 请先在部件清单中选中部件", "error");
-        return;
-      }
-      const target = hasCustomModel ? customModelGroup : questGroup;
-      const mesh = findPartMesh(target, selectedPartName);
-      if (!mesh) {
-        showToast(`❌ 未找到部件“${selectedPartName}”`, "error");
-        return;
-      }
-      const exporter = new STLExporterClass();
-      const data = exporter.parse(mesh, { binary: true });
-      const blob = new Blob([data], { type: "model/stl" });
-      const url = URL.createObjectURL(blob);
-      triggerDownload(url, `${currentModelName}-部件${selectedPartName}-${fileTimestamp()}.stl`);
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-      showToast(`🖨️ 部件 STL 已导出：${selectedPartName}`, "success");
-    } catch (err) {
-      showToast("❌ 部件 STL 导出失败：" + err.message, "error");
-    }
+  // 默认实现：POST 到 API_BASE。单独抽出来是为了测试能整块替换，
+  // 也为了将来换存储后端（比如对象存储）只改这一处。
+  async function defaultManifestApi(manifest, modelName) {
+    const resp = await fetch(`${API_BASE}/api/manifest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ manifest, name: modelName }),
+    });
+    return resp.json();
   }
 
   const shotBtn = document.getElementById("shot-btn");
@@ -327,10 +370,10 @@ export function createExportPanel({
   if (copyMdBtn) copyMdBtn.addEventListener("click", copyLessonMarkdown);
   const exportGlbBtn = document.getElementById("export-glb-btn");
   if (exportGlbBtn) exportGlbBtn.addEventListener("click", exportGLB);
-  const exportStlBtn = document.getElementById("export-stl-btn");
-  if (exportStlBtn) exportStlBtn.addEventListener("click", exportSTLWhole);
-  const exportStlPartBtn = document.getElementById("export-stl-part-btn");
-  if (exportStlPartBtn) exportStlPartBtn.addEventListener("click", exportSTLPart);
+  const exportManifestBtn = document.getElementById("export-manifest-btn");
+  if (exportManifestBtn) exportManifestBtn.addEventListener("click", exportSplitManifest);
+  const replayManifestBtn = document.getElementById("replay-manifest-btn");
+  if (replayManifestBtn) replayManifestBtn.addEventListener("click", saveManifestAndReplay);
   return {
     showToast,
     getToastWrap,
@@ -341,8 +384,9 @@ export function createExportPanel({
     exportScreenshot,
     exportLessonMarkdown,
     copyLessonMarkdown,
+    copyStepLink,
     exportGLB,
-    exportSTLWhole,
-    exportSTLPart,
+    exportSplitManifest,
+    saveManifestAndReplay,
   };
 }
