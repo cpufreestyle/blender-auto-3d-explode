@@ -190,9 +190,11 @@ async function handleManifestSave(req, res) {
     const fileName = `${safeName}-manifest-${ts}.json`;
 
     fs.mkdirSync(GENERATED_DIR, { recursive: true });
-    const outPath = path.join(GENERATED_DIR, fileName);
-    // 防御路径穿越：join 之后仍要确认落点在 GENERATED_DIR 内
-    if (!outPath.startsWith(GENERATED_DIR)) {
+    const outPath = path.resolve(path.join(GENERATED_DIR, fileName));
+    // 防御路径穿越：resolve 后确认落点在 GENERATED_DIR 内（带分隔符边界，防同级前缀误放行）；
+    // fileName 本身已由 safeName 白名单清洗（路径分隔符与点号均被替换），此处为纵深防御
+    const genRoot = path.resolve(GENERATED_DIR);
+    if (outPath !== genRoot && !outPath.startsWith(genRoot + path.sep)) {
       sendJSON(res, 400, { success: false, error: "非法文件名" });
       return;
     }
