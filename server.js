@@ -181,7 +181,23 @@ const {
   GENERATED_DIR,
   BLENDER_PATH,
   execFile: execFileAsync,
-});
+})
+
+
+/**
+ * 身份端点：返回本服务的 app 标记、版本、pid 与端口。
+ * 桌面启动器（scripts/mac/quest3-launcher）据此判断端口上监听的是不是本项目：
+ * 端口被别的程序占用时拒绝打开它的页面，也避免把别人的 HTTP 200 当成就绪。
+ * app 字段必须与启动器里的 APP_ID 一致。
+ */
+async function handleIdentity(req, res) {
+  sendJSON(res, 200, {
+    app: "blender-auto-3d-explode",
+    version: "3.2.13",
+    pid: process.pid,
+    port: Number(PORT),
+  });
+}
 
 // ── AI 生成类路由（图片转3D / 文生3D）──────────────────
 // 实现（finishImageTo3D / handleImageTo3D / handleTextTo3D / runLocalTextTo3D）
@@ -286,39 +302,44 @@ const server = http.createServer(
     const url = new URL(req.url, `http://localhost:${PORT}`);
     log.info(`${req.method} ${url.pathname}`);
 
-    if (req.method === "GET" && url.pathname === "/api/health") {
+    // 身份端点：桌面启动器（scripts/mac/quest3-launcher）据此判断端口上的
+    // 服务是不是本项目——端口被别的程序占用时不打开它的页面、也不误报
+    // 「服务已在运行」。app 标记必须与启动器里的 APP_ID 一致。
+    if (req.method === "GET" && url.pathname === "/api/identity") {
+    await handleIdentity(req, res);
+    } else if (req.method === "GET" && url.pathname === "/api/health") {
     await handleHealth(req, res);
-  } else if (req.method === "GET" && url.pathname === "/api/generated") {
+    } else if (req.method === "GET" && url.pathname === "/api/generated") {
     await handleGeneratedList(req, res);
-  } else if (req.method === "POST" && url.pathname === "/api/blender/launch") {
+    } else if (req.method === "POST" && url.pathname === "/api/blender/launch") {
     await handleLaunchBlender(req, res);
-  } else if (req.method === "POST" && url.pathname === "/api/split") {
+    } else if (req.method === "POST" && url.pathname === "/api/split") {
     await handleSplit(req, res);
-  } else if (req.method === "POST" && url.pathname === "/api/ai-paint") {
+    } else if (req.method === "POST" && url.pathname === "/api/ai-paint") {
     await handleAIPaint(req, res);
-  } else if (req.method === "POST" && url.pathname === "/api/image-to-3d") {
+    } else if (req.method === "POST" && url.pathname === "/api/image-to-3d") {
     await handleImageTo3D(req, res);
-  } else if (req.method === "POST" && url.pathname === "/api/text-to-3d") {
+    } else if (req.method === "POST" && url.pathname === "/api/text-to-3d") {
     await handleTextTo3D(req, res);
-  } else if (req.method === "GET" && url.pathname === "/api/ai-config") {
+    } else if (req.method === "GET" && url.pathname === "/api/ai-config") {
     handleAIConfigGet(req, res);
-  } else if (req.method === "POST" && url.pathname === "/api/ai-config") {
+    } else if (req.method === "POST" && url.pathname === "/api/ai-config") {
     handleAIConfigPost(req, res);
-  } else if (req.method === "POST" && url.pathname === "/api/ai-test") {
+    } else if (req.method === "POST" && url.pathname === "/api/ai-test") {
     await handleAITest(req, res);
-  } else if (req.method === "POST" && url.pathname === "/api/test-provider") {
+    } else if (req.method === "POST" && url.pathname === "/api/test-provider") {
     await handleProviderTest(req, res);
-  } else if (req.method === "POST" && url.pathname === "/api/gen-to-blender") {
+    } else if (req.method === "POST" && url.pathname === "/api/gen-to-blender") {
     await handleGenToBlender(req, res);
-  } else if (req.method === "GET" && url.pathname === "/api/blender/export") {
+    } else if (req.method === "GET" && url.pathname === "/api/blender/export") {
     await handleBlenderExport(req, res, url);
-  } else if (req.method === "GET" && url.pathname === "/api/assembly/sequence") {
+    } else if (req.method === "GET" && url.pathname === "/api/assembly/sequence") {
     await handleAssemblySequence(req, res, url);
-  } else if (req.method === "GET" && url.pathname === "/api/assembly/analysis") {
+    } else if (req.method === "GET" && url.pathname === "/api/assembly/analysis") {
     await handleAssemblyAnalysis(req, res, url);
-  } else if (req.method === "GET") {
+    } else if (req.method === "GET") {
     serveStatic(req, res, url);
-  } else {
+    } else {
     sendJSON(res, 404, { error: "Not Found", path: url.pathname });
   }
   })

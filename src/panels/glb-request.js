@@ -47,6 +47,7 @@ export function postGlbRequest({
   timeoutMs,
   timeoutLabel,
   requireSuccess = false,
+  onDownloadProgress,
 }) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -72,6 +73,15 @@ export function postGlbRequest({
       reject(new Error("网络错误：无法连接到服务器（请确认 server.js 已启动）")),
     );
     xhr.addEventListener("timeout", () => reject(new Error(`请求超时（${timeoutLabel}）`)));
+    if (typeof onDownloadProgress === "function") {
+      xhr.addEventListener("progress", e => {
+        if (!e.loaded) return;
+        onDownloadProgress({
+          loaded: e.loaded,
+          total: e.lengthComputable && e.total > 0 ? e.total : null,
+        });
+      });
+    }
 
     xhr.open("POST", url);
     xhr.setRequestHeader("Content-Type", "application/json");
