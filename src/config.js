@@ -4,11 +4,23 @@
 //
 // 解析顺序（靠前的优先）：
 //   1. window.APP_CONFIG.API_BASE —— 生产部署注入点（保留原有约定）；
-//   2. <meta name="api-base"> 标签 —— 两个页面里真实在用的旋钮。此前只有
+//   2. ?api= 查询参数 —— 桌面快捷方式的固定端口入口（launcher.html 重定向
+//      时带上，覆盖 meta 标签；详见 launcher.html 与 scripts/make_desktop_shortcut.sh）；
+//   3. <meta name="api-base"> 标签 —— 两个页面里真实在用的旋钮。此前只有
 //      页面内联脚本读它、模块侧读不到，改标签会让配置页与主应用指向不同
 //      后端，现在由本文件收口，改一处即整体生效；
-//   3. "http://localhost:3001" —— 默认值。
+//   4. "http://localhost:3001" —— 默认值。
 // Node 等无 document 的环境下第 2 步自动跳过（服务端 import 不会炸）。
+function readQueryApiBase() {
+  if (typeof window === "undefined" || typeof window.location?.search !== "string") {
+    return null;
+  }
+  try {
+    return new URLSearchParams(window.location.search).get("api");
+  } catch {
+    return null;
+  }
+}
 function readMetaApiBase() {
   if (typeof document === "undefined" || typeof document.querySelector !== "function") {
     return null;
@@ -24,5 +36,6 @@ function readMetaApiBase() {
  */
 export const API_BASE =
   (typeof window !== "undefined" && window.APP_CONFIG?.API_BASE) ||
+  readQueryApiBase() ||
   readMetaApiBase() ||
   "http://localhost:3001";

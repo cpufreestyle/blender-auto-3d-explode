@@ -92,6 +92,7 @@ export default [
         navigator: 'readonly',
         location: 'readonly',
         URL: 'readonly',
+        URLSearchParams: 'readonly',
         // 计时器
         requestAnimationFrame: 'readonly',
         cancelAnimationFrame: 'readonly',
