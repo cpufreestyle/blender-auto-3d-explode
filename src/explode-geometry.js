@@ -33,8 +33,11 @@ export function mergeGeometries(geometries) {
   // 统一转为非索引几何体
   const nonIndexed = geometries.map(g => (g.index ? g.toNonIndexed() : g));
 
-  // 确定要合并的属性
-  const attrNames = ["position", "normal", "uv"];
+  // 确定要合并的属性：常规属性取所有输入的交集（缺 normal 的输入进合并会
+  // 产出坏缓冲），皮肤属性（skinIndex/skinWeight）同样取交集——带骨骼的部件
+  // 与不带骨骼的部件合并时，骨骼属性整体丢弃（对应部件退化为静止网格），
+  // 而不是半套属性拼出错误的蒙皮权重
+  const attrNames = ["position", "normal", "uv", "skinIndex", "skinWeight"];
   const activeAttrs = attrNames.filter(name => nonIndexed.every(g => g.attributes[name]));
 
   // 计算总顶点数
@@ -52,6 +55,36 @@ export function mergeGeometries(geometries) {
       offset += data.length;
     }
     merged.setAttribute(attrName, new BufferAttribute(array, itemSize));
+  }
+
+  // morph attributes（形变目标）：与常规属性同样取交集，且每个属性的 morph
+  // 数量必须一致（every 输入都有同名同数量的 morph 才进结果）
+  const morphNames = Object.keys(nonIndexed[0].morphAttributes || {});
+  const activeMorphs = morphNames.filter(name =>
+    nonIndexed.every(
+      g =>
+        g.morphAttributes &&
+        g.morphAttributes[name] &&
+        g.morphAttributes[name].length === nonIndexed[0].morphAttributes[name].length,
+    ),
+  );
+  for (const morphName of activeMorphs) {
+    const morphCount = nonIndexed[0].morphAttributes[morphName].length;
+    for (let m = 0; m < morphCount; m++) {
+      const itemSize = nonIndexed[0].morphAttributes[morphName][m].itemSize;
+      const array = new Float32Array(totalVerts * itemSize);
+      let offset = 0;
+      for (const g of nonIndexed) {
+        const data = g.morphAttributes[morphName][m].array;
+        array.set(data, offset);
+        offset += data.length;
+      }
+      if (!merged.morphAttributes[morphName]) merged.morphAttributes[morphName] = [];
+      merged.morphAttributes[morphName].push(new BufferAttribute(array, itemSize));
+    }
+  }
+  if (activeMorphs.length > 0) {
+    merged.morphTargetsRelative = nonIndexed[0].morphTargetsRelative ?? false;
   }
 
   return merged;

@@ -38,6 +38,16 @@ DEPTH_SOURCE_LUMA_QUANTIZED = "luminance-quantized"
 CUE_WEIGHTS = {"haze": 0.15, "vertical": 0.25, "centre": 0.30, "detail": 0.30}
 
 
+# --- 出站请求/路径安全校验（共享模块 scripts/blender_net_safe.py；Blender --python 不加 sys.path，按 __file__ 定位）---
+import importlib.util as _ilu
+import os as _osp
+_bns_path = _osp.path.join(_osp.path.dirname(_osp.path.abspath(__file__)), "scripts", "blender_net_safe.py")
+_bns_spec = _ilu.spec_from_file_location("blender_net_safe", _bns_path)
+_bns = _ilu.module_from_spec(_bns_spec)
+_bns_spec.loader.exec_module(_bns)
+_open_url, _safe_path, _safe_url = _bns._open_url, _bns._safe_path, _bns._safe_url
+
+
 def parse_args():
     argv = sys.argv
     if "--" in argv:
@@ -458,7 +468,7 @@ def main():
         ],
     }
     if manifest_path:
-        with open(manifest_path, "w", encoding="utf-8") as f:
+        with open(_safe_path(manifest_path), "w", encoding="utf-8") as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
 
     print(

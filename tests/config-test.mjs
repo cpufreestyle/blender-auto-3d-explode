@@ -59,7 +59,7 @@ function it(_name, fn) {
 // 每个用例把源码写一份独立临时副本再 import：绕过 ESM 模块缓存，才能在同一
 // 进程里反复求值不同全局环境下的 API_BASE
 let tempSeq = 0;
-async function resolveApiBase({ meta, appConfig, hasDocument = true }) {
+async function resolveApiBase({ meta, appConfig, query, hasDocument = true }) {
   const file = path.join(os.tmpdir(), `quest3-config-${process.pid}-${tempSeq++}.mjs`);
   fs.writeFileSync(file, CONFIG_SRC);
   const prevWindow = globalThis.window;
@@ -68,7 +68,10 @@ async function resolveApiBase({ meta, appConfig, hasDocument = true }) {
     if (appConfig === undefined) {
       delete globalThis.window;
     } else {
-      globalThis.window = { APP_CONFIG: appConfig };
+      globalThis.window = { APP_CONFIG: appConfig, location: { search: query || "" } };
+    }
+    if (appConfig === undefined && query !== undefined) {
+      globalThis.window = { location: { search: query } };
     }
     if (!hasDocument) {
       delete globalThis.document;
@@ -116,6 +119,28 @@ describe("API_BASE — window.APP_CONFIG 优先（保留生产注入约定）", 
   await it("APP_CONFIG 存在但缺 API_BASE 字段时继续往下走", async() => {
     const v = await resolveApiBase({ meta: "http://backend:4000", appConfig: {} });
     assert(v === "http://backend:4000", `APP_CONFIG={} → 走 meta → ${v}`);
+  });
+});
+
+describe("API_BASE — ?api= 查询参数（桌面快捷方式入口）", async() => {
+  await it("?api= 压过 meta 标签", async() => {
+    const v = await resolveApiBase({ meta: "http://backend:4000", query: "?api=http://q3:3011" });
+    assert(v === "http://q3:3011", `meta + ?api= → ${v}`);
+  });
+  await it("APP_CONFIG 仍压过 ?api=", async() => {
+    const v = await resolveApiBase({
+      appConfig: { API_BASE: "http://injected:9000" },
+      query: "?api=http://q3:3011",
+    });
+    assert(v === "http://injected:9000", `APP_CONFIG > ?api= → ${v}`);
+  });
+  await it("无 ?api= 时不受影响（回落 meta / 默认值）", async() => {
+    const v = await resolveApiBase({ meta: "http://backend:4000", query: "" });
+    assert(v === "http://backend:4000", `空查询走 meta → ${v}`);
+  });
+  await it("URLSearchParams 的 api 键存在但值为空串时跳过", async() => {
+    const v = await resolveApiBase({ meta: "http://backend:4000", query: "?api=&x=1" });
+    assert(v === "http://backend:4000", `api= 空值回退 meta → ${v}`);
   });
 });
 

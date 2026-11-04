@@ -150,6 +150,57 @@ describe("mergeGeometries — 边界与克隆语义", async() => {
     assert(!m.attributes.position && m.index === null,
       "没有任何属性、index 为 null（不是 null 返回值、不是抛出）");
   });
+
+  await it("skin 属性交集：两个输入都带 skinIndex/skinWeight 时按顶点拼接", () => {
+    const a = tri(0);
+    a.setAttribute("skinIndex", new Float32BufferAttribute([0,0,0,0, 1,0,0,0, 2,0,0,0], 4));
+    a.setAttribute("skinWeight", new Float32BufferAttribute([1,0,0,0, 1,0,0,0, 1,0,0,0], 4));
+    const b = tri(1);
+    b.setAttribute("skinIndex", new Float32BufferAttribute([3,0,0,0, 4,0,0,0, 5,0,0,0], 4));
+    b.setAttribute("skinWeight", new Float32BufferAttribute([2,0,0,0, 2,0,0,0, 2,0,0,0], 4));
+    const m = mergeGeometries([a, b]);
+    assert(m.attributes.skinIndex && m.attributes.skinWeight, "skin 属性进结果");
+    assert(attrArray(m, "skinIndex").length === 24, "skinIndex 6 顶点 × itemSize 4");
+    // 顶点 3 是 b 的第一个顶点，其蒙皮权重应为 2（区分两个输入的接续正确性）
+    assert(attrArray(m, "skinWeight")[12] === 2, "第二个输入的 skinWeight 从顶点 3 接续");
+    assert(attrArray(m, "skinWeight")[0] === 1, "第一个输入的权重保持 1");
+  });
+
+  await it("skin 属性部分缺失：交集语义下整体丢弃（不产出半套蒙皮）", () => {
+    const a = tri(0);
+    a.setAttribute("skinIndex", new Float32BufferAttribute([0,0,0,0, 1,0,0,0, 2,0,0,0], 4));
+    a.setAttribute("skinWeight", new Float32BufferAttribute([1,0,0,0, 1,0,0,0, 1,0,0,0], 4));
+    const b = tri(1); // 无 skin 属性
+    const m = mergeGeometries([a, b]);
+    assert(!m.attributes.skinIndex && !m.attributes.skinWeight, "skin 属性整体丢弃");
+    assert(m.attributes.position, "position 仍在");
+  });
+
+  await it("morph attributes 交集：同名同数量时拼接，morphTargetsRelative 透传", () => {
+    const a = tri(0);
+    a.morphAttributes.position = [new Float32BufferAttribute([9,9,9, 9,9,9, 9,9,9], 3)];
+    a.morphTargetsRelative = true;
+    const b = tri(1);
+    b.morphAttributes.position = [new Float32BufferAttribute([8,8,8, 8,8,8, 8,8,8], 3)];
+    b.morphTargetsRelative = true;
+    const m = mergeGeometries([a, b]);
+    assert(m.morphAttributes.position && m.morphAttributes.position.length === 1, "morph.position 一组");
+    assert(Array.from(m.morphAttributes.position[0].array).length === 18, "morph 6 顶点拼接");
+    assert(m.morphTargetsRelative === true, "morphTargetsRelative 透传");
+  });
+
+  await it("morph 数量不一致：该属性整体丢弃", () => {
+    const a = tri(0);
+    a.morphAttributes.position = [
+      new Float32BufferAttribute([9,9,9, 9,9,9, 9,9,9], 3),
+      new Float32BufferAttribute([7,7,7, 7,7,7, 7,7,7], 3),
+    ];
+    const b = tri(1);
+    b.morphAttributes.position = [new Float32BufferAttribute([8,8,8, 8,8,8, 8,8,8], 3)];
+    const m = mergeGeometries([a, b]);
+    assert(!m.morphAttributes.position, "morph 数量不一致时丢弃");
+    assert(m.attributes.position, "position 仍在");
+  });
   await it("单几何体是 clone 而非原对象", () => {
     const g = tri(0);
     const m = mergeGeometries([g]);

@@ -140,7 +140,7 @@ def call_vlm(provider, base_url, key, model, img_path, fix_msg=None):
                 "Content-Type": "application/json",
             },
         )
-        with urllib.request.urlopen(req, timeout=240) as r:
+        with _open_url(req, timeout=240) as r:
             data = json.loads(r.read().decode())
         text_parts = [
             b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"
@@ -168,6 +168,16 @@ def call_vlm(provider, base_url, key, model, img_path, fix_msg=None):
     with urllib.request.urlopen(req, timeout=240) as r:
         data = json.loads(r.read().decode())
     return data["choices"][0]["message"]["content"]
+
+
+# --- 出站请求/路径安全校验（共享模块 blender_net_safe.py；Blender --python 不加 sys.path，按 __file__ 定位）---
+import importlib.util as _ilu
+import os as _osp
+_bns_path = _osp.path.join(_osp.path.dirname(_osp.path.abspath(__file__)), "blender_net_safe.py")
+_bns_spec = _ilu.spec_from_file_location("blender_net_safe", _bns_path)
+_bns = _ilu.module_from_spec(_bns_spec)
+_bns_spec.loader.exec_module(_bns)
+_open_url, _safe_path, _safe_url = _bns._open_url, _bns._safe_path, _bns._safe_url
 
 
 def extract_code(text):

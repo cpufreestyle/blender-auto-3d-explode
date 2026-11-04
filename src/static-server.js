@@ -71,10 +71,10 @@ export function createStaticServer({ sendJSON }) {
       pathname = "/index.html";
     }
 
-    const filePath = path.join(ROOT, pathname);
+    const filePath = path.resolve(path.join(ROOT, pathname));
 
-    // 确保文件在 __dirname 下
-    if (!filePath.startsWith(ROOT)) {
+    // 确保文件在 ROOT 内（resolve 规范化 + 带分隔符前缀比较，防同级目录前缀误放行）
+    if (filePath !== ROOT && !filePath.startsWith(ROOT + path.sep)) {
       sendJSON(res, 403, { error: "Forbidden" });
       return;
     }

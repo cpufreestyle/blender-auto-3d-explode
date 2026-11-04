@@ -15,8 +15,16 @@ import {
   DirectionalLight,
   PerspectiveCamera,
   Scene,
+  Quaternion,
+  Vector3,
   WebGLRenderer,
 } from "three";
+import { Damper, smoothingAlpha } from "./ar-damper.js";
+
+// AR 位姿收敛速率：位置/旋转阻尼 50ms 衰减，四元数 slerp 每秒收敛 12 单位
+const AR_DECAY_MS = 50;
+const AR_SLERP_RATE = 12;
+const AR_AUTOROTATE_SPEED = Math.PI / 24; // rad/s，帧率无关
 
 export function createARPreview({ container, uiOverlay, questGroup, parts, controls, renderer, camera }) {
   // ===== WebXR AR 预览 =====
@@ -29,6 +37,59 @@ export function createARPreview({ container, uiOverlay, questGroup, parts, contr
   let arRenderer = null; // AR 专用渲染器（结束时释放 WebGL 上下文）
   let arScene = null; // AR 独立场景
   let arQuestGroup = null; // 模型的 AR 克隆（几何体/材质与主场景共享，禁止 dispose）
+  // 位姿阻尼状态（model-viewer ARRenderer Damper 模式）：hit-test 命中后
+  // 位置/旋转不再瞬移，而是按二阶临界阻尼收敛到目标位姿
+  let arPoseDampers = null;
+  let arLastTimestamp = null;
+  let arTargetQuaternion = null;
+  let arAutoRotateAccumulator = 0;
+  let arGoalPosition = null; // hit-test 目标位置（阻尼收敛终点）
+
+  function resetArPoseState() {
+    arPoseDampers = {
+      x: new Damper(AR_DECAY_MS),
+      y: new Damper(AR_DECAY_MS),
+      z: new Damper(AR_DECAY_MS),
+    };
+    arLastTimestamp = null;
+    arTargetQuaternion = null;
+    arAutoRotateAccumulator = 0;
+    arGoalPosition = null;
+  }
+
+  function updateArPlacement(timestamp) {
+    if (!arQuestGroup || !arGoalPosition) return;
+
+    // 帧步长（毫秒）：首次帧无步长，只记录
+    if (arLastTimestamp === null) {
+      arLastTimestamp = timestamp;
+      return;
+    }
+    const deltaMs = Math.min(timestamp - arLastTimestamp, 100); // 封顶防大跳
+    arLastTimestamp = timestamp;
+    if (deltaMs <= 0) return;
+
+    // 位置：三轴独立阻尼收敛
+    const p = arQuestGroup.position;
+    p.x = arPoseDampers.x.update(p.x, arGoalPosition.x, deltaMs, 1);
+    p.y = arPoseDampers.y.update(p.y, arGoalPosition.y, deltaMs, 1);
+    p.z = arPoseDampers.z.update(p.z, arGoalPosition.z, deltaMs, 1);
+
+    // 旋转：四元数朝目标 slerp，alpha 帧率无关
+    if (arTargetQuaternion) {
+      const alpha = smoothingAlpha(deltaMs / 1000, AR_SLERP_RATE);
+      arQuestGroup.quaternion.slerp(arTargetQuaternion, alpha);
+    }
+
+    // 自动旋转：按真实时间积分（替代每帧固定 +0.005，帧率相关会加倍速）
+    if (controls.autoRotate && arModelPlaced) {
+      arAutoRotateAccumulator += (AR_AUTOROTATE_SPEED * deltaMs) / 1000;
+      if (arAutoRotateAccumulator > 0.0001) {
+        arQuestGroup.rotation.y += arAutoRotateAccumulator;
+        arAutoRotateAccumulator = 0;
+      }
+    }
+  }
 
   // 检测 WebXR AR 支持
   async function checkARSupport() {
@@ -119,6 +180,7 @@ export function createARPreview({ container, uiOverlay, questGroup, parts, contr
       // 创建 Quest 3 模型的 AR 副本（clone 共享几何体/材质，结束时不可 dispose）
       arQuestGroup = questGroup.clone();
       arScene.add(arQuestGroup);
+      resetArPoseState(); // 初始化位姿阻尼状态（首次命中前的空目标）
 
       // 调整 AR 中的模型大小
       arQuestGroup.scale.set(0.1, 0.1, 0.1);
@@ -131,6 +193,7 @@ export function createARPreview({ container, uiOverlay, questGroup, parts, contr
       await arRenderer.xr.setSession(session);
 
       // 初始化 hit-test source（之前缺失，导致 getHitTestResults 始终失败）
+      // 位姿阻尼状态在 arQuestGroup 创建时已重置；此处只初始化目标
       try {
         const viewerSpace = await session.requestReferenceSpace("viewer");
         arHitTestSource = await session.requestHitTestSource({ space: viewerSpace });
@@ -185,9 +248,17 @@ export function createARPreview({ container, uiOverlay, questGroup, parts, contr
                 if (hitPose) {
                   arModelPlaced = true;
 
-                  // 放置模型
-                  arQuestGroup.position.setFromMatrixPosition(hitPose.transform);
-                  arQuestGroup.quaternion.setFromRotationMatrix(hitPose.transform);
+                  // 设置阻尼目标（而非瞬移）：位置三轴各自收敛，旋转 slerp 到目标
+                  const pos = new Vector3().setFromMatrixPosition(hitPose.transform);
+                  if (!arGoalPosition) {
+                    // 首次命中：直接落位，避免模型从原点飞向命中点的长距离滑移
+                    arQuestGroup.position.copy(pos);
+                    arPoseDampers.x.update(pos.x, pos.x, 0, 1);
+                    arPoseDampers.y.update(pos.y, pos.y, 0, 1);
+                    arPoseDampers.z.update(pos.z, pos.z, 0, 1);
+                  }
+                  arGoalPosition = pos;
+                  arTargetQuaternion = new Quaternion().setFromRotationMatrix(hitPose.transform);
                 }
               }
             }
@@ -206,10 +277,8 @@ export function createARPreview({ container, uiOverlay, questGroup, parts, contr
               });
             }
 
-            // 自动旋转
-            if (controls.autoRotate && arModelPlaced) {
-              arQuestGroup.rotation.y += 0.005;
-            }
+            // 位姿阻尼收敛（含帧率无关自动旋转）
+            updateArPlacement(timestamp);
           }
 
           arRenderer.render(arScene, arCamera);
@@ -258,6 +327,7 @@ export function createARPreview({ container, uiOverlay, questGroup, parts, contr
     }
     arScene = null;
     arQuestGroup = null;
+    resetArPoseState();
 
     // 恢复主渲染器画布（renderer 从未销毁，直接重新挂载即可，无需整页刷新）
     container.appendChild(renderer.domElement);

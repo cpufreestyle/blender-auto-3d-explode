@@ -19,6 +19,16 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 
+# --- 路径安全校验（共享模块 blender_net_safe.py；按 __file__ 定位导入）---
+import importlib.util as _ilu
+import os as _osp
+_bns_path = _osp.path.join(_osp.path.dirname(_osp.path.abspath(__file__)), "blender_net_safe.py")
+_bns_spec = _ilu.spec_from_file_location("blender_net_safe", _bns_path)
+_bns = _ilu.module_from_spec(_bns_spec)
+_bns_spec.loader.exec_module(_bns)
+_safe_path = _bns._safe_path
+
+
 class BlenderScriptHandler(FileSystemEventHandler):
     """监听 Python 脚本文件变化"""
 

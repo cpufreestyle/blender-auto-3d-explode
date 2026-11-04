@@ -25,7 +25,7 @@ import { createARPreview } from "./src/ar-preview.js";
 import { createExportPanel } from "./src/export-panel.js";
 import { createPrintPanel } from "./src/print-panel.js";
 import { calculateExplodePos } from "./src/explode-geometry.js";
-import { autoSplitModel, generatePartName } from "./src/geometry-split.js";
+import { autoSplitModelAsync, generatePartName } from "./src/geometry-split.js";
 import { createQuest3Model } from "./src/quest3-model.js";
 import { splitModelToQuest3Regions } from "./src/quest3-parts.js";
 import { setupUpload } from "./src/upload-panel.js";
@@ -278,7 +278,7 @@ customModelLoader = createCustomModelLoader({
   loadGLTFLoader,
   isQuest3Model,
   splitModelToQuest3Regions,
-  autoSplitModel,
+  autoSplitModel: autoSplitModelAsync,
   disposeNodeTree,
   yieldToMain,
   calculateExplodePos,
@@ -501,10 +501,11 @@ setupGeneratedLibrary({
 });
 
 
-// ===== 导出与轻提示（截图 / 教案 / GLB）=====
+// ===== 导出与轻提示（截图 / 教案 / GLB / STL）=====
 // 依赖注入：renderer/scene/camera/questGroup/customModelGroup 是 const 稳定引用；
 // currentModelName/totalSteps/displayedStep/hasCustomModel/customModelParts/stepGroups/parts
-// 都是会重赋值的 let / 会被替换的数组，经 getState() 现取，避免闭包钉住旧值。
+// 都是会重赋值的 let / 会被替换的数组，经 getState() 现取，避免闭包钉住旧值；
+// selectedPartName 取自部件清单交互（partInteractions 在下方才赋值，getState 现取刚好）。
 const exportPanel = createExportPanel({
   renderer,
   scene,
@@ -519,6 +520,7 @@ const exportPanel = createExportPanel({
     customModelParts,
     stepGroups,
     parts,
+    selectedPartName: partInteractions?.getSelected?.() ?? null,
   }),
   // 步骤深链：教案里每一步都带一条可点链接，复制链接按钮也走同一构造器
   buildStepUrl: step => buildStepUrl(location, step),
@@ -539,12 +541,6 @@ createPrintPanel({
   showToast: exportPanel.showToast,
 });
 
-// ===== 侧栏折叠 =====
-// 实现自成一体：src/sidebar-toggle.js 按 id 自取面板与两个按钮，
-// localStorage("quest3-sidebar") 记忆收起状态。必须先于快捷键建立，
-// 因为 H 键要拿它的 toggle。
-const sidebar = setupSidebarToggle();
-
 // ===== 授课模式 =====
 // 投影 / 讲台上只留 3D 视图与教学控件，AI 生成、上传、配置入口整块收起。
 // 实现迁至 src/teaching-mode.js（含 storage 记忆与 .hidden 原状保护）。
@@ -553,6 +549,12 @@ const teachingMode = setupTeachingMode({
   btn: document.getElementById("teaching-mode-btn"),
   storage: typeof localStorage !== "undefined" ? localStorage : null,
 });
+
+// ===== 侧栏折叠 =====
+// 实现自成一体：src/sidebar-toggle.js 按 id 自取面板与两个按钮，
+// localStorage("quest3-sidebar") 记忆收起状态。必须先于快捷键建立，
+// 因为 H 键要拿它的 toggle。
+const sidebar = setupSidebarToggle();
 
 // 键盘快捷键
 // 实现迁至 src/keyboard-shortcuts.js：keydown 分发 + autoRotate change 整段

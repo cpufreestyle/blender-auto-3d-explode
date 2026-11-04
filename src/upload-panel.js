@@ -15,6 +15,7 @@
 // 本模块只负责拿到已就绪的 DOM 之后做什么。
 
 import { API_BASE } from "./config.js";
+import { formatProgressText } from "./model-progress.js";
 import { base64ToUtf8 } from "./utils.js";
 import { loadSTLModel, loadURDFModel } from "./model-loaders.js";
 
@@ -75,10 +76,7 @@ export function setupUpload({
         if (e.lengthComputable) {
           const pct = Math.round((e.loaded / e.total) * 100);
           if (pct < 100) {
-            showStatus(
-              `📤 上传中... ${pct}% (${(e.loaded / 1024).toFixed(0)} / ${(e.total / 1024).toFixed(0)} KB)`,
-              "info",
-            );
+            showStatus(`📤 上传中... ${formatProgressText({ loaded: e.loaded, total: e.total })}`, "info");
           } else {
             showStatus("🔧 Blender 正在拆解模型... (已上传，等待后端处理)", "info");
           }
@@ -89,8 +87,7 @@ export function setupUpload({
       // 避免长耗时（数十秒）时用户误以为卡死。
       xhr.addEventListener("progress", e => {
         if (e.lengthComputable && e.total > 0) {
-          const pct = Math.round((e.loaded / e.total) * 100);
-          showStatus(`⏳ Blender 拆解中... ${pct}%`, "info");
+          showStatus(`⏳ Blender 拆解中... ${formatProgressText({ loaded: e.loaded, total: e.total })}`, "info");
         } else if (e.loaded > 0) {
           // 无 Content-Length 时（分块流式），仅显示已接收大小
           showStatus(

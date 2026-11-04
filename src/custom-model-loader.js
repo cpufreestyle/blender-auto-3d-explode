@@ -229,7 +229,7 @@ export function createCustomModelLoader({
         splitParts = splitModelToQuest3Regions(model);
       } else {
         showStatus("🔍 正在分析模型结构并自动拆分...", "info");
-        splitParts = autoSplitModel(model);
+        splitParts = await autoSplitModel(model);
       }
 
       // 原始 GLTF 场景的几何体/材质已复制/拆分为新部件，释放原始场景以回收 GPU 资源

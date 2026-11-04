@@ -17,7 +17,7 @@
  * 用法：node tests/generated-library-test.mjs
  */
 
-import { setupGeneratedLibrary } from "../src/generated-library.js";
+import { clearGeneratedModelCache, setupGeneratedLibrary } from "../src/generated-library.js";
 import { API_BASE } from "../src/config.js";
 
 // ===== 测试框架（与仓库既有 .mjs 测试一致；含 await 的 it 走 itPromises）=====
@@ -66,6 +66,7 @@ function makeEl(tag = "div") {
 }
 
 function setup(opts = {}) {
+  clearGeneratedModelCache();
   const select = opts.noSelect ? null : makeEl("select");
   const btn = opts.noBtn ? null : makeEl("button");
   const calls = { fetch: [], loadCustomModel: [], showStatus: [] };
@@ -168,7 +169,12 @@ describe("点击加载模型", async() => {
     assert(w.calls.loadCustomModel[0].buf === "DATA", "传入 arrayBuffer 结果");
     assert(w.calls.loadCustomModel[0].name === "a b.glb", "文件名取 URL 末段并 decodeURIComponent");
     assert(w.calls.loadCustomModel[0].arg === null, "第三参为 null");
-    assert(w.calls.showStatus.length === 1, "无错误提示");
+    // 下载进度会产生额外的 info 提示（fetchArrayBufferWithProgress 的满载回调）；
+    // 关键不变量是：无 error 提示，且首条仍是开打提示
+    assert(
+      w.calls.showStatus.every(s => s.type === "info" || s.type === "success"),
+      "无 error/warn 提示",
+    );
   });
 
   it("resp 不 ok：error 提示含状态码，不载入", async() => {
@@ -206,6 +212,53 @@ describe("点击加载模型", async() => {
     await new Promise(r => setTimeout(r, 0));
     assert(w.calls.fetch.length === 0, "未发起 fetch");
     assert(w.btn === null, "无按钮可点");
+  });
+});
+
+describe("下载去重与缓存（in-flight + buffer cache）", async() => {
+  it("并发两次点击同一 URL：只发一次 fetch，两次都拿到同一 buffer", async() => {
+    const w = setup({ selectValue: "/models/generated/same.glb", buf: "B1" });
+    const clicks = [w.btn.fire("click"), w.btn.fire("click")];
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await clicks[0];
+    assert(w.fetches.length === 1, "并发点击只发一次 fetch");
+    assert(w.calls.loadCustomModel.length === 2, "两次点击都完成加载");
+    assert(w.calls.loadCustomModel[0].buf === "B1", "第一次拿到 buffer");
+    assert(w.calls.loadCustomModel[1].buf === "B1", "第二次共享同一 buffer");
+  });
+
+  it("成功后再次点击：复用缓存，不再 fetch", async() => {
+    const w = setup({ selectValue: "/models/generated/same.glb", buf: "B2" });
+    await w.btn.fire("click");
+    await Promise.resolve();
+    await w.btn.fire("click");
+    assert(w.fetches.length === 1, "第二次点击命中缓存不再 fetch");
+    assert(w.calls.loadCustomModel.length === 2, "两次加载都完成");
+  });
+
+  it("404 失败后重试：缓存不保留错误，可重新 fetch", async() => {
+    const w = setup({ selectValue: "/models/generated/retry404.glb", modelNotOk: true });
+    await w.btn.fire("click");
+    assert(w.calls.showStatus[1].msg === "❌ 从生成库加载失败: 加载失败 404", "第一次失败报 404");
+    // 切换到正常 fetch 后重试同一 URL
+    w.select.value = "/models/generated/retry-ok.glb";
+    clearGeneratedModelCache();
+    const w2 = setup({ selectValue: "/models/generated/retry-ok.glb", buf: "OK" });
+    await w2.btn.fire("click");
+    assert(w2.calls.loadCustomModel.length === 1, "重试成功且不载入旧错误");
+  });
+
+  it("网络异常失败后重试：同样可重试", async() => {
+    const w = setup({ selectValue: "/models/generated/net.glb", modelError: true });
+    await w.btn.fire("click");
+    assert(w.calls.showStatus[1].msg === "❌ 从生成库加载失败: net down", "网络异常被捕获");
+    clearGeneratedModelCache();
+    const w2 = setup({ selectValue: "/models/generated/net2.glb", buf: "OK2" });
+    await w2.btn.fire("click");
+    assert(w2.calls.loadCustomModel[0].buf === "OK2", "重试成功");
   });
 });
 

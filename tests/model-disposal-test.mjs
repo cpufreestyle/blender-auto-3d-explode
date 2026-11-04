@@ -67,6 +67,7 @@ function makeNode(name, opts = {}) {
     name,
     geometry: opts.geometry,
     material: opts.material,
+    skeleton: opts.skeleton,
     children,
     userData: opts.userData || {},
     scale: { set: (...a) => { node._scale = a; } },
@@ -196,6 +197,60 @@ describe("disposeNodeTree", async() => {
     const empty = makeNode("empty");
     disposeNodeTree(empty);
     assert(log.length === 0, "无可释放资源，静默通过");
+  });
+
+  await it("共享几何体/材质/贴图：同树内只释放一次", () => {
+    const log = [];
+    const sharedGeo = makeGeometry(log, "g-shared");
+    const sharedTex = makeTexture(log, "t-shared");
+    const sharedMat = makeMaterial(log, "m-shared", { map: sharedTex });
+    const a = makeNode("a", { geometry: sharedGeo, material: sharedMat });
+    const b = makeNode("b", { geometry: sharedGeo, material: sharedMat });
+    const root = makeNode("root", { children: [a, b] });
+    disposeNodeTree(root);
+    assert(log.filter(l => l === "geo:g-shared").length === 1, "共享几何体只释放一次");
+    assert(log.filter(l => l === "mat:m-shared").length === 1, "共享材质只释放一次");
+    assert(log.filter(l => l === "tex:t-shared").length === 1, "共享贴图只释放一次");
+  });
+
+  await it("SkinnedMesh：skeleton 释放（boneTexture 由 Skeleton.dispose 承担）", () => {
+    const log = [];
+    const skeleton = {
+      dispose() { log.push("skeleton"); },
+    };
+    const mesh = makeNode("skinned", {
+      geometry: makeGeometry(log, "g-sk"),
+      material: makeMaterial(log, "m-sk"),
+      skeleton,
+    });
+    disposeNodeTree(mesh);
+    assert(log.includes("skeleton"), "skeleton.dispose 被调用");
+    assert(log.filter(l => l === "skeleton").length === 1, "skeleton 只释放一次");
+
+    // 两个 SkinnedMesh 共享同一 skeleton：只释放一次
+    const log2 = [];
+    const shared = { dispose() { log2.push("sk"); } };
+    const a = makeNode("a", { skeleton: shared });
+    const b = makeNode("b", { skeleton: shared });
+    const root = makeNode("root", { children: [a, b] });
+    disposeNodeTree(root);
+    assert(log2.filter(l => l === "sk").length === 1, "共享 skeleton 只释放一次");
+  });
+
+  await it("ShaderMaterial uniforms 嵌套贴图：value 里的 isTexture 被释放", () => {
+    const log = [];
+    const mat = makeMaterial(log, "m-shader");
+    mat.uniforms = {
+      uMap: { value: makeTexture(log, "u-map") },
+      uStrength: { value: 0.8 },
+      uNull: { value: null },
+    };
+    const mesh = makeNode("mesh", { material: mat });
+    disposeNodeTree(mesh);
+    assert(log.includes("tex:u-map"), "uniforms 嵌套贴图被释放");
+    assert(log.includes("mat:m-shader"), "材质本体随后释放");
+    assert(log.indexOf("tex:u-map") < log.indexOf("mat:m-shader"), "uniform 贴图早于材质");
+    assert(!log.some(l => l.startsWith("tex:uStrength") || l.startsWith("tex:uNull")), "非贴图 uniform 不触发释放");
   });
 });
 

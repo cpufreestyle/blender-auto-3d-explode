@@ -1391,6 +1391,16 @@ def call_ai_for_structure(prompt):
         raise
 
 
+# --- 出站请求/路径安全校验（共享模块 scripts/blender_net_safe.py；Blender --python 不加 sys.path，按 __file__ 定位）---
+import importlib.util as _ilu
+import os as _osp
+_bns_path = _osp.path.join(_osp.path.dirname(_osp.path.abspath(__file__)), "scripts", "blender_net_safe.py")
+_bns_spec = _ilu.spec_from_file_location("blender_net_safe", _bns_path)
+_bns = _ilu.module_from_spec(_bns_spec)
+_bns_spec.loader.exec_module(_bns)
+_open_url, _safe_path, _safe_url = _bns._open_url, _bns._safe_path, _bns._safe_url
+
+
 def call_openai_api(config, system_prompt, user_prompt):
     """调用 OpenAI API"""
     import urllib.request
@@ -1420,7 +1430,7 @@ def call_openai_api(config, system_prompt, user_prompt):
         }
     )
     
-    with urllib.request.urlopen(req, timeout=60) as response:
+    with _open_url(req, timeout=60) as response:
         result = json.loads(response.read().decode('utf-8'))
         content = result['choices'][0]['message']['content']
         return parse_ai_response(content)
@@ -1462,7 +1472,7 @@ def call_stepfun_api(config, system_prompt, user_prompt):
         }
     )
     
-    with urllib.request.urlopen(req, timeout=120) as response:
+    with _open_url(req, timeout=120) as response:
         result = json.loads(response.read().decode('utf-8'))
         content = result['choices'][0]['message']['content']
         return parse_ai_response(content)
@@ -1496,7 +1506,7 @@ def call_anthropic_api(config, system_prompt, user_prompt):
         }
     )
     
-    with urllib.request.urlopen(req, timeout=60) as response:
+    with _open_url(req, timeout=60) as response:
         result = json.loads(response.read().decode('utf-8'))
         content = result['content'][0]['text']
         return parse_ai_response(content)
@@ -1533,7 +1543,7 @@ def call_nvidia_api(config, system_prompt, user_prompt):
         }
     )
     
-    with urllib.request.urlopen(req, timeout=120) as response:
+    with _open_url(req, timeout=120) as response:
         result = json.loads(response.read().decode('utf-8'))
         content = result['choices'][0]['message']['content']
         return parse_ai_response(content)
@@ -1559,7 +1569,7 @@ def call_ollama_api(config, system_prompt, user_prompt):
         headers={'Content-Type': 'application/json'}
     )
     
-    with urllib.request.urlopen(req, timeout=120) as response:
+    with _open_url(req, timeout=120) as response:
         result = json.loads(response.read().decode('utf-8'))
         return parse_ai_response(result['response'])
 
@@ -1589,7 +1599,7 @@ def call_lmstudio_api(config, system_prompt, user_prompt):
         headers={'Content-Type': 'application/json'}
     )
     
-    with urllib.request.urlopen(req, timeout=120) as response:
+    with _open_url(req, timeout=120) as response:
         result = json.loads(response.read().decode('utf-8'))
         content = result['choices'][0]['message']['content']
         return parse_ai_response(content)
@@ -3233,6 +3243,13 @@ def main():
 
         # 4. 计算 manifest
         manifest = compute_manifest()
+        from pathlib import PurePath
+        _mp2 = os.path.realpath(os.path.abspath(os.path.expanduser(str(manifest_path))))
+        _mbase = os.path.realpath(os.path.abspath(os.getcwd()))
+        if ".." in PurePath(str(manifest_path)).parts:
+            raise ValueError("路径不允许包含父目录穿越段")
+        if _mp2 != _mbase and not _mp2.startswith(_mbase + os.sep):
+            raise ValueError("manifest 落盘路径必须在工作目录内")
         with open(manifest_path, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
         log(f"  ✅ Manifest 已保存: {manifest_path} ({manifest['total_parts']} 个部件)")

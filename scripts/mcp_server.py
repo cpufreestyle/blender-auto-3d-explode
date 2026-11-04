@@ -60,6 +60,16 @@ TIMEOUT = float(os.environ.get("BLENDERMCP_TIMEOUT", "300"))
 # Blender addon client (TCP, newline-delimited JSON request/response)
 # --------------------------------------------------------------------------
 
+# --- 出站请求/路径安全校验（共享模块 blender_net_safe.py；Blender --python 不加 sys.path，按 __file__ 定位）---
+import importlib.util as _ilu
+import os as _osp
+_bns_path = _osp.path.join(_osp.path.dirname(_osp.path.abspath(__file__)), "blender_net_safe.py")
+_bns_spec = _ilu.spec_from_file_location("blender_net_safe", _bns_path)
+_bns = _ilu.module_from_spec(_bns_spec)
+_bns_spec.loader.exec_module(_bns)
+_open_url, _safe_path, _safe_url = _bns._open_url, _bns._safe_path, _bns._safe_url
+
+
 def call_addon(command_type, params=None, timeout=TIMEOUT):
     """Send a single command to the Blender addon and return the parsed JSON
     response. The addon sends exactly one JSON response per command."""
@@ -116,7 +126,7 @@ def _api_call(method, url, *, headers=None, json_body=None, timeout=600):
     for k, v in (headers or {}).items():
         req.add_header(k, v)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _open_url(req, timeout=timeout) as resp:
             raw = resp.read()
             return resp.status, (json.loads(raw.decode("utf-8")) if raw else {})
     except urllib.error.HTTPError as e:
@@ -128,7 +138,14 @@ def _api_call(method, url, *, headers=None, json_body=None, timeout=600):
 
 def _download(url, dest, timeout=600):
     req = urllib.request.Request(url, headers={"User-Agent": "blender-mcp"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp, open(dest, "wb") as f:
+    from pathlib import PurePath
+    _dp = os.path.realpath(os.path.abspath(os.path.expanduser(str(dest))))
+    if ".." in PurePath(str(dest)).parts:
+        raise ValueError("路径不允许包含父目录穿越段")
+    _dbase = os.path.realpath(os.path.abspath(os.getcwd()))
+    if _dp != _dbase and not _dp.startswith(_dbase + os.sep):
+        raise ValueError("下载落盘路径必须在工作目录内")
+    with _open_url(req, timeout=timeout) as resp, open(_dp, "wb") as f:
         while True:
             chunk = resp.read(1 << 20)
             if not chunk:

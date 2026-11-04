@@ -312,6 +312,30 @@ describe("连接与收尾", async() => {
   });
 });
 
+// ===== 远程执行门禁报错传导（annotateRemoteExecError）=====
+describe("远程执行门禁报错传导", async() => {
+  const mod = await import("../src/blender-mcp-client.js").then(m => m, () => null);
+  const annotate = mod && mod.annotateRemoteExecError;
+
+  await it("命中门禁报错 → 附加可行动指引（面板位置 + 按钮名）", () => {
+    if (typeof annotate !== "function") {
+      assert(false, "annotateRemoteExecError 尚未实现");
+      return;
+    }
+    const out = annotate("远程代码执行未开启：请在插件偏好里勾选 allow_remote_code_exec");
+    assert(out.includes("一键开启远程代码执行"), "指引含面板按钮名");
+    assert(out.includes("N 面板"), "指引含面板位置");
+    assert(out.includes("远程代码执行未开启"), "保留原始报错");
+  });
+
+  await it("非门禁报错与空值原样透传", () => {
+    if (typeof annotate !== "function") return;
+    assert(annotate("addon error") === "addon error", "普通报错不改写");
+    assert(annotate(null) === null, "null 透传");
+    assert(annotate(undefined) === undefined, "undefined 透传");
+  });
+});
+
 // ===== 运行 =====
 (async() => {
   for (const item of describeQueue) {

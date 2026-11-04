@@ -5,6 +5,7 @@ import { validateImageFile } from "./image-validate.js";
 import { fetchConfigAndHighlight } from "./config-panel.js";
 import { getPromptIcon } from "./prompt-icon.js";
 import { buildFeatureStatusHtml, extractImageFeatures } from "./image-features.js";
+import { createProgressReporter, formatProgressText } from "../model-progress.js";
 import { API_BASE } from "../config.js";
 
 // 后端 AI 服务地址（从统一配置读取）
@@ -44,6 +45,17 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
   let uploadedImageFeatures = null;
   // 当前上传图片的 data URL（用于图片转 3D）
   let uploadedImageDataUrl = null;
+
+  // 生成任务的下载进度上报：节流 + 去重（下载 GLB 时每个 chunk 一次回调）
+  function makeGenerationProgress(label) {
+    const reporter = createProgressReporter(({ loaded, total }) => {
+      const pct = formatProgressText({ loaded, total });
+      if (pct) showAIStatus(`<span class="ai-paint-spinner"></span>${label}（下载中 ${pct}）`, "info");
+    });
+    return {
+      onDownloadProgress: payload => reporter.report(payload),
+    };
+  }
 
   if (!promptInput || !paintBtn) {
     console.warn("AI 绘画元素未找到，跳过初始化");
@@ -213,6 +225,7 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
         payload,
         timeoutMs: 1200000, // 20 分钟（CPU 首跑含权重下载可能较慢）
         timeoutLabel: "20分钟",
+        ...makeGenerationProgress("正在下载重建结果"),
       });
 
       showAIStatus("✅ 重建成功！正在加载到场景...", "success");
@@ -371,6 +384,7 @@ export function setupAIPaint({ loadCustomModel, showStatus }) {
         timeoutMs: 120000, // 2 分钟
         timeoutLabel: "2分钟",
         requireSuccess: true,
+        ...makeGenerationProgress("正在下载生成结果"),
       });
 
       // 成功！加载模型到场景

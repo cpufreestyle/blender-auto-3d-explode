@@ -141,8 +141,12 @@ function shouldOpenInBlender() {
 function saveGeneratedModel(glbBuffer, baseName) {
   fs.mkdirSync(GENERATED_DIR, { recursive: true });
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
-  const fileName = `${baseName}-${ts}.glb`;
-  const outPath = path.join(GENERATED_DIR, fileName);
+  const fileName = `${String(baseName).replace(/[^\w.-]+/g, "_")}-${ts}.glb`;
+  const outPath = path.resolve(path.join(GENERATED_DIR, fileName));
+  const genDirResolved = path.resolve(GENERATED_DIR);
+  if (outPath !== genDirResolved && !outPath.startsWith(genDirResolved + path.sep)) {
+    throw new Error("生成模型落盘路径越界");
+  }
   fs.writeFileSync(outPath, glbBuffer);
   console.log(`  💾 模型已存盘: ${outPath}`);
   return outPath;

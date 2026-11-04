@@ -42,6 +42,16 @@ import subprocess
 FENCE_RE = re.compile(r"^(\s*)(`{3,}|~{3,})\s*([^\s`]*)\s*$")
 
 
+# --- 路径安全校验（共享模块 blender_net_safe.py；按 __file__ 定位导入）---
+import importlib.util as _ilu
+import os as _osp
+_bns_path = _osp.path.join(_osp.path.dirname(_osp.path.abspath(__file__)), "blender_net_safe.py")
+_bns_spec = _ilu.spec_from_file_location("blender_net_safe", _bns_path)
+_bns = _ilu.module_from_spec(_bns_spec)
+_bns_spec.loader.exec_module(_bns)
+_safe_path = _bns._safe_path
+
+
 def guess_language(block: str) -> str:
     s = block.strip()
     if not s:
@@ -230,7 +240,7 @@ def main() -> int:
     print("Step 2/2: Python fix (MD040 fence languages, MD034 bare URLs)...")
     changed = 0
     for p in paths:
-        with open(p, "r", encoding="utf-8") as f:
+        with open(_safe_path(p), "r", encoding="utf-8") as f:
             original = f.read()
         fixed = fix_md040(fix_md034(original))
         if fixed != original:

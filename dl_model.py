@@ -3,6 +3,8 @@ import time
 import requests
 
 URL = "https://huggingface.co/stabilityai/TripoSR/resolve/main/model.ckpt"
+from urllib.parse import urlparse as _urlparse  # 常量 URL 边界自检
+assert _urlparse(URL).scheme == "https" and (_urlparse(URL).hostname or "") == "huggingface.co"
 OUT = r"D:\Michael\CodeBuddy\20260827161745\external\TripoSR\local_model\model.ckpt"
 PROXIES = {"http": "http://127.0.0.1:7897", "https": "http://127.0.0.1:7897"}
 

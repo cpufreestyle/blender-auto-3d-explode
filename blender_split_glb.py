@@ -15,6 +15,16 @@ import traceback
 from mathutils import Vector
 
 # 确保输出立即刷新（Blender 后台模式有时会缓冲）
+# --- 出站请求/路径安全校验（共享模块 scripts/blender_net_safe.py；Blender --python 不加 sys.path，按 __file__ 定位）---
+import importlib.util as _ilu
+import os as _osp
+_bns_path = _osp.path.join(_osp.path.dirname(_osp.path.abspath(__file__)), "scripts", "blender_net_safe.py")
+_bns_spec = _ilu.spec_from_file_location("blender_net_safe", _bns_path)
+_bns = _ilu.module_from_spec(_bns_spec)
+_bns_spec.loader.exec_module(_bns)
+_open_url, _safe_path, _safe_url = _bns._open_url, _bns._safe_path, _bns._safe_url
+
+
 def log(msg):
     print(msg, flush=True)
     sys.stdout.flush()
@@ -868,7 +878,7 @@ def call_vlm_vision_multi(provider, key, model, png_paths, part_labels):
     try:
         # 多图请求（一次发送全部部件图）推理较慢，超时给足 180s；
         # 服务端 runBlenderSplit 整体有 600s 余量，不会因此被掐断。
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with _open_url(req, timeout=180) as resp:
             data = json.loads(resp.read().decode())
     except Exception as e:
         raise RuntimeError(f"VLM 请求失败: {e}")
@@ -1209,6 +1219,13 @@ def main():
 
         # 9. 导出清单
         log(f"\n9️⃣ 导出清单: {manifest_path}")
+        from pathlib import PurePath
+        _mp3 = os.path.realpath(os.path.abspath(os.path.expanduser(str(manifest_path))))
+        if ".." in PurePath(str(manifest_path)).parts:
+            raise ValueError("路径不允许包含父目录穿越段")
+        _sbase = os.path.realpath(os.path.abspath(os.getcwd()))
+        if _mp3 != _sbase and not _mp3.startswith(_sbase + os.sep):
+            raise ValueError("manifest 落盘路径必须在工作目录内")
         with open(manifest_path, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
         log("  清单导出成功")
