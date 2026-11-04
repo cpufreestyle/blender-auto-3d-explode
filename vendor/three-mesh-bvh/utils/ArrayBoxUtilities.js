@@ -40,13 +40,42 @@ export function getLongestEdgeIndex( bounds ) {
 
 }
 
-// expands the given bounds by the provided primitive bounds
-export function expandByPrimitiveBounds( startIndex, primitiveBounds, bounds ) {
+// copies bounds a into bounds b
+export function copyBounds( source, target ) {
+
+	target.set( source );
+
+}
+
+// sets bounds target to the union of bounds a and b
+export function unionBounds( a, b, target ) {
+
+	let aVal, bVal;
+	for ( let d = 0; d < 3; d ++ ) {
+
+		const d3 = d + 3;
+
+		// set the minimum values
+		aVal = a[ d ];
+		bVal = b[ d ];
+		target[ d ] = aVal < bVal ? aVal : bVal;
+
+		// set the max values
+		aVal = a[ d3 ];
+		bVal = b[ d3 ];
+		target[ d3 ] = aVal > bVal ? aVal : bVal;
+
+	}
+
+}
+
+// expands the given bounds by the provided triangle bounds
+export function expandByTriangleBounds( startIndex, triangleBounds, bounds ) {
 
 	for ( let d = 0; d < 3; d ++ ) {
 
-		const tCenter = primitiveBounds[ startIndex + 2 * d ];
-		const tHalf = primitiveBounds[ startIndex + 2 * d + 1 ];
+		const tCenter = triangleBounds[ startIndex + 2 * d ];
+		const tHalf = triangleBounds[ startIndex + 2 * d + 1 ];
 
 		const tMin = tCenter - tHalf;
 		const tMax = tCenter + tHalf;
