@@ -319,7 +319,7 @@ def run():
             print(f"  导出失败: {e}")
 
     code_path = args.code_out or generated_code_path(args.out)
-    with open(code_path, "w") as f:
+    with open(_safe_path(code_path), "w") as f:
         f.write(last_code or "")
 
     print("\n" + "=" * 50)

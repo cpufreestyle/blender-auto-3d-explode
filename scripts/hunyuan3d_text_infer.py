@@ -116,7 +116,7 @@ def main():
         "engine": "hunyuan3d-local",
         "prompt": prompt,
     }
-    with open(args.manifest, "w", encoding="utf-8") as f:
+    with open(_safe_path(args.manifest), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
     print(f"  ✅ 本地文生3D 完成: {args.output}", flush=True)
