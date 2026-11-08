@@ -82,7 +82,7 @@ class BlenderScriptHandler(FileSystemEventHandler):
             )
 
             # 保存输出
-            with open(output_file, 'w', encoding='utf-8') as f:
+            with open(_safe_path(output_file), 'w', encoding='utf-8') as f:
                 f.write("=== STDOUT ===\n")
                 f.write(result.stdout)
                 f.write("\n=== STDERR ===\n")

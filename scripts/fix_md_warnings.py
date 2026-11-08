@@ -244,7 +244,7 @@ def main() -> int:
             original = f.read()
         fixed = fix_md040(fix_md034(original))
         if fixed != original:
-            with open(p, "w", encoding="utf-8") as f:
+            with open(_safe_path(p), "w", encoding="utf-8") as f:
                 f.write(fixed)
             changed += 1
             print(f"  python-fixed: {p}")

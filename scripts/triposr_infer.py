@@ -173,7 +173,7 @@ def main():
             }
         ],
     }
-    with open(args.manifest, "w", encoding="utf-8") as f:
+    with open(_safe_path(args.manifest), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
     print("OK: triposr image-to-3d -> " + args.output, flush=True)
