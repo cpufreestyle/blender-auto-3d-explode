@@ -20,6 +20,7 @@ import {
   WebGLRenderer,
 } from "three";
 import { Damper, smoothingAlpha } from "./ar-damper.js";
+import { anchorGoalPose, createAnchorFromHit } from "./ar-anchor.js";
 
 // AR 位姿收敛速率：位置/旋转阻尼 50ms 衰减，四元数 slerp 每秒收敛 12 单位
 const AR_DECAY_MS = 50;
@@ -44,6 +45,7 @@ export function createARPreview({ container, uiOverlay, questGroup, parts, contr
   let arTargetQuaternion = null;
   let arAutoRotateAccumulator = 0;
   let arGoalPosition = null; // hit-test 目标位置（阻尼收敛终点）
+  let arAnchor = null; // XRAnchor：放置后模型跟随锚位姿（重定位免疫）
 
   function resetArPoseState() {
     arPoseDampers = {
@@ -135,7 +137,7 @@ export function createARPreview({ container, uiOverlay, questGroup, parts, contr
       // 请求 AR 会话
       const session = await navigator.xr.requestSession("immersive-ar", {
         requiredFeatures: ["hit-test", "local-floor"],
-        optionalFeatures: ["dom-overlay", "light-estimation"],
+        optionalFeatures: ["dom-overlay", "light-estimation", "anchors"],
         domOverlay: { root: document.body },
       });
 
@@ -259,6 +261,17 @@ export function createARPreview({ container, uiOverlay, questGroup, parts, contr
                   }
                   arGoalPosition = pos;
                   arTargetQuaternion = new Quaternion().setFromRotationMatrix(hitPose.transform);
+
+                  // 锚定：从命中点创建 XRAnchor（不支持时 null，保持既有行为）；
+                  // 异步解析，成功后后续帧改用锚位姿作为阻尼目标
+                  const anchorPromise = createAnchorFromHit(hit);
+                  if (anchorPromise) {
+                    anchorPromise
+                      .then(a => {
+                        if (arSession) arAnchor = a;
+                      })
+                      .catch(() => {});
+                  }
                 }
               }
             }
@@ -275,6 +288,15 @@ export function createARPreview({ container, uiOverlay, questGroup, parts, contr
 
                 part.mesh.position.lerpVectors(part.homePos, part.explodePos, factor * 0.5);
               });
+            }
+
+            // 锚位姿修正：模型跟随锚（参考空间重定位时仍贴合真实表面）
+            if (arAnchor && arModelPlaced) {
+              const goal = anchorGoalPose(frame, arAnchor, referenceSpace);
+              if (goal) {
+                arGoalPosition = goal.position;
+                arTargetQuaternion = goal.quaternion;
+              }
             }
 
             // 位姿阻尼收敛（含帧率无关自动旋转）
@@ -313,6 +335,7 @@ export function createARPreview({ container, uiOverlay, questGroup, parts, contr
         arSession = null;
       }
       arModelPlaced = false;
+      arAnchor = null;
     } catch (err) {
       console.error("结束 AR 会话时出错:", err);
     }

@@ -155,3 +155,6 @@ HANDOFF.md
 .video_agent/
 # 学习笔记（本地保留）
 docs/OSS_LEARNING.md
+
+# three-mesh-bvh 的构建产物目录（被通用 build/ 模式误伤，显式豁免）
+!vendor/three-mesh-bvh/core/build/
