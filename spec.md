@@ -5,7 +5,7 @@
 > 任何行为变更必须同步更新本文件与 `harness.md`；`harness.md` 记录最近一次核验结论。
 > 冲突时以本文件为准，并由 `harness.md` §6 的 Drift 台账记录历史偏差。
 >
-> 最近核验：2026-10-07（HEAD `e8fb32e`，v3.3.3）
+> 最近核验：2026-11-16（v3.3.3，生成库重放入口）
 
 ## 1. 目标与范围
 
@@ -114,6 +114,14 @@
   各一次，不满足退回原几何。封盖在缩放前做（阈值按场景单位定义），封盖必须在
   缩放/贴底之前、世界变换烘进几何之后。预检面板的口径是「只报告」，封盖是导出
   层的自动修复，两者共用同一套焊接拓扑（1e-4）。
+- **I13 生成库重放入口契约**：`/api/generated` 里的 `.json` 是拆解清单，其余是模型。
+  生成库选中清单时只显示 `#generated-replay`（必须是真 `<a>`，带 `target="_blank"` +
+  `rel="noopener noreferrer"`）并隐藏/禁用 `#generated-load`；选中模型时反向。
+  `src/replay-url.js` 是唯一地址构造点：`isManifestUrl` 忽略 query/hash、大小写不敏感；
+  `buildReplayUrl` 把重放页与 `manifest` 落在 `API_BASE` 来源，并带 `&api=`；
+  `.json` 不得进入模型下载路径。重放页必须用 importmap 解析裸 `three`，并从
+  `src/config.js` 读取 API_BASE（不得复制 meta 解析）。静态服务只对
+  `/models/generated/*.json` 发 `Access-Control-Allow-Origin: *`。
 
 ## 6. 验证矩阵（spec ↔ harness）
 
@@ -121,7 +129,7 @@
 |---------------|----------|----------|
 | I3 身份端点 | `npm test`（桌面启动器 28 条断言） | `tests/desktop-launcher-test.mjs` |
 | I4 vendor 镜像 | `npm test` | `tests/vendor-three-test.mjs` |
-| I5 版本键一致 + I6 死标记 | `npm test`（id 数量 92 与版本键一致性均被钉住） | `tests/dead-markup-test.mjs` |
+| I5 版本键一致 + I6 死标记 | `npm test`（id 数量 93 与版本键一致性均被钉住） | `tests/dead-markup-test.mjs` |
 | I2 拆解产物 | `npm test` + 真机 Blender 冒烟 | `tests/blender-runner-test.mjs`、`scripts/ci_blender_smoke.py` |
 | I7 单飞队列 | `npm test` | `tests/blender-runner-test.mjs` |
 | 路由分发 | `npm test` | `tests/routes-generate-test.mjs`、`tests/routes-blender-test.mjs` |
@@ -132,6 +140,7 @@
 | I10 装配定位销 | `npm test`（pair 检测 / 水密 / 体积账 / 现场不变 / 开关） | `tests/print-export-test.mjs` |
 | I11 自动拼板 | `npm test`（顺序回排 / 间距分板 / 无重叠无出界 / 巨件过滤 / 开关） | `tests/print-export-test.mjs` |
 | I12 切口封盖 | `npm test`（开口立方体水密恢复 / 嵌套环垫 / 非平面拒绝 / 非索引 / 现场不变 / 开关） | `tests/print-export-test.mjs` |
+| I13 生成库重放入口 | `npm test`（清单/模型分流、URL 编码、API_BASE、CORS） | `tests/replay-url-test.mjs`、`tests/generated-library-test.mjs`、`tests/static-server-test.mjs` |
 
 ## 7. 已知缺口
 

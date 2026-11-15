@@ -9,6 +9,8 @@
  *   - 加载：点击 #generated-load 读 select.value 拉取该 URL，resp.ok 时经
  *     loadCustomModel(buf, name, null) 载入，name 为 URL 末段 decodeURIComponent；
  *     开打前showStatus 一条「📦 正在从生成库加载模型...」info；
+ *   - 清单：选中 .json 时 #generated-load 隐藏，#generated-replay 显示且 href
+ *     指向 buildReplayUrl(url)；选中模型时反过来。两种误点都不发模型下载；
  *   - resp 不 ok：抛「加载失败 <status>」并被 catch，showStatus 一条 error，
  *     loadCustomModel 不调；
  *   - select.value 为空：直接返回，不请求模型 URL；
@@ -19,6 +21,7 @@
 
 import { clearGeneratedModelCache, setupGeneratedLibrary } from "../src/generated-library.js";
 import { API_BASE } from "../src/config.js";
+import { buildReplayUrl } from "../src/replay-url.js";
 
 // ===== 测试框架（与仓库既有 .mjs 测试一致；含 await 的 it 走 itPromises）=====
 let passed = 0;
@@ -48,11 +51,23 @@ function it(_name, fn) {
 // ===== 假 DOM / 假 fetch =====
 function makeEl(tag = "div") {
   const listeners = {};
+  const attrs = {};
   return {
     tagName: String(tag).toUpperCase(),
     value: "",
     textContent: "",
     children: [],
+    disabled: false,
+    attrs,
+    classList: {
+      toggle(name, on) {
+        if (on) attrs["class:" + name] = true;
+        else delete attrs["class:" + name];
+      },
+      contains(name) {
+        return Boolean(attrs["class:" + name]);
+      },
+    },
     appendChild(child) {
       this.children.push(child);
       return child;
@@ -62,6 +77,9 @@ function makeEl(tag = "div") {
     },
     fire: type => listeners[type] && listeners[type](),
     hasListener: type => typeof listeners[type] === "function",
+    setAttribute(name, value) {
+      attrs[name] = value;
+    },
   };
 }
 
@@ -69,6 +87,7 @@ function setup(opts = {}) {
   clearGeneratedModelCache();
   const select = opts.noSelect ? null : makeEl("select");
   const btn = opts.noBtn ? null : makeEl("button");
+  const replay = opts.noReplay ? null : makeEl("a");
   const calls = { fetch: [], loadCustomModel: [], showStatus: [] };
   const fetches = [];
   if (select) select.value = opts.selectValue || "";
@@ -76,6 +95,7 @@ function setup(opts = {}) {
     getElementById: id => {
       if (id === "generated-select") return select;
       if (id === "generated-load") return btn;
+      if (id === "generated-replay") return replay;
       return null;
     },
     createElement: tag => makeEl(tag),
@@ -104,7 +124,7 @@ function setup(opts = {}) {
     showStatus: (msg, type) => calls.showStatus.push({ msg, type }),
     loadCustomModel: (buf, name, arg) => calls.loadCustomModel.push({ buf, name, arg }),
   });
-  return { select, btn, calls, fetches };
+  return { select, btn, replay, calls, fetches };
 }
 
 describe("生成库列表填充", async() => {
@@ -212,6 +232,43 @@ describe("点击加载模型", async() => {
     await new Promise(r => setTimeout(r, 0));
     assert(w.calls.fetch.length === 0, "未发起 fetch");
     assert(w.btn === null, "无按钮可点");
+  });
+
+  it("选中清单：载入按钮隐藏，重放链接显示且指向 buildReplayUrl", async() => {
+    const w = setup({ selectValue: "/models/generated/a-manifest.json" });
+    assert(w.btn.classList.contains("hidden"), "载入按钮隐藏");
+    assert(w.btn.disabled === true, "载入按钮禁用");
+    assert(!w.replay.classList.contains("hidden"), "重放链接显示");
+    assert(
+      w.replay.attrs.href === buildReplayUrl("/models/generated/a-manifest.json"),
+      "重放链接地址与共享构造器一致",
+    );
+    await w.btn.fire("click");
+    assert(w.fetches.length === 0, "清单不会被当模型下载");
+  });
+
+  it("选中模型：重放链接隐藏，载入按钮显示", async() => {
+    const w = setup({ selectValue: "/models/generated/a.glb" });
+    assert(!w.btn.classList.contains("hidden"), "载入按钮显示");
+    assert(w.replay.classList.contains("hidden"), "重放链接隐藏");
+  });
+
+  it("换选条目时同步动作且链接可更新", async() => {
+    const w = setup({ selectValue: "/models/generated/a.glb" });
+    w.select.value = "/models/generated/b-manifest.json";
+    await w.select.fire("change");
+    assert(w.btn.classList.contains("hidden"), "换到清单后载入按钮隐藏");
+    assert(w.replay.attrs.href === buildReplayUrl("/models/generated/b-manifest.json"), "链接跟着换");
+    w.select.value = "/models/generated/c.glb";
+    await w.select.fire("change");
+    assert(!w.btn.classList.contains("hidden"), "换回模型后载入按钮出现");
+    assert(w.replay.classList.contains("hidden"), "换回模型后链接收起");
+  });
+
+  it("重放链接缺失：模型加载照常工作", async() => {
+    const w = setup({ noReplay: true, selectValue: "/models/generated/a.glb" });
+    await w.btn.fire("click");
+    assert(w.calls.loadCustomModel.length === 1, "模型仍能载入");
   });
 });
 

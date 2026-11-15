@@ -1,7 +1,7 @@
 # Blender Auto 3D Explode — 验证面与评审台账 (harness.md)
 
 > 配套 `spec.md`：`spec.md` 定义「应当具备的契约」，本文件记录「如何验证 + 最近一次核验结论」。
-> 最近核验：**2026-10-30**（v3.3.3，切口封盖）
+> 最近核验：**2026-11-16**（v3.3.3，生成库重放入口）
 
 ## 1. 一键验证命令
 
@@ -9,8 +9,8 @@
 npm ci                  # 安装依赖（`npm test` 需要 node_modules/three，缺了会在 ar-preview 处 ERR_MODULE_NOT_FOUND）
 
 npm run lint:all:check  # ESLint + StyleLint，只检查不改文件（CI 用的就是这组）
-npm test                # 56 个 .mjs 套件串行（unit → … → desktop-launcher）
-npm run test:py         # Python 侧 unittest（36 项，零依赖）
+npm test                # 65 个 .mjs 套件串行（unit → … → print-panel）
+npm run test:py         # Python 侧 unittest（52 项，零依赖）
 npm run build           # webpack 生产构建（CI 也跑）
 
 # 需要真机 / 真 Blender 的（不进 npm test 链）：
@@ -24,7 +24,7 @@ BLENDER_PATH=/Applications/Blender.app/Contents/MacOS/Blender npm run test:blend
 | 层 | 文件 | 规模 | 测试覆盖 |
 |----|------|------|----------|
 | 前端外壳 | `main.js` | 681 行 | 无直接单测（靠模块级单测 + 真机冒烟） |
-| 前端模块 | `src/` | 63 个 .js（含 print-analyze / print-export / print-panel） | 大部分有对应 `tests/*-test.mjs` |
+| 前端模块 | `src/` | 65 个 .js（含 print-* / manifest-* / replay-url） | 大部分有对应 `tests/*-test.mjs` |
 | 后端引导 | `server.js` | 408 行 | 无直接单测（逻辑已抽到 `src/routes-*.js` 等工厂，注入 deps 后可测） |
 | 后端模块 | `src/routes-generate.js`、`src/routes-blender.js`、`src/static-server.js` 等 | — | 有对应单测 |
 | Blender 脚本 | `blender_*.py`、`scripts/*.py` | — | 纯逻辑走 stub 单测；真实版本行为走 `blender-smoke` |
@@ -46,7 +46,20 @@ curl -s -o /dev/null -w '%{http_code}\n' $BASE/api/nope                # 404
 npm run smoke:ui     # parts / sidebar / narrow / teaching / print 五条
 ```
 
-## 4. 最近验证结论（2026-10-30，HEAD 待提交 — 切口封盖）
+## 4. 最近验证结论（2026-11-16，v3.3.3 — 生成库重放入口）
+
+| 项 | 命令 | 结论 |
+|----|------|------|
+| 工作区 | `git status` | 本轮生成库重放入口 + 文档变更（待提交） |
+| JS 单元测试 | `npm test` | **65 套件 / 4164 断言 / 0 失败**（新增 replay-url-test 21 条；生成库动作切换 17 条） |
+| Python 单测 | `npm run test:py` | **52 项 OK** |
+| JS lint | `npm run lint:all:check` | **0 errors / 54 warnings**（既有基线） |
+| 生产构建 | `npm run build` | compiled successfully |
+| 静态服务 | `node tests/static-server-test.mjs` | **98 条全绿**（新增生成库 manifest 的 CORS 断言） |
+| 3D 打印真机冒烟 | `node scripts/ci_print_ui_smoke.mjs` | **25 条全绿**（面板与导出路径未回归） |
+| 重放页真机冒烟 | 临时 CDP 脚本（真实 manifest） | 载入 **1 个部件**、画布存在、0 运行时异常；importmap 能解析裸 `three` |
+
+### 上一轮（2026-10-30，HEAD 待提交 — 切口封盖）
 
 | 项 | 命令 | 结论 |
 |----|------|------|

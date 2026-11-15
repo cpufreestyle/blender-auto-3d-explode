@@ -7,6 +7,7 @@
 // custom-model-loader 工厂实例方法，运行期才调用。
 import { API_BASE } from "./config.js";
 import { fetchArrayBufferWithProgress, formatProgressText } from "./model-progress.js";
+import { buildReplayUrl, isManifestUrl } from "./replay-url.js";
 
 // 模型下载进行中去重（model-viewer CachingGLTFLoader 的 in-flight promise 模式）：
 // 同一 URL 的并发点击共享同一个下载 Promise，成功后保留 ArrayBuffer 供再次
@@ -39,10 +40,25 @@ function formatBytes(sizeInBytes) {
   return (sizeInBytes / 1024).toFixed(0);
 }
 
+function setHidden(el, hidden) {
+  if (el && el.classList) el.classList.toggle("hidden", hidden);
+}
+
 export function setupGeneratedLibrary({ showStatus, loadCustomModel }) {
   const generatedSelect = document.getElementById("generated-select");
   const generatedLoadBtn = document.getElementById("generated-load");
+  const generatedReplayLink = document.getElementById("generated-replay");
   if (generatedSelect && generatedLoadBtn) {
+    const syncActions = () => {
+      const url = generatedSelect.value;
+      const manifest = isManifestUrl(url);
+      generatedLoadBtn.disabled = manifest;
+      setHidden(generatedLoadBtn, manifest);
+      if (generatedReplayLink) {
+        setHidden(generatedReplayLink, !manifest);
+        if (manifest) generatedReplayLink.setAttribute("href", buildReplayUrl(url));
+      }
+    };
     fetch(`${API_BASE}/api/generated`)
       .then(r => r.json())
       .then(data => {
@@ -54,14 +70,18 @@ export function setupGeneratedLibrary({ showStatus, loadCustomModel }) {
           opt.textContent = `${f.name} (${kb} KB)`;
           generatedSelect.appendChild(opt);
         });
+        syncActions();
       })
       .catch(() => {
         /* 忽略：无生成库时不展示 */
       });
 
+    generatedSelect.addEventListener("change", syncActions);
+    syncActions();
+
     generatedLoadBtn.addEventListener("click", async() => {
       const url = generatedSelect.value;
-      if (!url) return;
+      if (!url || isManifestUrl(url)) return;
       try {
         showStatus("📦 正在从生成库加载模型...", "info");
         const buf = await fetchModelBuffer(url, {

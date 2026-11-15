@@ -18,6 +18,7 @@
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { buildSplitManifest, serializeSplitManifest } from "./split-manifest.js";
 import { API_BASE } from "./config.js";
+import { buildReplayUrl } from "./replay-url.js";
 
 export function createExportPanel({
   renderer,
@@ -336,9 +337,8 @@ export function createExportPanel({
       if (!result || !result.success || !result.url) {
         throw new Error((result && result.error) || "服务端未返回可寻址地址");
       }
-      // 重放页与前端同源（都在静态根下），用相对地址即可，
-      // 换端口 / 换机器部署时不需要改这里。
-      const replayUrl = `replay.html?manifest=${encodeURIComponent(result.url)}`;
+      // 地址规则收在 replay-url.js：生成库条目与这里共用同一份 URL 契约。
+      const replayUrl = buildReplayUrl(result.url, { apiBase: API_BASE });
       window.open(replayUrl, "_blank", "noopener");
       showToast(`🎬 已打开重放页（${manifest.totalParts} 个部件）`, "success");
     } catch (err) {
