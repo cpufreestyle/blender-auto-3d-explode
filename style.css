@@ -466,6 +466,11 @@ input[type="range"]::-moz-range-thumb {
 }
 .generated-lib .gen-select option { background: #1a1c22; color: var(--text); }
 
+.generated-lib .gen-action {
+  display: block; text-align: center; text-decoration: none; line-height: 1.4;
+}
+.generated-lib .gen-action:hover:not(:disabled) { background: rgb(255 255 255 / 12%); }
+
 .btn-ar { background: linear-gradient(135deg,#00d4aa,#00b894); color: #fff; border-color: transparent; font-weight: 600; }
 
 /* AI 配置入口：教学核心上移后，从首页主 CTA 降级成一行安静的自适应入口。

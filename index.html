@@ -302,18 +302,19 @@
           <div>拖拽或点击选择文件</div>
           <input type="file" id="file-input" accept=".glb,.gltf,.stl,.urdf,.obj" style="display:none" />
         </div>
-        <div id="upload-status" class="status-box hidden"></div>
+        <div id="upload-status" class="status-box hidden" role="status" aria-live="polite"></div>
         <div id="uploaded-file-name" class="file-name"></div>
         <div class="upload-actions">
           <button id="upload-btn" class="btn">📂 选择文件</button>
           <button id="clear-model-btn" class="btn btn-danger" style="display:none">🗑️ 清除</button>
         </div>
         <div class="generated-lib">
-          <div class="gen-lib-title">📚 从生成库加载</div>
-          <select id="generated-select" class="gen-select">
-            <option value="">— 加载已生成的模型 —</option>
+          <label class="gen-lib-title" for="generated-select">📚 从生成库加载</label>
+          <select id="generated-select" class="gen-select" aria-label="从生成库选择模型或拆解清单">
+            <option value="">— 选择已生成的模型或拆解清单 —</option>
           </select>
-          <button id="generated-load" class="btn btn-mini">⬇️ 载入</button>
+          <button id="generated-load" class="btn btn-mini" title="把选中的模型载入拆解视图">⬇️ 载入模型</button>
+          <a id="generated-replay" class="btn btn-mini gen-action hidden" href="replay.html" target="_blank" rel="noopener noreferrer" aria-label="在新标签页重放选中的拆解清单" title="在新标签页重放选中的拆解清单">🎬 重放清单</a>
         </div>
       </div>
     </details>

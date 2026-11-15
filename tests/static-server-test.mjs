@@ -86,6 +86,8 @@ function setupFixtures() {
   fs.writeFileSync(path.join(FIX, "weird.xyz"), "payload");
   fs.writeFileSync(path.join(FIX, "main.js"), "// js\n".repeat(300));
   fs.mkdirSync(path.join(FIX, "adir"), { recursive: true });
+  fs.mkdirSync(path.join(ROOT, "models", "generated"), { recursive: true });
+  fs.writeFileSync(path.join(ROOT, "models", "generated", "replay-cors-test.json"), "{}");
 }
 
 const server = http.createServer((req, res) => {
@@ -294,6 +296,12 @@ describe("serveStatic 基本响应", async() => {
     assert(r.headers["content-type"] === "text/plain; charset=utf-8", ".TXT 也能映射到 text/plain");
     fs.rmSync(path.join(FIX, "UP.TXT"));
   });
+
+  await it("生成库 manifest 允许跨源重放读取", async() => {
+    const r = await get("/models/generated/replay-cors-test.json");
+    assert(r.status === 200, "状态 200");
+    assert(r.headers["access-control-allow-origin"] === "*", "manifest 带 CORS 头");
+  });
 });
 
 describe("serveStatic 安全与 404", async() => {
@@ -441,6 +449,7 @@ describe("serveStatic 版本号查询串", async() => {
   } finally {
     server.close();
     fs.rmSync(FIX, { recursive: true, force: true });
+    fs.rmSync(path.join(ROOT, "models", "generated", "replay-cors-test.json"), { force: true });
   }
   console.log("\n════════════════════════════════════════════════════════════════");
   console.log(`  结果: ${passed} 通过, ${failed} 失败`);

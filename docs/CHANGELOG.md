@@ -2,6 +2,26 @@
 
 所有项目的显著变更都将记录在此文件中。
 
+## [Unreleased] - 2026-11-16
+
+> 易用性方案：让生成库里的拆解清单直接可重放，不再把 JSON 当模型点。
+
+### ✨ 新增
+
+- **生成库一键重放**（src/generated-library.js + src/replay-url.js + replay.html）— `/api/generated` 现在按扩展名分流：`.json` 条目显示「🎬 重放清单」，GLB/GLTF/STL 显示「⬇️ 载入模型」。重放链接是真 `<a>`（新标签页打开、可复制），地址统一由 `buildReplayUrl` 构造，并带上 `API_BASE` 与 `&api=`，因此桌面 `?api=`、`npx serve .` 跨端口与后端同源部署都能正确取到清单。`replay.html` 补 importmap 解析裸 `three`，并从 `src/config.js` 读取后端地址，修掉此前只能手动拼 URL 且页面模块可能加载失败的问题。
+- **静态服务 CORS**（src/static-server.js）— 仅对 `/models/generated/*.json` 放 `Access-Control-Allow-Origin: *`，支持跨来源重放页读取清单；304 响应同样带该头。
+
+### ♿ 可访问性
+
+- 生成库下拉补 `<label>` 与 `aria-label`；上传状态条加 `role="status"` / `aria-live="polite"`；重放页进度滑块加 `aria-label`，错误区改 `role="alert"`；新链接带明确文案、`title`、`rel="noopener noreferrer"`，焦点态沿用全局 `:focus-visible`。
+
+### 🧪 测试与工程
+
+- 新增 `tests/replay-url-test.mjs`（21 条）：清单判定、URL 编码、API_BASE/`api=` 透传、`replay.html` 的 importmap/配置/可访问性接线。
+- `tests/generated-library-test.mjs` 新增 17 条：清单与模型的动作切换、链接地址、误点清单不下载、换选同步、缺链接降级。
+- `tests/static-server-test.mjs` 新增生成库 manifest 的 CORS 断言；`dead-markup-test` 的 id/class/getElementById 计数同步到 93/132/122。
+- 门禁：`npm test` 65 套件 / 4164 断言 0 失败；`npm run test:py` 52 项 OK；`npm run build` OK；`npm run lint:all:check` 0 error / 54 warnings；`node scripts/ci_print_ui_smoke.mjs` 25 通过；真实 Chrome 重放页冒烟载入 1 个部件、0 运行时异常。
+
 ## [Unreleased] - 2026-10-28
 
 > 结合 3D 打印做功能：把「看得见的几何」变成切片软件能吃的文件。

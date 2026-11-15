@@ -72,6 +72,7 @@ export function createStaticServer({ sendJSON }) {
     }
 
     const filePath = path.resolve(path.join(ROOT, pathname));
+    const isGeneratedManifest = /^\/models\/generated\/[^/]+\.json$/i.test(pathname);
 
     // 确保文件在 ROOT 内（resolve 规范化 + 带分隔符前缀比较，防同级目录前缀误放行）
     if (filePath !== ROOT && !filePath.startsWith(ROOT + path.sep)) {
@@ -100,11 +101,13 @@ export function createStaticServer({ sendJSON }) {
       const imsHit =
         !inm && ims && new Date(ims).getTime() >= Math.floor(stat.mtimeMs / 1000) * 1000;
       if (etagHit || imsHit) {
-        res.writeHead(304, {
+        const headers304 = {
           ETag: etag,
           "Last-Modified": lastModified,
           "Cache-Control": cacheControl,
-        });
+        };
+        if (isGeneratedManifest) headers304["Access-Control-Allow-Origin"] = "*";
+        res.writeHead(304, headers304);
         res.end();
         return;
       }
@@ -115,6 +118,9 @@ export function createStaticServer({ sendJSON }) {
         ETag: etag,
         "Last-Modified": lastModified,
       };
+      // 生成库的 manifest 允许被别的来源重放页读取：?api= 把前端指向后端时，
+      // 浏览器会把 replay.html 与 /models/generated/x.json 视作跨源请求。
+      if (isGeneratedManifest) headers["Access-Control-Allow-Origin"] = "*";
 
       // ── 文本类资源 gzip（体积通常省 60~75%）──
       const isCompressible = /^(text\/|application\/(json|javascript|wasm)|image\/svg)/.test(

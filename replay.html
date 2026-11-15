@@ -3,7 +3,16 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="api-base" content="http://localhost:3011" />
 <title>拆解方案重放</title>
+<script type="importmap">
+  {
+    "imports": {
+      "three": "/vendor/three/build/three.module.js",
+      "three/examples/jsm/": "/vendor/three/examples/jsm/"
+    }
+  }
+</script>
 <style>
   html, body {
     margin: 0; height: 100%; overflow: hidden;
@@ -45,22 +54,24 @@
   <div class="row"><span>部件</span><span id="m-count">—</span></div>
   <div class="row"><span>清单版本</span><span id="m-ver">—</span></div>
   <div class="row"><span>当前部件</span><span id="m-cur">—</span></div>
-  <input id="progress" type="range" min="0" max="100" value="0" />
+  <input id="progress" type="range" min="0" max="100" value="0" aria-label="拆解进度" />
   <div class="btns">
     <button id="btn-play">▶ 播放</button>
     <button id="btn-reset">⟲ 复位</button>
   </div>
   <div class="tip">拖拽旋转 · 滚轮缩放 · 右键平移<br>manifest 只存几何摘要，此处以包围盒代理还原布局。</div>
 </div>
-<div class="err" id="err"></div>
+<div class="err" id="err" role="alert" aria-live="assertive"></div>
 
 <script type="module">
-import * as THREE from './vendor/three/build/three.module.js';
-import { OrbitControls } from './vendor/three/examples/jsm/controls/OrbitControls.js';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { replayPlan, createReplayScene } from './src/manifest-replay.js';
 import { inspectManifestVersion, MANIFEST_SUPPORTED_VERSION } from './src/manifest-version.js';
+import { API_BASE } from "./src/config.js";
 
-const MANIFEST_URL = new URLSearchParams(location.search).get('manifest');
+const query = new URLSearchParams(location.search);
+const MANIFEST_URL = query.get('manifest');
 const errEl = document.getElementById('err');
 function fail(msg) {
   errEl.style.display = 'grid';
@@ -126,7 +137,7 @@ function applyProgress(p) {
   if (replay) replay.setProgress(p);
 }
 
-fetch(MANIFEST_URL)
+fetch(new URL(MANIFEST_URL, API_BASE).toString())
   .then((r) => {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     return r.json();

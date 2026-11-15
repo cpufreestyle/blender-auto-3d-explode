@@ -770,9 +770,10 @@ describe("导出模块（src/export-panel.js）", async() => {
       assert(w.calls.manifestApiCalls[0].name === "Meta Quest 3", "模型名透传给落盘端点");
       assert(w.calls.openedUrls.length === 1, "打开了一次重放页");
       const opened = w.calls.openedUrls[0];
-      assert(opened.url.startsWith("replay.html?manifest="), "指向重放页（实测 " + opened.url + "）");
+      assert(opened.url.includes("replay.html?manifest="), "指向重放页（实测 " + opened.url + "）");
       assert(opened.url.includes("%2Fmodels%2Fgenerated%2F"), "url 参数已编码");
       assert(!opened.url.includes(" "), "打开的地址里不留裸空格");
+      assert(opened.url.includes("api="), "重放页带上 API_BASE 供取清单");
       assert(opened.target === "_blank", "新标签页打开");
       assert(w.lastToast().textContent.includes("已打开重放页"), "成功文案");
       assert(w.calls.downloads.length === 0, "成功路径不触发下载");
